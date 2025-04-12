@@ -1,5 +1,9 @@
       module av18
 
+      private
+
+      public :: av18pw,av18op,empot,consts
+
       contains 
 
 
