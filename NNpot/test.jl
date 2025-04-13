@@ -14,7 +14,7 @@ function example()
     tz = 0  # np system
     r = 1.0  # fm
     
-    potential = potential_matrix(AV18, r, angular_momenta, s, j, t, tz)
+    potential = potential_matrix(NIJM, r, angular_momenta, s, j, t, tz)
     println("Deuteron potential at r = $r fm:")
     println(potential)
 end

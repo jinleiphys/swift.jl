@@ -272,11 +272,15 @@ end
 Utility function to debug library symbol issues
 """
 function debug_library_symbols()
-    println("Available symbols in the library:")
-    for symbol in list_symbols(libpot)
-        println(symbol)
+    # On Linux/Unix systems, we can use nm command to list symbols
+    try
+        lib_path = Libdl.dlpath(libpot)
+        println("Library path: $lib_path")
+        run(`nm $lib_path`)
+    catch e
+        println("Could not run nm command: $e")
+        println("Try running in terminal: nm $(Libdl.dlpath(libpot))")
     end
 end
-
 
 end # module
