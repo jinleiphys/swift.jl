@@ -27,6 +27,7 @@ mutable struct nch3b # channel index for the three body coupling
     s12::Vector{Float64}
     J12::Vector{Float64}
     λ::Vector{Int}
+    s3::Vector{Float64}
     J3::Vector{Float64}
     J::Vector{Float64}
     T12::Vector{Float64}
@@ -34,17 +35,28 @@ mutable struct nch3b # channel index for the three body coupling
     
     # Constructor with default initialization
     function nch3b()
-        new(0, Int[], Float64[], Float64[], Int[], Float64[], Float64[], Float64[], Float64[])
+        new(0, Int[], Float64[], Float64[], Int[], Float64[],Float64[], Float64[], Float64[], Float64[])
+    end
+end
+
+mutable struct α_bar # channel index for the three body coupling
+    αin:: Vector{Int} # channel index 
+    αout:: Vector{Int} # channel index
+
+    # Constructor with default initialization
+    function α_bar()
+        new(Int[], Int[])
     end
 end
 
 # Renamed to avoid conflict with the type name
 global α = nch3b()
+global αbar = α_bar()
 
 # channel index of the three body channels
 #|(l_{12} (s_1 s_2) s_{12}) J_{12}, (\lambda_3 s_3) J_3, J; (t_1 t_2) T_{12}, t_3, T M_T\rangle.
 # Function to count and create three-body channels
-function α3b()
+function α3b(J,T,parity)
     global α
 
     
@@ -57,21 +69,22 @@ function α3b()
             for nJ12 in Int(2*abs(l-s12)):2:Int(2*(l+s12))  # Fixed min/max calculation
                 J12 = nJ12/2.0
                 for λ in λmin:λmax
+                    if (-1)^(l+λ) != parity
+                        continue
+                    end
                     for nJ3 in Int(2*abs(λ-s3)):2:Int(2*(λ+s3))  # Fixed min/max calculation
                         J3 = nJ3/2.0
                         for nJ in Int(2*abs(J12-J3)):2:Int(2*(J12+J3))  # Fixed min/max calculation
-                            J = nJ/2.0
-                            # check if J is in the range of Jmin and Jmax
-                            if J < Jmin || J > Jmax
+                            if nJ != Int(2*J)
                                 continue
                             end
-                            
                             for nT12 in Int(2*abs(t1-t2)):2:Int(2*(t1+t2))
                                 T12 = nT12/2.0
+                                if (-1)^(l+s12+T12) != -1
+                                    continue
+                                end
                                 for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))  # Fixed min/max calculation
-                                    T = nT/2.0
-                                    # check if T is in the range of Tmin and Tmax
-                                    if T < Tmin || T > Tmax
+                                    if nT != Int(2*T)
                                         continue
                                     end
                                     # check if MT is in the range of -T to T
@@ -90,9 +103,9 @@ function α3b()
     end
     
 
-    println("Number of channels: ", α.nchmax)
+    println("For J=",J, " T=",T," parity=",parity, " Number of channels: ", nch_count)
     open("channels.dat", "w") do io
-        println(io, "Number of channels: ", nch_count)
+        println(io, "For J=",J, " T=",T," parity=",parity, " Number of channels: ", nch_count)
     end
     # Now allocate arrays with the correct size
     α.nchmax = nch_count
@@ -100,6 +113,7 @@ function α3b()
     α.s12 = zeros(Float64, nch_count)
     α.J12 = zeros(Float64, nch_count)
     α.λ = zeros(Int, nch_count)
+    α.s3 = zeros(Float64, nch_count)
     α.J3 = zeros(Float64, nch_count)
     α.J = zeros(Float64, nch_count)
     α.T12 = zeros(Float64, nch_count)
@@ -118,21 +132,23 @@ function α3b()
                 for nJ12 in Int(2*abs(l-s12)):2:Int(2*(l+s12))
                     J12 = nJ12/2.0
                     for λ in λmin:λmax
+                        if (-1)^(l+λ) != parity
+                            continue
+                        end
                         for nJ3 in Int(2*abs(λ-s3)):2:Int(2*(λ+s3))
                             J3 = nJ3/2.0
                             for nJ in Int(2*abs(J12-J3)):2:Int(2*(J12+J3))
-                                J = nJ/2.0
-                                # check if J is in the range of Jmin and Jmax
-                                if J < Jmin || J > Jmax
+                                if nJ != Int(2*J)
                                     continue
                                 end
                                 
                                 for nT12 in Int(2*abs(t1-t2)):2:Int(2*(t1+t2))
                                     T12 = nT12/2.0
+                                    if (-1)^(l+s12+T12) !=-1
+                                        continue
+                                    end
                                     for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))
-                                        T = nT/2.0
-                                        # check if T is in the range of Tmin and Tmax
-                                        if T < Tmin || T > Tmax
+                                        if nT != Int(2*T)
                                             continue
                                         end
                                         # check if MT is in the range of -T to T
@@ -144,6 +160,7 @@ function α3b()
                                         α.s12[ich] = s12
                                         α.J12[ich] = J12
                                         α.λ[ich] = λ
+                                        α.s3[ich] = s3
                                         α.J3[ich] = J3
                                         α.J[ich] = J
                                         α.T12[ich] = T12
@@ -163,6 +180,9 @@ function α3b()
 
     return α
 end
+
+
+
 
 
 # Function to update parameters
