@@ -1,85 +1,192 @@
-module channels 
+module channels
+using Printf
+# export lmax, lmin, λmax, λmin, s1, s2, s3, Jmin, Jmax, t1, t2, t3, Tmin, Tmax, MT
+export  α, α3b
 
-   # channel parameters
-   lmax = 0 # maximum l
-   lmin = 0 # minimum l
+# channel parameters
+lmax = 0 # maximum l
+lmin = 0 # minimum l
+λmax = 0 # maximum λ
+λmin = 0 # minimum λ
+s1 = 0.0 # spin of particle 1
+s2 = 0.0 # spin of particle 2
+s3 = 0.0 # spin of particle 3
+# for bound state J=Jmin=Jmax
+Jmin = 0.0 # minimum J
+Jmax = 0.0 # maximum J
+t1 = 0.0 # isospin of particle 1
+t2 = 0.0 # isospin of particle 2
+t3 = 0.0 # isospin of particle 3
+Tmin = 0.0 # minimum T
+Tmax = 0.0 # maximum T
+MT = 0.0 # third component of T, fix for the given system by charge conservation
 
-   s12 = 0.0 # coupling of s1 and s2
-   J12 = 0.0 # coupling of s12 and l
+mutable struct nch3b # channel index for the three body coupling
+    nchmax::Int # maximum number of channels
+    l::Vector{Int}
+    s12::Vector{Float64}
+    J12::Vector{Float64}
+    λ::Vector{Int}
+    J3::Vector{Float64}
+    J::Vector{Float64}
+    T12::Vector{Float64}
+    T::Vector{Float64}
+    
+    # Constructor with default initialization
+    function nch3b()
+        new(0, Int[], Float64[], Float64[], Int[], Float64[], Float64[], Float64[], Float64[])
+    end
+end
 
-   λmax=0  # maximum λ  
-   λmin=0  # minimum λ
-   J3=0.0 # coupling of λ and s3 
+# Renamed to avoid conflict with the type name
+global α = nch3b()
 
-   J=0.0 # coupling of J12 and J3
-   s1=0.0  # spin of particle 1 
-   s2=0.0  # spin of particle 2
-   s3=0.0  # spin of particle 3
+# channel index of the three body channels
+#|(l_{12} (s_1 s_2) s_{12}) J_{12}, (\lambda_3 s_3) J_3, J; (t_1 t_2) T_{12}, t_3, T M_T\rangle.
+# Function to count and create three-body channels
+function α3b()
+    global α
 
-   # for bound state J=Jmin=Jmax 
-   Jmin=0.0 # minimum J
-   Jmax=0.0 # maximum J
-
-   t1=0.0 # isospin of particle 1
-   t2=0.0 # isospin of particle 2
-   t3=0.0 # isospin of particle 3
-   T12=0.0 # coupling of t1 and t2
-   T=0.0 # coupling of T12 and t3
-   Tmin=0.0 # minimum T 
-   Tmax=0.0 # maximum T
-   MT=0.0 # third component of T, fix for the given system by charge conservation
-
-
-   mutable struct α_bar  # for the channel coupling 
-    αin=[] 
-    αout=[]
-   end 
-
-   mutable struct nch3b # channel index for the three body coupling 
-    nchmax =0 # maximum number of channels
-    l=[]
-    s12=[]
-    J12=[]
-    λ=[]
-    J3=[]
-    J=[]
-    T12=[]
-    T=[]
-   end 
-
-   #Initialize the structures
-   αbar = α_bar()
-   α=nch3b()
-
-   # channel index of the three body channels 
-   #|(l_{12} (s_1 s_2) s_{12}) J_{12}, (\lambda_3 s_3) J_3, J; (t_1 t_2) T_{12}, t_3, T M_T\rangle.
-   function α3b()
-    α.nchmax=0
+    
+    # First pass to count channels
+    nch_count = 0
+    
     for l in lmin:lmax
-        for s12 in 0:2*s1+1
-            for J12 in 0:2*s12+1
+        for ns in Int(2*(s1-s2)):2:Int(2*(s1+s2))
+            s12 = ns/2.0
+            for nJ12 in Int(2*abs(l-s12)):2:Int(2*(l+s12))  # Fixed min/max calculation
+                J12 = nJ12/2.0
                 for λ in λmin:λmax
-                    for J3 in 0:2*λ+1
-                        for J in max(abs(J12-J3),abs(l-J12)):min(J12+J3,l+J12)
-                            for T12 in 0:2*t1+1
-                                for T in max(abs(T12-t3),abs(t2-T12)):min(T12+t3,t1+T12)
-                                    α.nchmax+=1
-                                end 
-                            end 
-                        end 
-                    end 
-                end 
-            end 
+                    for nJ3 in Int(2*abs(λ-s3)):2:Int(2*(λ+s3))  # Fixed min/max calculation
+                        J3 = nJ3/2.0
+                        for nJ in Int(2*abs(J12-J3)):2:Int(2*(J12+J3))  # Fixed min/max calculation
+                            J = nJ/2.0
+                            # check if J is in the range of Jmin and Jmax
+                            if J < Jmin || J > Jmax
+                                continue
+                            end
+                            
+                            for nT12 in Int(2*abs(t1-t2)):2:Int(2*(t1+t2))
+                                T12 = nT12/2.0
+                                for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))  # Fixed min/max calculation
+                                    T = nT/2.0
+                                    # check if T is in the range of Tmin and Tmax
+                                    if T < Tmin || T > Tmax
+                                        continue
+                                    end
+                                    # check if MT is in the range of -T to T
+                                    if abs(MT) > T
+                                        continue
+                                    end
+                                    
+                                    nch_count += 1
+                                end
+                            end
+                        end
+                    end
+                end
+            end
         end
+    end
+    
+
+    println("Number of channels: ", α.nchmax)
+    open("channels.dat", "w") do io
+        println(io, "Number of channels: ", nch_count)
+    end
+    # Now allocate arrays with the correct size
+    α.nchmax = nch_count
+    α.l = zeros(Int, nch_count)
+    α.s12 = zeros(Float64, nch_count)
+    α.J12 = zeros(Float64, nch_count)
+    α.λ = zeros(Int, nch_count)
+    α.J3 = zeros(Float64, nch_count)
+    α.J = zeros(Float64, nch_count)
+    α.T12 = zeros(Float64, nch_count)
+    α.T = zeros(Float64, nch_count)
+    
+    # Second pass to fill the channels
+    ich = 0
+    
+    if nch_count > 0  # Only do second pass if we have channels
+      open("channels.dat", "a") do io
+        println(io, "---The coupling coefficients are")
+        println(io, " a3b |( l ( s1 s2 ) s12 ) J12 ( λ s3 ) J3 ,   J; ( t1 t2 ) T12 , t3 , T >")
+        for l in lmin:lmax
+            for ns in Int(2*(s1-s2)):2:Int(2*(s1+s2))
+                s12 = ns/2.0
+                for nJ12 in Int(2*abs(l-s12)):2:Int(2*(l+s12))
+                    J12 = nJ12/2.0
+                    for λ in λmin:λmax
+                        for nJ3 in Int(2*abs(λ-s3)):2:Int(2*(λ+s3))
+                            J3 = nJ3/2.0
+                            for nJ in Int(2*abs(J12-J3)):2:Int(2*(J12+J3))
+                                J = nJ/2.0
+                                # check if J is in the range of Jmin and Jmax
+                                if J < Jmin || J > Jmax
+                                    continue
+                                end
+                                
+                                for nT12 in Int(2*abs(t1-t2)):2:Int(2*(t1+t2))
+                                    T12 = nT12/2.0
+                                    for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))
+                                        T = nT/2.0
+                                        # check if T is in the range of Tmin and Tmax
+                                        if T < Tmin || T > Tmax
+                                            continue
+                                        end
+                                        # check if MT is in the range of -T to T
+                                        if abs(MT) > T
+                                            continue
+                                        end
+                                        ich += 1
+                                        α.l[ich] = l
+                                        α.s12[ich] = s12
+                                        α.J12[ich] = J12
+                                        α.λ[ich] = λ
+                                        α.J3[ich] = J3
+                                        α.J[ich] = J
+                                        α.T12[ich] = T12
+                                        α.T[ich] = T
+                                        print_channel_info(io, ich, l, s1, s2, s12, J12, λ, s3, J3, J, T12, t3, T)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+      end # end open
+    end # end if 
+    
+
+    return α
+end
 
 
+# Function to update parameters
+function update_parameters(params)
+    global lmax = params["lmax"]
+    global lmin = params["lmin"]
+    global t1 = params["t1"]
+    global t2 = params["t2"]
+    global t3 = params["t3"]
+    global s1 = params["s1"]
+    global s2 = params["s2"]
+    global s3 = params["s3"]
+    global λmin = params["λmin"]
+    global λmax = params["λmax"]
+    global Jmin = params["Jmin"]
+    global Jmax = params["Jmax"]
+    global Tmin = params["Tmin"]
+    global Tmax = params["Tmax"]
+    global MT = params["MT"]
+end
 
+function print_channel_info(io, ich, l, s1, s2, s12, J12, λ, s3, J3, J, T12, t3, T)
+    @printf(io, "%4d |(%2d (%2.1f %2.1f) %2.1f) %4.1f (%2d %2.1f) %3.1f, %3.1f; (%2.1f %2.1f) %2.1f, %2.1f, %2.1f > \n",
+            ich, l, s1, s2, s12, J12, λ, s3, J3, J, t1, t2, T12, t3, T)
+end
 
-   end  
-
-   
-
-
-
-
-end module 
+end # module
