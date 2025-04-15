@@ -1,6 +1,8 @@
 module mesh 
 using FastGaussQuadrature
-export initialmesh
+export initialmesh, nθ, nx, ny, xmax, ymax
+export xi, dxi, yi, dyi
+export θi, dθi
 # angular mesh 
 nθ = 24
 θi = Float64[]

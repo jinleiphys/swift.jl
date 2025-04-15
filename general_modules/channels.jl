@@ -1,7 +1,7 @@
 module channels
 using Printf
 # export lmax, lmin, λmax, λmin, s1, s2, s3, Jmin, Jmax, t1, t2, t3, Tmin, Tmax, MT
-export  α, α3b
+export  α, α3b,λmax,lmax
 
 # channel parameters
 lmax = 0 # maximum l
