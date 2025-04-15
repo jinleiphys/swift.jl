@@ -138,10 +138,9 @@ function initialY
 
                 for l in 0:lmax
                     for m in -l:l
+                        nch = l^2+l+m+1
                         
                     end
-
-
                 end 
 
 
