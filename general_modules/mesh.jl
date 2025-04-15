@@ -1,17 +1,18 @@
 module mesh 
 using FastGaussQuadrature
+export initialmesh
 # angular mesh 
 nθ = 24
-θi::Vector{Float64}
-dθi::Vector{Float64}
+θi = Float64[]
+dθi = Float64[]
 
 # radial mesh
 nx = 50
 ny = 50
-xi::Vector{Float64}
-dxi::Vector{Float64}
-yi::Vector{Float64}
-dyi::Vector{Float64}
+xi = Float64[]
+dxi = Float64[]
+yi = Float64[]
+dyi = Float64[]
 
 xmax = 10.0
 ymax = 10.0
@@ -27,9 +28,12 @@ function update_parameters(params)
 end
 
 function initialmesh(alpha)
-    global xi, dxi
-    global yi, dyi
-    global θi, dθi
+    global θi = Vector{Float64}(undef, nθ)
+    global dθi = Vector{Float64}(undef, nθ)
+    global xi = Vector{Float64}(undef, nx)
+    global dxi = Vector{Float64}(undef, nx)
+    global yi = Vector{Float64}(undef, ny)
+    global dyi = Vector{Float64}(undef, ny)
 
     θi, dθi = gausslegendre(nθ)    
     xi, dxi = scale_gausslaguerre(nx,xmax,0.0)
@@ -38,9 +42,6 @@ function initialmesh(alpha)
     # scaling the angular mesh from [-1,1] to [0,π]
     θi = (π/2) .* θi .+ (π/2)
     dθi = (π/2) .* dθi
-
-
-
 end 
 
 function scale_gausslaguerre(nx, xmax, alpha)
