@@ -6,9 +6,9 @@ using .channels
 include("../general_modules/mesh.jl")
 using .mesh
 
-Yλαout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-
-Ylαin = zeros(Float64,nθ,ny,nx,lmax^2+2*lmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
-Yλαout = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)  # last dimension for the permutation operator 1 for P+; 2 for P-
+# Yλαout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-
+# Ylαin = zeros(Float64,nθ,ny,nx,lmax^2+2*lmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
+# Yλαin = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
 # clebschgordan(j1, m1, j2, m2, j, m)
 
 
@@ -40,8 +40,8 @@ Yλαout = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)  # last dimension for th
         Cisospin=hat(α.T12[αin])*hat(α.T12[αout])*wigner6j(t1,t2,α.T12[αout],t3,α.T[αin],α.T12[αin])
         Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout]) 
 
-        LLmin =max(abs(α.l[αin]-α.λ[αin]),abs(α.l[αout]-α.λ[αout]))
-        LLmax =min(α.l[αin]+α.λ[αin],α.l[αout]+α.λ[αout])
+        # LLmin =max(abs(α.l[αin]-α.λ[αin]),abs(α.l[αout]-α.λ[αout]))
+        # LLmax =min(α.l[αin]+α.λ[αin],α.l[αout]+α.λ[αout])
 
         nSmin= max(Int(2*abs(α.s12[αin]-α.s3[αin])), Int(2*abs(α.s12[αout]-α.s3[αout])))
         nSmax= min(Int(2*(α.s12[αin]+α.s3[αin])), Int(2*(α.s12[αout]+α.s3[αout])))
@@ -59,8 +59,7 @@ Yλαout = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)  # last dimension for th
         Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t3,t1,α.T12[αin],t2,α.T[αout],α.T12[αout])
         Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout])
 
-        LLmin =max(abs(α.l[αin]-α.λ[αin]),abs(α.l[αout]-α.λ[αout]))
-        LLmax =min(α.l[αin]+α.λ[αin],α.l[αout]+α.λ[αout])
+        
 
         nSmin= max(Int(2*abs(α.s12[αin]-α.s3[αin])), Int(2*abs(α.s12[αout]-α.s3[αout])))
         nSmax= min(Int(2*(α.s12[αin]+α.s3[αin])), Int(2*(α.s12[αout]+α.s3[αout])))
@@ -74,85 +73,171 @@ Yλαout = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)  # last dimension for th
  end
 
 
-function YYcoupling(Y4,P::Char)
-    Y4 = zeros(Float64, nθ, nx, ny, α.nchmax, α.nchmax)
-
-end 
-
-function initialY 
-# set x_3 as z-direction,
-    Ylαout = sqrt( (2.*α.l[αout]+1.)/(4.*π) )
-    Yλαout . = 0.0
-
-    for λ in 0:λmax
-        for m in -λ:λ
-            nch=λ^2+λ+m+1
-                for i in 1:nθ
-                Yλαout[i,nch] =  sphericalharmonic(λ, m, θi[i], 0.0)
+ function YYcoupling(α, nθ, ny, nx, Ylαin, Yλαin)
+    # Initialize output arrays
+    Y4 = zeros(Float64, nθ, ny, nx, α.nchmax, α.nchmax, 2)
+    
+    for αout in 1:α.nchmax
+        # Calculate Ylαout coefficient
+        Ylαout = sqrt((2 * α.l[αout] + 1) / (4 * π))
+        
+        for αin in 1:α.nchmax
+            # Calculate angular momentum bounds
+            LLmin = max(abs(α.l[αin] - α.λ[αin]), abs(α.l[αout] - α.λ[αout]))
+            LLmax = min(α.l[αin] + α.λ[αin], α.l[αout] + α.λ[αout])
+            
+            for LL in LLmin:LLmax
+                minl = min(LL, α.λ[αout])
+                
+                for ML in -minl:minl
+                    # Calculate nchλout index
+                    nchλout = Int(α.λ[αout]^2 + α.λ[αout] + ML + 1)
+                    
+                    # Calculate Clebsch-Gordan coefficient for output
+                    CGout = clebschgordan(α.l[αout], 0, α.λ[αout], ML, LL, ML)
+                    
+                    # Pre-calculate Yout values
+                    Yout = zeros(Float64, nθ)
+                    # Assuming Yλout is defined elsewhere and has shape [nθ, nchλout_max]
+                    Yout[:] = Ylαout * Yλout[:, nchλout]
+                    
+                    # Loop over ml values
+                    for ml in -α.l[αin]:α.l[αin]
+                        # Loop over mλ values
+                        for mλ in -α.λ[αin]:α.λ[αin]
+                            # Skip if quantum numbers don't satisfy coupling condition
+                            if mλ + ml != ML
+                                continue
+                            end
+                            
+                            # Calculate indices for input channel components
+                            nchlin = Int(α.l[αin]^2 + α.l[αin] + ml + 1)
+                            nchλin = Int(α.λ[αin]^2 + α.λ[αin] + mλ + 1)
+                            
+                            # Calculate Clebsch-Gordan coefficient for input
+                            CGin = clebschgordan(α.l[αin], ml, α.λ[αin], mλ, LL, ML)
+                            
+                            # Calculate coupled spherical harmonics
+                            for ix in 1:nx
+                                for iy in 1:ny
+                                    for iθ in 1:nθ
+                                        # Calculate input harmonic products
+                                        Yin1 = Ylαin[iθ, iy, ix, nchlin, 1] * Yλαin[iθ, iy, ix, nchλin, 1]
+                                        Yin2 = Ylαin[iθ, iy, ix, nchlin, 2] * Yλαin[iθ, iy, ix, nchλin, 2]
+                                        
+                                        # Update Y4 tensor
+                                        Y4[iθ, iy, ix, αin, αout, 1] += CGin * CGout * Yout[iθ] * Yin1
+                                        Y4[iθ, iy, ix, αin, αout, 2] += CGin * CGout * Yout[iθ] * Yin2
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
             end
         end
     end
+    
+    return Y4
+end
 
-# now compute the sperical harmonics for incoming channels 
-# |x1|   | -0.5    1    |   |x3|           |0 |
-#     =  |              |   |  |       x3= |0 |
-# |y1|   | -0.75  -0.5  |   |y3|           |x3|
-
-# |x2|   | -0.5    -1    |   |x3|         |y3√{1-cos(θi)}|
-#     =  |               |   |  |      y3=|      0       |
-# |y2|   | 0.75  -0.5    |   |y3|         |   y3cos(θi)  |
-
-   if P == '+'  # compute Gα3α1   
-       a=-0.5
-       b=1.0
-       c=-0.75
-       d=-0.5
-    elseif P == '-'  # compute Gα3α2
-       a=-0.5
-       b=-1.0
-       c=0.75
-       d=-0.5
+function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi, P::Char)
+    
+    # Initialize arrays if they don't exist or have the wrong size
+    if !@isdefined(Yλαout) || size(Yλαout, 1) != nθ || size(Yλαout, 2) < (λmax^2 + 2*λmax + 1)
+        Yλαout = zeros(Float64, nθ, λmax^2 + 2*λmax + 1)
     else
-       error("Parameter P must be '+' or '-'") 
-    end 
-    # set the ϕ angle for the spherical harmonics
-    ϕx=0
-    ϕy=0 
-    if b<0 
-        ϕx=π
+        Yλαout .= 0.0  # Reset existing array
     end
-    if d<0
-        ϕy=π
+    
+    if !@isdefined(Ylαin) || size(Ylαin) != (nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)
+        Ylαin = zeros(Float64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)
+    else
+        Ylαin .= 0.0  # Reset existing array
     end
-
+    
+    if !@isdefined(Yλαin) || size(Yλαin) != (nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
+        Yλαin = zeros(Float64, nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
+    else
+        Yλαin .= 0.0  # Reset existing array
+    end
+    
+    # Set x_3 as z-direction
+    for λ in 0:λmax
+        for m in -λ:λ
+            nch = λ^2 + λ + m + 1
+            for i in 1:nθ
+                Yλαout[i, nch] = sphericalharmonic(λ, m, θi[i], 0.0)
+            end
+        end
+    end
+    
+    # Now compute the spherical harmonics for incoming channels
+    if P == '+'  # compute Gα3α1
+        a = -0.5
+        b = 1.0
+        c = -0.75
+        d = -0.5
+        perm_index = 1
+    elseif P == '-'  # compute Gα3α2
+        a = -0.5
+        b = -1.0
+        c = 0.75
+        d = -0.5
+        perm_index = 2
+    else
+        error("Parameter P must be '+' or '-'")
+    end
+    
+    # Set the ϕ angle for the spherical harmonics
+    ϕx = b < 0 ? π : 0
+    ϕy = d < 0 ? π : 0
+    
     for ix in 1:nx
         for iy in 1:ny
             for iθ in 1:nθ
-
+                # Compute transformed coordinates
                 xin = sqrt(a^2*xi[ix]^2 + b^2*yi[iy]^2 + 2*a*b*xi[ix]*yi[iy]*cos(θi[iθ]))
                 yin = sqrt(c^2*xi[ix]^2 + d^2*yi[iy]^2 + 2*c*d*xi[ix]*yi[iy]*cos(θi[iθ]))
-                xzin = a*xi[ix] + b*yi[iy]*cos(θi[iθ])
-                yzin = c*xi[ix] + d*yi[iy]*cos(θi[iθ])
-                θx = acos(xzin/xin)
-                θy = acos(yzin/yin)
-
+                
+                # Handle potential division by zero
+                if xin ≈ 0.0
+                    θx = 0.0  # Default value when xin is very close to zero
+                else
+                    xzin = a*xi[ix] + b*yi[iy]*cos(θi[iθ])
+                    # Ensure argument to acos is in valid range [-1, 1]
+                    θx = acos(clamp(xzin/xin, -1.0, 1.0))
+                end
+                
+                if yin ≈ 0.0
+                    θy = 0.0  # Default value when yin is very close to zero
+                else
+                    yzin = c*xi[ix] + d*yi[iy]*cos(θi[iθ])
+                    # Ensure argument to acos is in valid range [-1, 1]
+                    θy = acos(clamp(yzin/yin, -1.0, 1.0))
+                end
+                
+                # Compute spherical harmonics for each (l,m) combination
                 for l in 0:lmax
                     for m in -l:l
-                        nch = l^2+l+m+1
-                        
+                        nch = l^2 + l + m + 1
+                        Ylαin[iθ, iy, ix, nch, perm_index] = sphericalharmonic(l, m, θx, ϕx)
                     end
-                end 
-
-
-
-
-
+                end
+                
+                # Compute spherical harmonics for each (λ,m) combination
+                for λ in 0:λmax
+                    for m in -λ:λ
+                        nch = λ^2 + λ + m + 1
+                        Yλαin[iθ, iy, ix, nch, perm_index] = sphericalharmonic(λ, m, θx, ϕx)
+                    end
+                end
             end
         end
     end
-
-
-end # function YYcoupling
+    
+    return Yλαout, Ylαin, Yλαin
+end  # function initialY
 
 
 
