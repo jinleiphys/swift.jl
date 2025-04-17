@@ -4,9 +4,9 @@ using SphericalHarmonics
 export Gαα,  YYcoupling, initialY
 
 
-# Yλαout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-
-# Ylαin = zeros(Float64,nθ,ny,nx,lmax^2+2*lmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
-# Yλαin = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
+# Yλout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-
+# Ylin = zeros(Float64,nθ,ny,nx,lmax^2+2*lmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
+# Yλin = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
 # clebschgordan(j1, m1, j2, m2, j, m)
 
 
@@ -70,9 +70,9 @@ export Gαα,  YYcoupling, initialY
  end
 
 
- function YYcoupling(α, nθ, ny, nx, Ylαin, Yλαin)
+ function YYcoupling(α, nθ, ny, nx, Ylin, Yλin)
     # Initialize output arrays
-    Y4 = zeros(Float64, nθ, ny, nx, α.nchmax, α.nchmax, 2)
+    Y4 = zeros(ComplexF64, nθ, ny, nx, α.nchmax, α.nchmax, 2)
     
     for αout in 1:α.nchmax
         # Calculate Ylαout coefficient
@@ -119,8 +119,8 @@ export Gαα,  YYcoupling, initialY
                                 for iy in 1:ny
                                     for iθ in 1:nθ
                                         # Calculate input harmonic products
-                                        Yin1 = Ylαin[iθ, iy, ix, nchlin, 1] * Yλαin[iθ, iy, ix, nchλin, 1]
-                                        Yin2 = Ylαin[iθ, iy, ix, nchlin, 2] * Yλαin[iθ, iy, ix, nchλin, 2]
+                                        Yin1 = Ylin[iθ, iy, ix, nchlin, 1] * Yλin[iθ, iy, ix, nchλin, 1]
+                                        Yin2 = Ylin[iθ, iy, ix, nchlin, 2] * Yλin[iθ, iy, ix, nchλin, 2]
                                         
                                         # Update Y4 tensor
                                         Y4[iθ, iy, ix, αin, αout, 1] += CGin * CGout * Yout[iθ] * Yin1
@@ -138,53 +138,38 @@ export Gαα,  YYcoupling, initialY
     return Y4
 end
 
-function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi, P::Char)
+function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi)
     
-    # Initialize arrays if they don't exist or have the wrong size
-    if !@isdefined(Yλαout) || size(Yλαout, 1) != nθ || size(Yλαout, 2) < (λmax^2 + 2*λmax + 1)
-        Yλαout = zeros(Float64, nθ, λmax^2 + 2*λmax + 1)
-    else
-        Yλαout .= 0.0  # Reset existing array
-    end
-    
-    if !@isdefined(Ylαin) || size(Ylαin) != (nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)
-        Ylαin = zeros(Float64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)
-    else
-        Ylαin .= 0.0  # Reset existing array
-    end
-    
-    if !@isdefined(Yλαin) || size(Yλαin) != (nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
-        Yλαin = zeros(Float64, nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
-    else
-        Yλαin .= 0.0  # Reset existing array
-    end
-    
+    Yλout = zeros(ComplexF64, nθ, λmax^2 + 2*λmax + 1)
+    Ylin = zeros(ComplexF64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)    
+    Yλin = zeros(ComplexF64, nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
+
     # Set x_3 as z-direction
-    for λ in 0:λmax
-        for m in -λ:λ
-            nch = λ^2 + λ + m + 1
-            for i in 1:nθ
-                Yλαout[i, nch] = sphericalharmonic(λ, m, θi[i], 0.0)
+    for i in 1:nθ
+        Yλ = computeYlm(θi[i], 0.0, λmax)
+        for λ in 0:λmax
+           for m in -λ:λ
+                nch = λ^2 + λ + m + 1
+                Yλout[i, nch] =  Yλ[(λ,m)]
             end
         end
     end
-    
+
+  for perm_index in 1:2 
     # Now compute the spherical harmonics for incoming channels
-    if P == '+'  # compute Gα3α1
-        a = -0.5
-        b = 1.0
-        c = -0.75
-        d = -0.5
-        perm_index = 1
-    elseif P == '-'  # compute Gα3α2
-        a = -0.5
-        b = -1.0
-        c = 0.75
-        d = -0.5
-        perm_index = 2
-    else
-        error("Parameter P must be '+' or '-'")
-    end
+       if perm_index == 1  # compute Gα3α1
+           a = -0.5
+           b = 1.0
+           c = -0.75
+           d = -0.5
+        elseif perm_index == 2 # compute Gα3α2
+           a = -0.5
+           b = -1.0
+           c = 0.75
+           d = -0.5
+        else
+           error("Parameter P must be '+' or '-'")
+        end
     
     # Set the ϕ angle for the spherical harmonics
     ϕx = b < 0 ? π : 0
@@ -213,12 +198,13 @@ function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi, P::Char)
                     # Ensure argument to acos is in valid range [-1, 1]
                     θy = acos(clamp(yzin/yin, -1.0, 1.0))
                 end
-                
+                Yl = computeYlm(θx, ϕx, lmax)
+                Yλ = computeYlm(θy, ϕy, λmax)
                 # Compute spherical harmonics for each (l,m) combination
                 for l in 0:lmax
                     for m in -l:l
                         nch = l^2 + l + m + 1
-                        Ylαin[iθ, iy, ix, nch, perm_index] = sphericalharmonic(l, m, θx, ϕx)
+                        Ylin[iθ, iy, ix, nch, perm_index] = Yl[(l, m)]
                     end
                 end
                 
@@ -226,14 +212,15 @@ function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi, P::Char)
                 for λ in 0:λmax
                     for m in -λ:λ
                         nch = λ^2 + λ + m + 1
-                        Yλαin[iθ, iy, ix, nch, perm_index] = sphericalharmonic(λ, m, θx, ϕx)
+                        Yλin[iθ, iy, ix, nch, perm_index] = Yλ[(λ, m)]
                     end
                 end
             end
         end
     end
+  end 
     
-    return Yλαout, Ylαin, Yλαin
+    return Yλout, Ylin, Yλin
 end  # function initialY
 
 
