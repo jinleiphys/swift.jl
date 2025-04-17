@@ -1,10 +1,8 @@
 module Gcoefficient
 using WignerSymbols
 using SphericalHarmonics
-include("../general_modules/channels.jl")
-using .channels
-include("../general_modules/mesh.jl")
-using .mesh
+export Gαα,  YYcoupling, initialY
+
 
 # Yλαout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-
 # Ylαin = zeros(Float64,nθ,ny,nx,lmax^2+2*lmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
@@ -25,11 +23,10 @@ using .mesh
 
 # Compute Y_l^m(θ,φ)
 # Arguments: l (integer), m (integer), θ (polar angle), φ (azimuthal angle)
-# l, m = 2, 1
-# theta, phi = π/4, π/3
-# Y = sphericalharmonic(l, m, theta, phi)
+# computeYlm(θ, ϕ; lmax)
+# The returned array may be indexed using (l,m)
 
- function Gαα'(αout, αin,P::Char)
+ function Gαα(αout, αin,P::Char)
     if P == '+'  # compute Gα3α1   
         a=-0.5
         b=1.0
