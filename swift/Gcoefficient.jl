@@ -138,7 +138,7 @@ export Gαα,  YYcoupling, initialY
     return Y4
 end
 
-function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi)
+function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
     
     Yλout = zeros(ComplexF64, nθ, λmax^2 + 2*λmax + 1)
     Ylin = zeros(ComplexF64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)    
@@ -146,7 +146,7 @@ function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi)
 
     # Set x_3 as z-direction
     for i in 1:nθ
-        Yλ = computeYlm(θi[i], 0.0, λmax)
+        Yλ = computeYlm(acos(cosθi[i]), 0.0, λmax)
         for λ in 0:λmax
            for m in -λ:λ
                 nch = λ^2 + λ + m + 1
@@ -179,14 +179,14 @@ function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi)
         for iy in 1:ny
             for iθ in 1:nθ
                 # Compute transformed coordinates
-                xin = sqrt(a^2*xi[ix]^2 + b^2*yi[iy]^2 + 2*a*b*xi[ix]*yi[iy]*cos(θi[iθ]))
-                yin = sqrt(c^2*xi[ix]^2 + d^2*yi[iy]^2 + 2*c*d*xi[ix]*yi[iy]*cos(θi[iθ]))
+                xin = sqrt(a^2*xi[ix]^2 + b^2*yi[iy]^2 + 2*a*b*xi[ix]*yi[iy]*cosθi[iθ])
+                yin = sqrt(c^2*xi[ix]^2 + d^2*yi[iy]^2 + 2*c*d*xi[ix]*yi[iy]*cosθi[iθ])
                 
                 # Handle potential division by zero
                 if xin ≈ 0.0
                     θx = 0.0  # Default value when xin is very close to zero
                 else
-                    xzin = a*xi[ix] + b*yi[iy]*cos(θi[iθ])
+                    xzin = a*xi[ix] + b*yi[iy]*cosθi[iθ]
                     # Ensure argument to acos is in valid range [-1, 1]
                     θx = acos(clamp(xzin/xin, -1.0, 1.0))
                 end
@@ -194,7 +194,7 @@ function initialY(λmax, lmax, nθ, nx, ny, θi, xi, yi)
                 if yin ≈ 0.0
                     θy = 0.0  # Default value when yin is very close to zero
                 else
-                    yzin = c*xi[ix] + d*yi[iy]*cos(θi[iθ])
+                    yzin = c*xi[ix] + d*yi[iy]*cosθi[iθ]
                     # Ensure argument to acos is in valid range [-1, 1]
                     θy = acos(clamp(yzin/yin, -1.0, 1.0))
                 end
