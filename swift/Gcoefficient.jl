@@ -1,30 +1,22 @@
 module Gcoefficient
 using WignerSymbols
 using SphericalHarmonics
-export Gαα,  YYcoupling, initialY
+export Gαα,  YYcoupling, initialY,computeGcoffecient
 
 
 # Yλout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-
 # Ylin = zeros(Float64,nθ,ny,nx,lmax^2+2*lmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
 # Yλin = zeros(Float64,nθ,ny,nx,λmax^2+2*λmax+1,2)   # last dimension for the permutation operator 1 for P+; 2 for P-
-# clebschgordan(j1, m1, j2, m2, j, m)
 
 
-# Computing 6j symbols
-# wigner6j(j1, j2, j3, j4, j5, j6)
-# Corresponds to the symbol { j1 j2 j3 }
-#                           { j4 j5 j6 }
 
-# Computing 9j symbols
-# wigner9j(j1, j2, j3, j4, j5, j6, j7, j8, j9)
-# Corresponds to the symbol { j1 j2 j3 }
-#                           { j4 j5 j6 }
-#                           { j7 j8 j9 }
 
-# Compute Y_l^m(θ,φ)
-# Arguments: l (integer), m (integer), θ (polar angle), φ (azimuthal angle)
-# computeYlm(θ, ϕ; lmax)
-# The returned array may be indexed using (l,m)
+ function computeGcoffecient(α,lmax,λmax,s1, s2, s3, t1, t2, t3, nθ, nx, ny, cosθi, xi, yi)
+    Yλout, Ylin, Yλin = initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
+    Y4 = YYcoupling(α, nθ, ny, nx, Ylin, Yλin, Yλout)
+    Gresult = Gαα(nθ, ny, nx, α, s1, s2, s3, t1, t2, t3, Y4)
+    return Gresult
+ end 
 
  function Gαα(nθ, ny, nx, α, s1, s2, s3, t1, t2, t3,Y4)
 
@@ -54,8 +46,12 @@ export Gαα,  YYcoupling, initialY
                     for nSS in nSmin:nSmax
                         SS = nSS/2.
 
-                        f0 = (2.*SS+1) * wigner9j(α.l[αout],α.s12[αout],α.J12[αout], α.λ[αout], α.s3[αout], α.J3[αout], LL, SS, α.J[αout]) * 
-                              wigner9j(α.l[αin],α.s12[αin],α.J12[αin], α.λ[αin], α.s3[αin], α.J3[αin], LL, SS, α.J[αin])
+                        f0 = (2*SS+1.0) * u9(float(α.l[αout]),α.s12[αout],α.J12[αout], 
+                                             float(α.λ[αout]),α.s3[αout], α.J3[αout], 
+                                             float(LL), SS, α.J[αout]) * 
+                                          u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
+                                             float(α.λ[αin]), α.s3[αin], α.J3[αin], 
+                                             float(LL), SS, α.J[αin])
 
                         if perm_index == 1
                             f1=wigner6j(s1, s2, α.s12[αout], s3, SS, α.s12[αin])
@@ -259,6 +255,47 @@ end  # function initialY
  end 
 
 
+
+"""
+Nine-j symbol calculation. Definition as in Brink and Satchler.
+| a b c |
+| d e f |
+| g h i |
+
+Uses the racahW function from WignerSymbols.jl for efficient computation.
+"""
+function u9(ra::Float64, rb::Float64, rc::Float64, rd::Float64, re::Float64, 
+            rf::Float64, rg::Float64, rh::Float64, ri::Float64)::Float64
+    
+    # Implementation using the sum formula for 9-j symbols in terms of 6-j symbols
+    result = 0.0
+    
+    # Determine the range for the summation variable
+    minr = max(abs(ra - ri), abs(rb - rf), abs(rd - rh))
+    maxr = min(ra + ri, rb + rf, rd + rh)
+    
+    # Skip calculation if the triangle conditions aren't satisfied
+    if minr > maxr
+        return 0.0
+    end
+    
+    # Sum over all valid angular momenta
+    for n1 in Int(2*minr):2:Int(2*maxr)
+        r1 = n1/2.0  # Convert back to angular momentum value
+        
+        # Calculate the triple product of Racah W coefficients
+        # Note: racahW(T, j₁, j₂, J, j₃, J₁₂, J₂₃) computes W(j₁, j₂, J, j₃; J₁₂, J₂₃)
+        w1 = racahW(Float64, ra, ri, rd, rh, r1, rg)
+        w2 = racahW(Float64, rb, rf, rh, rd, r1, re)
+        w3 = racahW(Float64, ra, ri, rb, rf, r1, rc)
+        
+        # Add contribution to the sum
+        # Factor of (2*r1 + 1) corresponds to (2x+1) in the sum formula
+        result += (2.0 * r1 + 1.0) * w1 * w2 * w3 * ((-1.0)^(2*r1))
+    end
+    
+    return result
+end
 
 
 end # end module 
