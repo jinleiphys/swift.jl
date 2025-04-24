@@ -18,23 +18,54 @@ export initialmesh
 # xmax = 10.0
 # ymax = 10.0
 
+mutable struct meshset # channel index for the three body coupling
+    nθ::Int 
+    nx::Int
+    ny::Int
+    cosθi::Vector{Float64}
+    dcosθi::Vector{Float64}
+    xi::Vector{Float64}
+    dxi::Vector{Float64}
+    yi::Vector{Float64}
+    dyi::Vector{Float64}
+    xmax::Float64
+    ymax::Float64
+    α::Float64
+    
+    # Constructor with default initialization
+    function meshset()
+        new(20, 40, 40, Float64[], Float64[], Float64[], Float64[], Float64[], Float64[],30.0,30.0,0.0)
+    end
+end
+
+
 
 
 function initialmesh(nθ::Int,nx::Int,ny::Int, 
     xmax::Float64, ymax::Float64,alpha::Float64)
-    θi = Vector{Float64}(undef, nθ)
-    dθi = Vector{Float64}(undef, nθ)
-    xi = Vector{Float64}(undef, nx)
-    dxi = Vector{Float64}(undef, nx)
-    yi = Vector{Float64}(undef, ny)
-    dyi = Vector{Float64}(undef, ny)
 
-    cosθi, dcosθi = gausslegendre(nθ)    
-    xi, dxi = scale_gausslaguerre(nx,xmax,0.0)
-    yi, dyi = scale_gausslaguerre(ny,ymax,0.0)
+    grid=meshset()
+    grid.nθ = nθ
+    grid.nx = nx
+    grid.ny = ny
+    grid.xmax = xmax
+    grid.ymax = ymax
+    grid.α = alpha
+
+    grid.cosθi= Vector{Float64}(undef, nθ)
+    grid.dcosθi= Vector{Float64}(undef, nθ)
+    grid.xi = Vector{Float64}(undef, nx)
+    grid.dxi = Vector{Float64}(undef, nx)
+    grid.yi = Vector{Float64}(undef, ny)
+    grid.dyi = Vector{Float64}(undef, ny)
 
 
-    return cosθi, dcosθi, xi, dxi, yi, dyi
+    grid.cosθi, grid.dcosθi = gausslegendre(nθ)    
+    grid.xi, grid.dxi = scale_gausslaguerre(nx,xmax,0.0)
+    grid.yi, grid.dyi = scale_gausslaguerre(ny,ymax,0.0)
+
+
+    return grid
 end 
 
 function scale_gausslaguerre(nx, xmax, alpha)

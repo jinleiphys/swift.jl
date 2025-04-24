@@ -23,19 +23,24 @@ export  α3b
 
 mutable struct nch3b # channel index for the three body coupling
     nchmax::Int # maximum number of channels
+    s1::Float64
+    s2::Float64
+    s3::Float64
+    t1::Float64
+    t2::Float64
+    t3::Float64
     l::Vector{Int}
     s12::Vector{Float64}
     J12::Vector{Float64}
     λ::Vector{Int}
-    s3::Vector{Float64}
     J3::Vector{Float64}
-    J::Vector{Float64}
+    J::Float64
     T12::Vector{Float64}
     T::Vector{Float64}
     
     # Constructor with default initialization
     function nch3b()
-        new(0, Int[], Float64[], Float64[], Int[], Float64[],Float64[], Float64[], Float64[], Float64[])
+        new(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, Int[], Float64[], Float64[], Int[], Float64[], 0.0, Float64[], Float64[])
     end
 end
 
@@ -50,6 +55,13 @@ function α3b(J::Float64, T::Float64, parity::Int,
     t1::Float64, t2::Float64, t3::Float64, 
     MT::Float64)
     α = nch3b()
+    α.s1 = s1
+    α.s2 = s2
+    α.s3 = s3
+    α.t1 = t1
+    α.t2 = t2
+    α.t3 = t3
+    α.J = J
 
     
     # First pass to count channels
@@ -105,9 +117,7 @@ function α3b(J::Float64, T::Float64, parity::Int,
     α.s12 = zeros(Float64, nch_count)
     α.J12 = zeros(Float64, nch_count)
     α.λ = zeros(Int, nch_count)
-    α.s3 = zeros(Float64, nch_count)
     α.J3 = zeros(Float64, nch_count)
-    α.J = zeros(Float64, nch_count)
     α.T12 = zeros(Float64, nch_count)
     α.T = zeros(Float64, nch_count)
     
@@ -152,9 +162,7 @@ function α3b(J::Float64, T::Float64, parity::Int,
                                         α.s12[ich] = s12
                                         α.J12[ich] = J12
                                         α.λ[ich] = λ
-                                        α.s3[ich] = s3
                                         α.J3[ich] = J3
-                                        α.J[ich] = J
                                         α.T12[ich] = T12
                                         α.T[ich] = T
                                         print_channel_info(io, ich, l, s1, s2, s12, J12, λ, s3, J3, J,t1,t2,T12, t3, T)

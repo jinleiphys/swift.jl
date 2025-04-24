@@ -11,15 +11,30 @@ export Gαα,  YYcoupling, initialY,computeGcoffecient
 
 
 
- function computeGcoffecient(α,lmax,λmax,s1, s2, s3, t1, t2, t3, nθ, nx, ny, cosθi, xi, yi)
+ function computeGcoffecient(α, grid)
+
+    λmax = maximum(α.λ)
+    lmax = maximum(α.l)
+    nθ = grid.nθ
+    nx = grid.nx
+    ny = grid.ny
+    cosθi = grid.cosθi
+    xi = grid.xi
+    yi = grid.yi
+
     Yλout, Ylin, Yλin = initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
     Y4 = YYcoupling(α, nθ, ny, nx, Ylin, Yλin, Yλout)
-    Gresult = Gαα(nθ, ny, nx, α, s1, s2, s3, t1, t2, t3, Y4)
+    Gresult = Gαα(nθ, ny, nx, α, Y4)
     return Gresult
  end 
 
- function Gαα(nθ, ny, nx, α, s1, s2, s3, t1, t2, t3,Y4)
-
+ function Gαα(nθ, ny, nx, α,Y4)
+    s1 = α.s1
+    s2 = α.s2
+    s3 = α.s3
+    t1 = α.t1
+    t2 = α.t2
+    t3 = α.t3
     Gαoutαin = zeros(ComplexF64, nθ, ny, nx, α.nchmax, α.nchmax, 2)
     for perm_index in 1:2 
         for αout in 1:α.nchmax
@@ -28,14 +43,14 @@ export Gαα,  YYcoupling, initialY,computeGcoffecient
                     phase = (-1)^(α.T12[αin] + α.s12[αin] + 2*s1+s2+s3+2*t1+t2+t3)
                     Cisospin=hat(α.T12[αin])*hat(α.T12[αout])*wigner6j(t1,t2,α.T12[αout],t3,α.T[αin],α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout]) 
-                    nSmin= max(Int(2*abs(α.s12[αin]-α.s3[αin])), Int(2*abs(α.s12[αout]-α.s3[αout])))
-                    nSmax= min(Int(2*(α.s12[αin]+α.s3[αin])), Int(2*(α.s12[αout]+α.s3[αout])))
+                    nSmin= max(Int(2*abs(α.s12[αin]-s1)), Int(2*abs(α.s12[αout]-s3)))
+                    nSmax= min(Int(2*(α.s12[αin]+s1)), Int(2*(α.s12[αout]+s3)))
                 elseif perm_index == 2 # compute Gα3α2
                     phase = (-1)^(α.T12[αout] + α.s12[αout] + 2*s3+s1+s2+2*t3+t1+t2)
                     Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t3,t1,α.T12[αin],t2,α.T[αout],α.T12[αout])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout])
-                    nSmin= max(Int(2*abs(α.s12[αin]-α.s3[αin])), Int(2*abs(α.s12[αout]-α.s3[αout])))
-                    nSmax= min(Int(2*(α.s12[αin]+α.s3[αin])), Int(2*(α.s12[αout]+α.s3[αout])))
+                    nSmin= max(Int(2*abs(α.s12[αin]-s2)), Int(2*abs(α.s12[αout]-s3)))
+                    nSmax= min(Int(2*(α.s12[αin]+s2)), Int(2*(α.s12[αout]+s3)))
                 else
                     error("Parameter P must be '+' or '-'")
                 end
@@ -45,17 +60,21 @@ export Gαα,  YYcoupling, initialY,computeGcoffecient
                 for LL in LLmin:LLmax 
                     for nSS in nSmin:nSmax
                         SS = nSS/2.
-
-                        f0 = (2*SS+1.0) * u9(float(α.l[αout]),α.s12[αout],α.J12[αout], 
-                                             float(α.λ[αout]),α.s3[αout], α.J3[αout], 
-                                             float(LL), SS, α.J[αout]) * 
-                                          u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
-                                             float(α.λ[αin]), α.s3[αin], α.J3[αin], 
-                                             float(LL), SS, α.J[αin])
-
                         if perm_index == 1
+                            f0 = (2*SS+1.0) * u9(float(α.l[αout]),α.s12[αout],α.J12[αout], 
+                                                 float(α.λ[αout]),α.s3, α.J3[αout], 
+                                                 float(LL), SS, α.J) * 
+                                              u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
+                                                 float(α.λ[αin]), α.s1, α.J3[αin], 
+                                                 float(LL), SS, α.J)
                             f1=wigner6j(s1, s2, α.s12[αout], s3, SS, α.s12[αin])
                         elseif perm_index == 2
+                            f0 = (2*SS+1.0) * u9(float(α.l[αout]),α.s12[αout],α.J12[αout], 
+                                                 float(α.λ[αout]),α.s3, α.J3[αout], 
+                                                 float(LL), SS, α.J) * 
+                                              u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
+                                                 float(α.λ[αin]), α.s2, α.J3[αin], 
+                                                 float(LL), SS, α.J)
                             f1=wigner6j(s3, s1, α.s12[αin], s2, SS, α.s12[αout])
                         end
                             
