@@ -2,6 +2,7 @@ module matrices
 using Kronecker
 include("../NNpot/nuclear_potentials.jl")
 using .NuclearPotentials
+using WignerSymbols
 
 const amu= 931.49432 # MeV
 const m=1.008665 # amu
@@ -78,6 +79,67 @@ const ħ=197.3269718 # MeV. fm
     return T
 
  end # end function Tx
+
+ function V_matrix(α, grid, potname)
+    # Initialize matrix for storing potential energy
+    Vαx = zeros(α.nchmax * grid.nx, α.nchmax * grid.nx)
+    
+    # Get nuclear potential matrix
+    v12 = pot_nucl(α, grid, potname)
+    
+    # Convert to integer values for loop limits
+    nt1 = Int(2 * α.t1)
+    nt2 = Int(2 * α.t2)
+    
+    for j in 1:α.nchmax
+        for i in 1:α.nchmax
+            # Calculate start and end indices for blocks in the matrix
+            row_start = (i - 1) * grid.nx + 1
+            row_end = i * grid.nx
+            col_start = (j - 1) * grid.nx + 1
+            col_end = j * grid.nx
+            
+            for nmt1 in -nt1:nt1
+                mt1 = nmt1 / 2.0
+                for nmt2 in -nt2:nt2
+                    mt2 = nmt2 / 2.0
+                    for nmt1p in -nt1:nt1
+                        mt1p = nmt1p / 2.0
+                        for nmt2p in -nt2:nt2
+                            mt2p = nmt2p / 2.0
+                            
+                            # Conservation of total m_t
+                            if nmt1 + nmt2 == nmt1p + nmt2p
+                                # Total magnetic quantum number
+                                mt_total = mt1 + mt2
+                                
+                                # Common Clebsch-Gordan coefficients that can be precomputed
+                                cg1 = clebschgordan(α.t1, mt1, α.t2, mt2, α.T12[i], mt_total)
+                                cg2 = clebschgordan(α.t1, mt1p, α.t2, mt2p, α.T12[j], mt_total)
+                                cg3 = clebschgordan(α.T12[i], mt_total, α.t3, α.MT - mt_total, α.T, α.MT)
+                                cg4 = clebschgordan(α.T12[j], mt_total, α.t3, α.MT - mt_total, α.T, α.MT)
+                                
+                                # Combined CG coefficient
+                                cg_combined = cg1 * cg2 * cg3 * cg4
+                                
+                                # Select potential based on isospin projection
+                                if mt_total == 0
+                                    # np pair (isospin index 1)
+                                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 1] * cg_combined
+                                else
+                                    # pp or nn pair (isospin index 2)
+                                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 2] * cg_combined
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return Vαx  # Added return statement
+end
 
  function pot_nucl(α, grid, potname)
     # Compute the nuclear potential matrix
