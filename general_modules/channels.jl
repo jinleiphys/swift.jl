@@ -37,10 +37,11 @@ mutable struct nch3b # channel index for the three body coupling
     J::Float64
     T12::Vector{Float64}
     T::Vector{Float64}
+    MT :: Float64
     
     # Constructor with default initialization
     function nch3b()
-        new(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, Int[], Float64[], Float64[], Int[], Float64[], 0.0, Float64[], Float64[])
+        new(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, Int[], Float64[], Float64[], Int[], Float64[], 0.0, Float64[], Float64[],-0.5)
     end
 end
 
@@ -62,6 +63,7 @@ function α3b(J::Float64, T::Float64, parity::Int,
     α.t2 = t2
     α.t3 = t3
     α.J = J
+    α.MT = MT
 
     
     # First pass to count channels

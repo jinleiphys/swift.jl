@@ -1,5 +1,7 @@
 module matrices 
 using Kronecker
+include("../NNpot/nuclear_potentials.jl")
+using .NuclearPotentials
 
 const amu= 931.49432 # MeV
 const m=1.008665 # amu
@@ -77,20 +79,139 @@ const ħ=197.3269718 # MeV. fm
 
  end # end function Tx
 
- function pot_nucl()
+ function pot_nucl(α,grid,potname)
+    # Compute the nuclear potential matrix
+    # Parameters:
+    # α: parameters for the Laguerre function
+    # grid: grid object containing nx, xi, and other parameters
+    # proton m1=+1/2  neutron m2=-1/2
+    # for the current function, I only consider the local potential(AV8,NIJM,REID,AV14,AV18), for the non-local potential, one needs to modify this function 
+    v12 = zeros(grid.nx,grid.nx,α.nchmax,α.nchmax,2)  # Initialize potential matrix the last dimension is for the isospin 1 for np pair and 2 for nn(MT<0) or pp pair(MT>0)
+
+    for j in 1:α.nchmax
+        for i in 1:α.nchmax
+            if checkα(i,j,α)
+                # Compute the potential matrix elements
+                if Int(α.J12[i]) == 0
+                    if α.l[i] != α.l[j]
+                        error("error: the channel is not allowed")
+                    end 
+                    for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
+                        v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir,ir,i,j,1] = v[1,1]
+                        if α.MT > 0
+                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir,ir,i,j,2] = v[1,1] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
+                        else
+                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir,ir,i,j,2] = v[1,1]
+                        end
+                    end 
+                    
+                elseif Int(α.J12[i]) == α.l[i]
+                    if α.l[i] != α.l[j]
+                        error("error: the channel is not allowed")
+                    end
+                    for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
+                        v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir,ir,i,j,1] = v[1,1]
+                        if α.MT > 0
+                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir,ir,i,j,2] = v[1,1] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
+                        else
+                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir,ir,i,j,2] = v[1,1]
+                        end
+                    end
+                else
+                    l=[Int(α.J12[i])-1,Int(α.J12[i])+1]
+                    if α.l[i]==Int(α.J12[i]-1) && α.l[j]==Int(α.J12[i]-1) 
+                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir,ir,i,j,1] = v[1,1]
+                        if α.MT > 0
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir,ir,i,j,2] = v[1,1] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
+                        else
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir,ir,i,j,2] = v[1,1]
+                        end
+                    end 
+                    if α.l[i]==Int(α.J12[i]+1) && α.l[j]==Int(α.J12[i]+1) 
+                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir,ir,i,j,1] = v[2,2]
+                        if α.MT > 0
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir,ir,i,j,2] = v[2,2] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
+                        else
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir,ir,i,j,2] = v[2,2]
+                        end
+                    end 
+                    if α.l[i]==Int(α.J12[i]-1) && α.l[j]==Int(α.J12[i]+1) 
+                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir,ir,i,j,1] = v[1,2]
+                        if α.MT > 0
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir,ir,i,j,2] = v[1,2] 
+                        else
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir,ir,i,j,2] = v[1,2]
+                        end
+                    end
+                    if α.l[i]==Int(α.J12[i]+1) && α.l[j]==Int(α.J12[i]-1) 
+                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir,ir,i,j,1] = v[2,1]
+                        if α.MT > 0
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir,ir,i,j,2] = v[2,1]  
+                        else
+                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir,ir,i,j,2] = v[2,1]
+                        end
+                    end
+
+
+                end 
+                
+            end
+        end
+    end
+
+
+
+ end 
 
 
  
  function checkα(i,j,α)
 
     # Check if the channel is allowed
-    if (-1)^α.l[i] == (-1)^α.l[j] && α.s12[i] == α.s12[j] && α.J12[i] == α.J12[j]
+    if (-1)^α.l[i] == (-1)^α.l[j] && Int(α.s12[i]*2) == Int(α.s12[j]*2) && Int(α.J12[i]*2) == Int(α.J12[j]*2)
         return true
     else
         return false
     end
  end 
 
+
+ function VCOUL_point(R, z12)   # use to compute the Coulomb potential
+    # Constants
+    e2 = 1.43997  # Coulomb constant in appropriate units
+    
+    # Calculations
+    aux = e2 * z12
+    vcoul_point = 0.0
+    
+    # Early return if z12 is very small
+    if (z12 < 1e-4)
+        return vcoul_point
+    end
+    
+    # Compute Coulomb potential
+    vcoul_point = aux / R
+    
+    return vcoul_point
+end
 
 
 end # end module matrices
