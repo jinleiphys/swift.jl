@@ -79,32 +79,32 @@ const ħ=197.3269718 # MeV. fm
 
  end # end function Tx
 
- function pot_nucl(α,grid,potname)
+ function pot_nucl(α, grid, potname)
     # Compute the nuclear potential matrix
     # Parameters:
     # α: parameters for the Laguerre function
     # grid: grid object containing nx, xi, and other parameters
     # proton m1=+1/2  neutron m2=-1/2
     # for the current function, I only consider the local potential(AV8,NIJM,REID,AV14,AV18), for the non-local potential, one needs to modify this function 
-    v12 = zeros(grid.nx,grid.nx,α.nchmax,α.nchmax,2)  # Initialize potential matrix the last dimension is for the isospin 1 for np pair and 2 for nn(MT<0) or pp pair(MT>0)
+    v12 = zeros(grid.nx, grid.nx, α.nchmax, α.nchmax, 2)  # Initialize potential matrix the last dimension is for the isospin 1 for np pair and 2 for nn(MT<0) or pp pair(MT>0)
 
     for j in 1:α.nchmax
         for i in 1:α.nchmax
-            if checkα(i,j,α)
+            if checkα(i, j, α)
                 # Compute the potential matrix elements
                 if Int(α.J12[i]) == 0
                     if α.l[i] != α.l[j]
                         error("error: the channel is not allowed")
                     end 
                     for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
-                        v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 0)
-                        v12[ir,ir,i,j,1] = v[1,1]
+                        v = potential_matrix(potname, grid.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir, ir, i, j, 1] = v[1, 1]
                         if α.MT > 0
-                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
-                            v12[ir,ir,i,j,2] = v[1,1] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
+                            v = potential_matrix(potname, grid.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                         else
-                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
-                            v12[ir,ir,i,j,2] = v[1,1]
+                            v = potential_matrix(potname, grid.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir, ir, i, j, 2] = v[1, 1]
                         end
                     end 
                     
@@ -113,73 +113,68 @@ const ħ=197.3269718 # MeV. fm
                         error("error: the channel is not allowed")
                     end
                     for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
-                        v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 0)
-                        v12[ir,ir,i,j,1] = v[1,1]
+                        v = potential_matrix(potname, grid.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 0)
+                        v12[ir, ir, i, j, 1] = v[1, 1]
                         if α.MT > 0
-                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
-                            v12[ir,ir,i,j,2] = v[1,1] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
+                            v = potential_matrix(potname, grid.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                            v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                         else
-                            v=potential_matrix(potname,gird.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
-                            v12[ir,ir,i,j,2] = v[1,1]
+                            v = potential_matrix(potname, grid.xi[ir], α.l[i], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                            v12[ir, ir, i, j, 2] = v[1, 1]
                         end
                     end
                 else
-                    l=[Int(α.J12[i])-1,Int(α.J12[i])+1]
-                    if α.l[i]==Int(α.J12[i]-1) && α.l[j]==Int(α.J12[i]-1) 
-                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
-                        v12[ir,ir,i,j,1] = v[1,1]
-                        if α.MT > 0
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
-                            v12[ir,ir,i,j,2] = v[1,1] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
-                        else
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
-                            v12[ir,ir,i,j,2] = v[1,1]
+                    l = [Int(α.J12[i])-1, Int(α.J12[i])+1]
+                    for ir in 1:grid.nx  
+                        if α.l[i] == Int(α.J12[i]-1) && α.l[j] == Int(α.J12[i]-1) 
+                            v = potential_matrix(potname, grid.xi[ir], l[1], α.s12[i], α.J12[i], α.T12[i], 0)
+                            v12[ir, ir, i, j, 1] = v[1, 1]
+                            if α.MT > 0
+                                v = potential_matrix(potname, grid.xi[ir], l[1], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                                v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
+                            else
+                                v = potential_matrix(potname, grid.xi[ir], l[1], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                                v12[ir, ir, i, j, 2] = v[1, 1]
+                            end
+                        elseif α.l[i] == Int(α.J12[i]+1) && α.l[j] == Int(α.J12[i]+1) 
+                            v = potential_matrix(potname, grid.xi[ir], l[2], α.s12[i], α.J12[i], α.T12[i], 0)
+                            v12[ir, ir, i, j, 1] = v[2, 2]
+                            if α.MT > 0
+                                v = potential_matrix(potname, grid.xi[ir], l[2], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                                v12[ir, ir, i, j, 2] = v[2, 2] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
+                            else
+                                v = potential_matrix(potname, grid.xi[ir], l[2], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                                v12[ir, ir, i, j, 2] = v[2, 2]
+                            end
+                        elseif α.l[i] == Int(α.J12[i]-1) && α.l[j] == Int(α.J12[i]+1) 
+                            v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
+                            v12[ir, ir, i, j, 1] = v[1, 2]
+                            if α.MT > 0
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                                v12[ir, ir, i, j, 2] = v[1, 2] 
+                            else
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                                v12[ir, ir, i, j, 2] = v[1, 2]
+                            end
+                        elseif α.l[i] == Int(α.J12[i]+1) && α.l[j] == Int(α.J12[i]-1) 
+                            v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
+                            v12[ir, ir, i, j, 1] = v[2, 1]
+                            if α.MT > 0
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                                v12[ir, ir, i, j, 2] = v[2, 1]  
+                            else
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                                v12[ir, ir, i, j, 2] = v[2, 1]
+                            end
                         end
                     end 
-                    if α.l[i]==Int(α.J12[i]+1) && α.l[j]==Int(α.J12[i]+1) 
-                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
-                        v12[ir,ir,i,j,1] = v[2,2]
-                        if α.MT > 0
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
-                            v12[ir,ir,i,j,2] = v[2,2] + VCOUL_point(gird.xi[ir], 1.0) # for pp pair
-                        else
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
-                            v12[ir,ir,i,j,2] = v[2,2]
-                        end
-                    end 
-                    if α.l[i]==Int(α.J12[i]-1) && α.l[j]==Int(α.J12[i]+1) 
-                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
-                        v12[ir,ir,i,j,1] = v[1,2]
-                        if α.MT > 0
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
-                            v12[ir,ir,i,j,2] = v[1,2] 
-                        else
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
-                            v12[ir,ir,i,j,2] = v[1,2]
-                        end
-                    end
-                    if α.l[i]==Int(α.J12[i]+1) && α.l[j]==Int(α.J12[i]-1) 
-                        v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
-                        v12[ir,ir,i,j,1] = v[2,1]
-                        if α.MT > 0
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
-                            v12[ir,ir,i,j,2] = v[2,1]  
-                        else
-                            v=potential_matrix(potname,gird.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
-                            v12[ir,ir,i,j,2] = v[2,1]
-                        end
-                    end
-
-
                 end 
-                
             end
         end
     end
-
-
-
- end 
+    
+    return v12  
+end
 
 
  
