@@ -1,30 +1,30 @@
 module NuclearPotentials
 
 using Libdl
-export potential_matrix, PotentialType, ChannelType, AV8, NIJM, REID, AV14, AV18
+export potential_matrix
 
-"""
-Enum for available potential models
-"""
-@enum PotentialType begin
-    AV8 = 1
-    NIJM = 2
-    REID = 3
-    AV14 = 4
-    AV18 = 5
-end
+# """
+# Enum for available potential models
+# """
+# @enum PotentialType begin
+#     AV8 = 1
+#     NIJM = 2
+#     REID = 3
+#     AV14 = 4
+#     AV18 = 5
+# end
 
-"""
-Enum for nucleon-nucleon channel types
-"""
-@enum ChannelType begin
-    NN = 1  # neutron-neutron
-    NP = 2  # neutron-proton
-    PP = 3  # proton-proton
-end
+# """
+# Enum for nucleon-nucleon channel types
+# """
+# @enum ChannelType begin
+#     NN = 1  # neutron-neutron
+#     NP = 2  # neutron-proton
+#     PP = 3  # proton-proton
+# end
 
 # Load the Fortran library with potentials
-const libpot = Libdl.dlopen("libpotentials.dylib")
+const libpot = Libdl.dlopen(joinpath(@__DIR__, "libpotentials.dylib"))
 
 # Function to list all symbols in the library (useful for debugging)
 function list_symbols(lib)
@@ -194,7 +194,7 @@ end
 Calculate the potential matrix for given parameters
 """
 function potential_matrix(
-    potential_type::PotentialType,
+    potential_type::String,  # Changed from PotentialType to String
     r::Float64,
     angular_momenta::Vector{Int},  # l values for each channel
     s::Int,                        # total spin
@@ -222,8 +222,8 @@ function potential_matrix(
             l_ia = angular_momenta[ia]
             l_ib = angular_momenta[ib]
             
-            # Choose the appropriate potential model
-            if potential_type == AV8
+            # Choose the appropriate potential model (using string comparison)
+            if potential_type == "AV8"
                 if r < 140.0  # Distance cutoff
                     if ia == ib  # Diagonal element
                         # For AV8, lpot=2 selects the v8' version
@@ -233,25 +233,25 @@ function potential_matrix(
                         potential[ia, ib] = vv2[1, 2]
                     end
                 end
-            elseif potential_type == NIJM
+            elseif potential_type == "NIJM"
                 if ia == ib  # Diagonal element
                     # Important: Nijmegen takes 2*l, 2*s, 2*j as arguments
                     potential[ia, ib] = call_nijmegen(2*l_ia, 2*s, 2*j, channel_type, r)
                 else  # Off-diagonal element (coupled channels)
                     potential[ia, ib] = call_nijmegen_coupling(2*min(l_ia, l_ib), 2*s, 2*j, channel_type, r)
                 end
-            elseif potential_type == REID
+            elseif potential_type == "REID"
                 if ia == ib  # Diagonal element
                     # Important: Reid93 also takes 2*l, 2*s, 2*j as arguments
                     potential[ia, ib] = call_reid(2*l_ia, 2*s, 2*j, channel_type, r)
                 else  # Off-diagonal element (coupled channels)
                     potential[ia, ib] = call_reid_coupling(2*min(l_ia, l_ib), 2*s, 2*j, channel_type, r)
                 end
-            elseif potential_type == AV14
+            elseif potential_type == "AV14"
                 vvv = call_av14(r)
                 # Julia is 1-indexed, but Fortran starts from 0, so we add 1
                 potential[ia, ib] = vvv[l_ia+1, l_ib+1, s+1, j+1]
-            elseif potential_type == AV18
+            elseif potential_type == "AV18"
                 if r < 140.0  # Distance cutoff
                     if ia == ib  # Diagonal element
                         # For AV18, lpot=1 selects the full v18 version

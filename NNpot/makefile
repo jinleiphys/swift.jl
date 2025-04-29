@@ -57,7 +57,7 @@ $(LIBFILE): $(OBJECTS)
 
 # Clean intermediate files
 clean:
-	rm -f $(OBJECTS) $(LIBFILE) *.mod nuclear_potentials.jl
+	rm -f $(OBJECTS) $(LIBFILE) *.mod 
 
 # Deep clean (includes installed library)
 distclean: clean
