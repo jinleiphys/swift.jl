@@ -49,7 +49,7 @@ const ħ=197.3269718 # MeV. fm
     end 
  end 
 
-
+ return Tx_matrix, Ty_matrix
  end 
 
 
@@ -69,7 +69,7 @@ const ħ=197.3269718 # MeV. fm
                 T[i,j] =  (-1.0 / 12. * xi[i]^2 ) * ( xi[i]^2 - 2.0 * (2.0* nx+α+1.0)*xi[i] + α^2 - 4.0 ) - (-1) ^{i-j} / (4 * sqrt(xi[i]*xi[j])) + l*(l+1)/xi[i]^2 
             else
                 # Off-diagonal elements
-                T[i,j] = (-1.0)^{i-j} * (xi[i]+xi[j]) / (sqrt(xi[i]*xi[j]) * (xi[i]-xi[j])^2 ) - (-1) ^{i-j} / (4 * sqrt(xi[i]*xi[j]))
+                T[i,j] = (-1.0)^(i-j) * (xi[i]+xi[j]) / (sqrt(xi[i]*xi[j]) * (xi[i]-xi[j])^2 ) - (-1) ^{i-j} / (4 * sqrt(xi[i]*xi[j]))
             end
  
         end
@@ -189,23 +189,23 @@ end
                     l = [Int(α.J12[i])-1, Int(α.J12[i])+1]
                     for ir in 1:grid.nx  
                         if α.l[i] == Int(α.J12[i]-1) && α.l[j] == Int(α.J12[i]-1) 
-                            v = potential_matrix(potname, grid.xi[ir], l[1], α.s12[i], α.J12[i], α.T12[i], 0)
+                            v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
                             v12[ir, ir, i, j, 1] = v[1, 1]
                             if α.MT > 0
-                                v = potential_matrix(potname, grid.xi[ir], l[1], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                             else
-                                v = potential_matrix(potname, grid.xi[ir], l[1], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[1, 1]
                             end
                         elseif α.l[i] == Int(α.J12[i]+1) && α.l[j] == Int(α.J12[i]+1) 
-                            v = potential_matrix(potname, grid.xi[ir], l[2], α.s12[i], α.J12[i], α.T12[i], 0)
+                            v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 0)
                             v12[ir, ir, i, j, 1] = v[2, 2]
                             if α.MT > 0
-                                v = potential_matrix(potname, grid.xi[ir], l[2], α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[2, 2] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                             else
-                                v = potential_matrix(potname, grid.xi[ir], l[2], α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
+                                v = potential_matrix(potname, grid.xi[ir], l, α.s12[i], α.J12[i], α.T12[i], -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[2, 2]
                             end
                         elseif α.l[i] == Int(α.J12[i]-1) && α.l[j] == Int(α.J12[i]+1) 
