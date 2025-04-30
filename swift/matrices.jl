@@ -20,8 +20,8 @@ const ħ=197.3269718 # MeV. fm
 
  for i in 1:α.nchmax
 
-    T = Tx(grid.nx,grid.xi,grid.α,α.l[i])  
-    T .= T .* ħ^2 / m / amu  
+    T = Tx(grid.nx,grid.xx,grid.α,α.l[i])  
+    T .= T .* ħ^2 / m / amu / grid.hsx^2
     row_start = (i-1)*grid.nx + 1
     row_end = i*grid.nx
     col_start = (i-1)*grid.nx + 1
@@ -37,8 +37,8 @@ const ħ=197.3269718 # MeV. fm
  for iα in 1:α.nchmax
     for ix in 1:grid.nx 
        i += 1
-       T= Tx(grid.ny,yi,α0,α.λ[iα])
-       T .= T .* ħ^2 * 0.75 / m / amu
+       T= Tx(grid.ny,grid.yy,grid.α,α.λ[iα])
+       T .= T .* ħ^2 * 0.75 / m / amu /grid.hsy^2
 
        row_start = (i-1)*grid.ny + 1
        row_end = i*grid.ny

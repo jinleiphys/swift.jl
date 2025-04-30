@@ -33,14 +33,13 @@ mutable struct meshset # channel index for the three body coupling
     α::Float64
     hsx::Float64
     hsy::Float64
-    rx::Vector{Float64}
-    drx::Vector{Float64}
-    ry::Vector{Float64}
-    dry::Vector{Float64}
+    xx::Vector{Float64}
+    yy::Vector{Float64}
+
     
     # Constructor with default initialization
     function meshset()
-        new(20, 40, 40, Float64[], Float64[], Float64[], Float64[], Float64[], Float64[],30.0,30.0,0.0,0.0,0.0,Float64[], Float64[], Float64[], Float64[])
+        new(20, 40, 40, Float64[], Float64[], Float64[], Float64[], Float64[], Float64[],30.0,30.0,0.0,0.0,0.0,Float64[], Float64[])
     end
 end
 
@@ -62,17 +61,15 @@ function initialmesh(nθ::Int,nx::Int,ny::Int,
     grid.dcosθi= Vector{Float64}(undef, nθ)
     grid.xi = Vector{Float64}(undef, nx)
     grid.dxi = Vector{Float64}(undef, nx)
-    grid.rx = Vector{Float64}(undef, nx)
-    grid.drx = Vector{Float64}(undef, nx)
+    grid.xx = Vector{Float64}(undef, nx)
     grid.yi = Vector{Float64}(undef, ny)
     grid.dyi = Vector{Float64}(undef, ny)
-    grid.ry = Vector{Float64}(undef, ny)
-    grid.dry = Vector{Float64}(undef, ny)
-
+    grid.yy = Vector{Float64}(undef, ny)
+   
 
     grid.cosθi, grid.dcosθi = gausslegendre(nθ)   
-    grid.rx, grid.drx =  gausslaguerre(nx, alpha)  # unscaled Laguerre points
-    grid.ry, grid.dry =  gausslaguerre(ny, alpha) # unscaled Laguerre points
+    grid.xx, drx =  gausslaguerre(nx, alpha)  # unscaled Laguerre points
+    grid.yy, dry =  gausslaguerre(ny, alpha) # unscaled Laguerre points
     grid.xi, grid.dxi, grid.hsx = scale_gausslaguerre(nx,xmax,0.0)
     grid.yi, grid.dyi, grid.hsy = scale_gausslaguerre(ny,ymax,0.0)
 
