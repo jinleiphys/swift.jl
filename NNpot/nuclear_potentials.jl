@@ -3,26 +3,6 @@ module NuclearPotentials
 using Libdl
 export potential_matrix
 
-# """
-# Enum for available potential models
-# """
-# @enum PotentialType begin
-#     AV8 = 1
-#     NIJM = 2
-#     REID = 3
-#     AV14 = 4
-#     AV18 = 5
-# end
-
-# """
-# Enum for nucleon-nucleon channel types
-# """
-# @enum ChannelType begin
-#     NN = 1  # neutron-neutron
-#     NP = 2  # neutron-proton
-#     PP = 3  # proton-proton
-# end
-
 # Load the Fortran library with potentials
 const libpot = Libdl.dlopen(joinpath(@__DIR__, "libpotentials.dylib"))
 
@@ -69,29 +49,32 @@ end
 
 # Define the function pointers to the Fortran subroutines - with robust symbol finding
 const av18pw_ptr = find_symbol(libpot, "av18_MOD_av18pw")
-const potn_ptr = find_symbol(libpot, "nijm_reid_potentials_MOD_potn")
-const pot_c_ptr = find_symbol(libpot, "nijm_reid_potentials_MOD_pot_c")
-const pot_r_ptr = find_symbol(libpot, "nijm_reid_potentials_MOD_pot_r")
-const pot_c_r_ptr = find_symbol(libpot, "nijm_reid_potentials_MOD_pot_c_r")
-const pot_v14_ptr = find_symbol(libpot, "argonne_v14_potential_MOD_pot_v14")
-
-"""
-Convert total isospin projection to channel type string for Nijmegen/Reid potentials
-"""
-function tz_to_channel_type(tz::Int)::String
-    if tz == -1
-        return "NN"
-    elseif tz == 0
-        return "NP"
-    elseif tz == 1
-        return "PP"
-    else
-        return "NP"  # Default case
-    end
-end
 
 """
 Call the AV18 potential with proper parameters
+
+Arguments:
+- lpot: switch for potential choice
+  - Argonne models:
+    - 1: av18
+    - 2: av8'
+    - 3: av6'
+    - 4: av4'
+    - 5: avx'
+    - 6: av2'
+    - 7: av1'
+    - 8: modified av8'
+  - Super-Soft Core models:
+    - 101: sscc v14
+    - 102: sscc v8'
+    - 108: modified sscc v8'
+- l: orbital angular momentum of pair (0,1,2,...)
+- s: total spin of pair (0 or 1)
+- j: total angular momentum of pair (0,1,2,...)
+- t: total isospin of pair (0 or 1)
+- t1z: isospin of particle 1 (1 for p, -1 for n)
+- t2z: isospin of particle 2 (1 for p, -1 for n)
+- r: separation in fm
 """
 function call_av18(lpot::Int, l::Int, s::Int, j::Int, t::Int, t1z::Int, t2z::Int, r::Float64)
     # Create output array for the potential
@@ -112,89 +95,31 @@ function call_av18(lpot::Int, l::Int, s::Int, j::Int, t::Int, t1z::Int, t2z::Int
 end
 
 """
-Call the Nijmegen potential
+Map potential type string to lpot parameter value
 """
-function call_nijmegen(l::Int, s::Int, j::Int, type::String, r::Float64)
-    # Call the Fortran function using ccall for diagonal elements
-    result = ccall(
-        potn_ptr,
-        Float64,
-        (Ref{Int32}, Ref{Int32}, Ref{Int32}, Cstring, Ref{Float64}),
-        Int32(l), Int32(s), Int32(j), type, r
+function potential_type_to_lpot(potential_type::String)::Int
+    potential_map = Dict(
+        "AV18" => 1,       # Argonne v18
+        "AV8" => 2,        # Argonne v8'
+        "AV6" => 3,        # Argonne v6'
+        "AV4" => 4,        # Argonne v4'
+        "AVX" => 5,        # Argonne vX'
+        "AV2" => 6,        # Argonne v2'
+        "AV1" => 7,        # Argonne v1'
+        "AV8M" => 8,       # Modified Argonne v8'
+        "SSCC_V14" => 101, # Super-Soft Core (C) v14
+        "SSCC_V8" => 102,  # Super-Soft Core (C) v8'
+        "SSCC_V8M" => 108  # Modified Super-Soft Core (C) v8'
     )
     
-    return result
-end
-
-"""
-Call the Nijmegen potential coupling term
-"""
-function call_nijmegen_coupling(l::Int, s::Int, j::Int, type::String, r::Float64)
-    # Call the Fortran function using ccall for off-diagonal elements
-    result = ccall(
-        pot_c_ptr,
-        Float64,
-        (Ref{Int32}, Ref{Int32}, Ref{Int32}, Cstring, Ref{Float64}),
-        Int32(l), Int32(s), Int32(j), type, r
-    )
-    
-    return result
-end
-
-"""
-Call the Reid93 potential
-"""
-function call_reid(l::Int, s::Int, j::Int, type::String, r::Float64)
-    # Call the Fortran function using ccall for diagonal elements
-    result = ccall(
-        pot_r_ptr,
-        Float64,
-        (Ref{Int32}, Ref{Int32}, Ref{Int32}, Cstring, Ref{Float64}),
-        Int32(l), Int32(s), Int32(j), type, r
-    )
-    
-    return result
-end
-
-"""
-Call the Reid93 potential coupling term
-"""
-function call_reid_coupling(l::Int, s::Int, j::Int, type::String, r::Float64)
-    # Call the Fortran function using ccall for off-diagonal elements
-    result = ccall(
-        pot_c_r_ptr,
-        Float64,
-        (Ref{Int32}, Ref{Int32}, Ref{Int32}, Cstring, Ref{Float64}),
-        Int32(l), Int32(s), Int32(j), type, r
-    )
-    
-    return result
-end
-
-"""
-Call the AV14 potential
-"""
-function call_av14(r::Float64)
-    # Create a large enough array to hold the potential matrix
-    # The AV14 potential is returned as potential(0:5, 0:5, 0:1, 0:4)
-    vvv = zeros(Float64, 6, 6, 2, 5)
-    
-    # Call the Fortran function
-    ccall(
-        pot_v14_ptr,
-        Cvoid,
-        (Ref{Float64}, Ref{Float64}),
-        r, vvv
-    )
-    
-    return vvv
+    return get(potential_map, uppercase(potential_type), 1)  # Default to AV18 if not found
 end
 
 """
 Calculate the potential matrix for given parameters
 """
 function potential_matrix(
-    potential_type::String,  # Changed from PotentialType to String
+    potential_type::String,
     r::Float64,
     angular_momenta::Vector{Int},  # l values for each channel
     s::Int,                        # total spin
@@ -213,8 +138,17 @@ function potential_matrix(
         return potential
     end
     
-    # Determine channel type based on tz
-    channel_type = tz_to_channel_type(tz)
+    # Convert tz to nucleon isospins for Argonne potentials
+    # For simplicity, we're using a convention here:
+    # t1z = -1 (neutron), t2z = 1 (proton) for NP
+    # t1z = -1 (neutron), t2z = -1 (neutron) for NN
+    # t1z = 1 (proton), t2z = 1 (proton) for PP
+    t1z, t2z = -1, -1  # Default to NN
+    if tz == 0
+        t1z, t2z = -1, 1  # NP
+    elseif tz == 1
+        t1z, t2z = 1, 1   # PP
+    end
     
     # Calculate potential matrix elements
     for ia in 1:n_channels
@@ -222,44 +156,16 @@ function potential_matrix(
             l_ia = angular_momenta[ia]
             l_ib = angular_momenta[ib]
             
-            # Choose the appropriate potential model (using string comparison)
-            if potential_type == "AV8"
-                if r < 140.0  # Distance cutoff
-                    if ia == ib  # Diagonal element
-                        # For AV8, lpot=2 selects the v8' version
-                        potential[ia, ib] = call_av18(2, min(l_ia, l_ib), s, j, t, -1, 1, r)[1, 1]
-                    else  # Off-diagonal element (coupled channels)
-                        vv2 = call_av18(2, min(l_ia, l_ib), s, j, t, -1, 1, r)
-                        potential[ia, ib] = vv2[1, 2]
-                    end
-                end
-            elseif potential_type == "NIJM"
+            # For Argonne and SSCC potentials
+            if r < 140.0  # Distance cutoff
+                lpot = potential_type_to_lpot(potential_type)
+                
                 if ia == ib  # Diagonal element
-                    # Important: Nijmegen takes 2*l, 2*s, 2*j as arguments
-                    potential[ia, ib] = call_nijmegen(2*l_ia, 2*s, 2*j, channel_type, r)
+                    potential[ia, ib] = call_av18(lpot, l_ia, s, j, t, t1z, t2z, r)[1, 1]
                 else  # Off-diagonal element (coupled channels)
-                    potential[ia, ib] = call_nijmegen_coupling(2*min(l_ia, l_ib), 2*s, 2*j, channel_type, r)
-                end
-            elseif potential_type == "REID"
-                if ia == ib  # Diagonal element
-                    # Important: Reid93 also takes 2*l, 2*s, 2*j as arguments
-                    potential[ia, ib] = call_reid(2*l_ia, 2*s, 2*j, channel_type, r)
-                else  # Off-diagonal element (coupled channels)
-                    potential[ia, ib] = call_reid_coupling(2*min(l_ia, l_ib), 2*s, 2*j, channel_type, r)
-                end
-            elseif potential_type == "AV14"
-                vvv = call_av14(r)
-                # Julia is 1-indexed, but Fortran starts from 0, so we add 1
-                potential[ia, ib] = vvv[l_ia+1, l_ib+1, s+1, j+1]
-            elseif potential_type == "AV18"
-                if r < 140.0  # Distance cutoff
-                    if ia == ib  # Diagonal element
-                        # For AV18, lpot=1 selects the full v18 version
-                        potential[ia, ib] = call_av18(1, min(l_ia, l_ib), s, j, t, -1, 1, r)[1, 1]
-                    else  # Off-diagonal element (coupled channels)
-                        vv2 = call_av18(1, min(l_ia, l_ib), s, j, t, -1, 1, r)
-                        potential[ia, ib] = vv2[1, 2]
-                    end
+                    # Using proper l values for each channel
+                    vv2 = call_av18(lpot, min(l_ia, l_ib), s, j, t, t1z, t2z, r)
+                    potential[ia, ib] = vv2[1, 2]
                 end
             end
         end

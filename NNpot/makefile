@@ -30,7 +30,7 @@ INSTALL_DIR = $(HOME)/lib
 
 # Source files
 F77_SOURCES = av18pot.f 
-F90_SOURCES = nijmengen.f90 av14pot.f90
+F90_SOURCES = 
 
 # Object files
 F77_OBJECTS = $(F77_SOURCES:.f=.o)
