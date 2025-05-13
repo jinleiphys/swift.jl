@@ -1,7 +1,7 @@
 module Gcoefficient
 using WignerSymbols
 using SphericalHarmonics
-export Gαα,  YYcoupling, initialY,computeGcoffecient
+export computeGcoffecient
 
 
 # Yλout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-

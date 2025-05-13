@@ -67,6 +67,8 @@ function initialmesh(nθ::Int,nx::Int,ny::Int,
     grid.yi = Vector{Float64}(undef, ny)
     grid.dyi = Vector{Float64}(undef, ny)
     grid.yy = Vector{Float64}(undef, ny)
+    grid.ϕx = Vector{Float64}(undef, nx)
+    grid.ϕy = Vector{Float64}(undef, ny)
    
 
     grid.cosθi, grid.dcosθi = gausslegendre(nθ)   
