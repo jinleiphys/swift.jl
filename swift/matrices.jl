@@ -10,6 +10,15 @@ const ħ=197.3269718 # MeV. fm
 
 # 1.008665 amu for neutron  amu=931.49432 MeV
 
+function Rxy_matrix(α,grid)
+# the channel index can be computed by i(iα,ix, iy) = (iα-1) * grid.nx * grid.ny + (ix-1)*grid.ny + iy
+
+
+
+ end
+
+
+
 
  function T_matrix(α,grid) 
 """
@@ -275,151 +284,203 @@ end
 
 
 """
-    cubherm_dp(xold::Vector{Float64}, xnew::Vector{Float64}) -> (spl::Matrix{Float64}, index::Matrix{Int})
+    cubherm_interp(xold::Vector{Float64}, yold::Vector{Float64}, xnew::Vector{Float64}) -> Vector{Float64}
 
-Calculate cubic Hermitian splines for interpolation from old grid points to new points.
+Perform cubic Hermitian spline interpolation from old grid points to new points.
 
 # Arguments
 - `xold`: Array of old grid points
+- `yold`: Array of function values at the old grid points
 - `xnew`: Array of new points where interpolation is desired
 
 # Returns
-- `spl`: Matrix where spl[j,i] contains spline elements for the 4 nearest old grid points
-- `index`: Matrix where index[j,i] contains indices to the relevant old grid points
+- `ynew`: Array of interpolated function values at the new points
 
 The interpolating functions are cubic Hermitian splines. The first derivatives at the grid 
 points are calculated from a parabola through the actual grid point and its two neighbors.
 For end points, the parabola is taken through the two right or left neighbors.
-
-In the calling routine, interpolated values are calculated as:
-    ynew[j] = sum(spl[j,i] * yold[index[j,i]] for i in 1:4)
-
-Originally by Dirk Hueber, 08.02.1996
 """
-function cubherm_dp(xold::Vector{Float64}, xnew::Vector{Float64})
+function cubherm_interp(xold::Vector{Float64}, yold::Vector{Float64}, xnew::Vector{Float64})
     n = length(xold)
     m = length(xnew)
     
-    # Initialize output arrays
-    spl = zeros(Float64, m, 4)
-    index = zeros(Int, m, 4)
-    
-    # Check if we have enough points for interpolation
-    enough = n >= 3
-    
-    # Find initial indices
-    for j in 1:m
-        index[j, 2] = 1
+    # Check if input arrays have consistent dimensions
+    if length(yold) != n
+        throw(ArgumentError("xold and yold must have the same length"))
     end
     
-    # Determine correct indices
-    for i in 1:n
-        for j in 1:m
-            if xnew[j] > xold[i]
-                index[j, 2] = i
-            end
+    # Check if we have enough points for proper cubic interpolation
+    if n < 3
+        # Fall back to simpler interpolation for small grid sizes
+        if n == 1
+            return fill(yold[1], m)
+        elseif n == 2
+            # Linear interpolation for 2 points
+            return [yold[1] + (x - xold[1]) * (yold[2] - yold[1]) / (xold[2] - xold[1]) for x in xnew]
         end
     end
     
-    # Adjust indices for interpolation
+    # Ensure xold is sorted (required for interpolation)
+    if !issorted(xold)
+        throw(ArgumentError("xold must be sorted in ascending order"))
+    end
+    
+    # Initialize output array
+    ynew = zeros(Float64, m)
+    
+    # Process each new point
     for j in 1:m
-        index[j, 2] = min(index[j, 2], n-1)
-        index[j, 1] = index[j, 2] - 1
-        index[j, 3] = index[j, 2] + 1
-        index[j, 4] = index[j, 2] + 2
+        x = xnew[j]
         
-        # Handle boundary cases
-        if index[j, 1] == 0
-            index[j, 1] = 3
-        end
-        if index[j, 4] == n+1
-            index[j, 4] = n-2
-        end
-    end
-    
-    # Calculate the spline coefficients
-    for j in 1:m
-        if xnew[j] <= xold[n] && enough
-            if xnew[j] < xold[2]  # Linear interpolation for values close to threshold
-                index[j, 2] = 1
-                index[j, 3] = 2
-                index[j, 1] = 1
-                index[j, 4] = 2
-                
-                spl[j, 2] = (xnew[j] - xold[2]) / (xold[1] - xold[2])
-                spl[j, 3] = (xnew[j] - xold[1]) / (xold[2] - xold[1])
-                spl[j, 1] = 0.0
-                spl[j, 4] = 0.0
+        # Handle extrapolation beyond grid bounds
+        if x <= xold[1]
+            # Extrapolate below the grid
+            if n >= 2
+                ynew[j] = yold[1] + (x - xold[1]) * (yold[2] - yold[1]) / (xold[2] - xold[1])
             else
-                i0 = index[j, 1]
-                i1 = index[j, 2]
-                i2 = index[j, 3]
-                i3 = index[j, 4]
-                
-                x0 = xold[i0]
-                x1 = xold[i1]
-                x2 = xold[i2]
-                x3 = xold[i3]
-                
-                # Factors for the derivatives
-                d10 = x1 - x0
-                d21 = x2 - x1
-                d32 = x3 - x2
-                d20 = x2 - x0
-                d31 = x3 - x1
-                
-                dfak13 = (d21/d10 - d10/d21) / d20
-                dfak14 = -d32 / (d21 * d31)
-                dfak23 = d10 / (d21 * d20)
-                dfak24 = (d32/d21 - d21/d32) / d31
-                dfak03 = -d21 / (d10 * d20)
-                dfak34 = d21 / (d32 * d31)
-                
-                # The cubic Hermitian splines
-                xn = xnew[j]
-                dn1 = xn - x1
-                d2n = x2 - xn
-                phidiv = 1.0 / (d21 * d21 * d21)
-                phi1 = d2n * d2n * phidiv * (d21 + 2.0 * dn1)
-                phi2 = dn1 * dn1 * phidiv * (d21 + 2.0 * d2n)
-                phidiv = phidiv * d21 * dn1 * d2n
-                phi3 = phidiv * d2n
-                phi4 = -phidiv * dn1
-                
-                # Combining everything to the final factors
-                spl[j, 2] = phi1 + phi3 * dfak13 + phi4 * dfak14
-                spl[j, 3] = phi2 + phi3 * dfak23 + phi4 * dfak24
-                spl[j, 1] = phi3 * dfak03
-                spl[j, 4] = phi4 * dfak34
-                
-                # Interpolation of q*f(q)
-                spl[j, 2] *= x1 / xn
-                spl[j, 3] *= x2 / xn
-                spl[j, 1] *= x0 / xn
-                spl[j, 4] *= x3 / xn
+                ynew[j] = yold[1]
             end
+            continue
+        elseif x >= xold[n]
+            # Extrapolate above the grid
+            if n >= 2
+                ynew[j] = yold[n-1] + (x - xold[n-1]) * (yold[n] - yold[n-1]) / (xold[n] - xold[n-1])
+            else
+                ynew[j] = yold[n]
+            end
+            continue
+        end
+        
+        # Find the right interval using binary search
+        idx2 = searchsortedlast(xold, x)
+        idx3 = min(idx2 + 1, n)
+        
+        # For cubic interpolation we need 4 points
+        # Use special handling for points near edges
+        if idx2 == 1
+            # Near the left edge of the grid
+            idx1 = 1
+            idx2 = 1
+            idx3 = 2
+            idx4 = 3
+        elseif idx2 >= n-1
+            # Near the right edge of the grid
+            idx1 = n-3
+            idx2 = n-2
+            idx3 = n-1
+            idx4 = n
         else
-            # Handle out-of-range points
-            index[j, 2] = 1
-            index[j, 3] = 1
-            index[j, 1] = 1
-            index[j, 4] = 1
+            # Regular case: we're within the grid
+            idx1 = idx2 - 1
+            idx4 = idx3 + 1
+        end
+        
+        # Safety bounds check
+        idx1 = max(1, min(idx1, n))
+        idx2 = max(1, min(idx2, n))
+        idx3 = max(1, min(idx3, n))
+        idx4 = max(1, min(idx4, n))
+        
+        # Use linear interpolation near the grid edges
+        if idx2 == 1 || idx3 == n
+            # Linear interpolation between idx2 and idx3
+            t = (x - xold[idx2]) / (xold[idx3] - xold[idx2])
+            ynew[j] = (1.0 - t) * yold[idx2] + t * yold[idx3]
+        else
+            x0 = xold[idx1]
+            x1 = xold[idx2]
+            x2 = xold[idx3]
+            x3 = xold[idx4]
             
-            spl[j, 2] = 0.0
-            spl[j, 3] = 0.0
-            spl[j, 1] = 0.0
-            spl[j, 4] = 0.0
+            # Check for very close points that could cause numerical issues
+            if abs(x1 - x0) < 1e-10 || abs(x2 - x1) < 1e-10 || abs(x3 - x2) < 1e-10
+                # Fall back to linear interpolation for numerical stability
+                t = (x - x1) / (x2 - x1)
+                ynew[j] = (1.0 - t) * yold[idx2] + t * yold[idx3]
+                continue
+            }
             
-            if n == 1
-                spl[j, 2] = 1.0
+            # Factors for the derivatives
+            d10 = x1 - x0
+            d21 = x2 - x1
+            d32 = x3 - x2
+            d20 = x2 - x0
+            d31 = x3 - x1
+            
+            # Check for potential division by zero
+            if abs(d20) < 1e-10 || abs(d31) < 1e-10 || abs(d21) < 1e-10
+                # Fall back to linear interpolation
+                t = (x - x1) / (x2 - x1)
+                ynew[j] = (1.0 - t) * yold[idx2] + t * yold[idx3]
+                continue
             end
+            
+            dfak13 = (d21/d10 - d10/d21) / d20
+            dfak14 = -d32 / (d21 * d31)
+            dfak23 = d10 / (d21 * d20)
+            dfak24 = (d32/d21 - d21/d32) / d31
+            dfak03 = -d21 / (d10 * d20)
+            dfak34 = d21 / (d32 * d31)
+            
+            # The cubic Hermitian splines
+            dn1 = x - x1
+            d2n = x2 - x
+            
+            # Avoid division by very small numbers
+            if abs(d21) < 1e-10
+                # Fall back to linear interpolation
+                t = (x - x1) / (x2 - x1)
+                ynew[j] = (1.0 - t) * yold[idx2] + t * yold[idx3]
+                continue
+            end
+            
+            phidiv = 1.0 / (d21 * d21 * d21)
+            phi1 = d2n * d2n * phidiv * (d21 + 2.0 * dn1)
+            phi2 = dn1 * dn1 * phidiv * (d21 + 2.0 * d2n)
+            phidiv = phidiv * d21 * dn1 * d2n
+            phi3 = phidiv * d2n
+            phi4 = -phidiv * dn1
+            
+            # Calculate weights
+            w1 = phi3 * dfak03
+            w2 = phi1 + phi3 * dfak13 + phi4 * dfak14
+            w3 = phi2 + phi3 * dfak23 + phi4 * dfak24
+            w4 = phi4 * dfak34
+            
+            # Interpolation of q*f(q) if needed
+            # Commented out as it depends on application specifics
+            # Uncomment if this scaling is needed for your application
+            # if x != 0.0 # Avoid division by zero
+            #     w1 *= x0 / x
+            #     w2 *= x1 / x
+            #     w3 *= x2 / x
+            #     w4 *= x3 / x
+            # end
+            
+            # Compute the interpolated value
+            ynew[j] = w1 * yold[idx1] + w2 * yold[idx2] + w3 * yold[idx3] + w4 * yold[idx4]
         end
     end
     
-    return spl, index
+    return ynew
 end
 
+"""
+    cubherm_interp_point(xold::Vector{Float64}, yold::Vector{Float64}, x::Float64) -> Float64
 
+Perform cubic Hermitian spline interpolation for a single point.
+
+# Arguments
+- `xold`: Array of old grid points
+- `yold`: Array of function values at the old grid points
+- `x`: Single point where interpolation is desired
+
+# Returns
+- The interpolated function value at point x
+"""
+function cubherm_interp_point(xold::Vector{Float64}, yold::Vector{Float64}, x::Float64)
+    return cubherm_interp(xold, yold, [x])[1]
+end
 
 
 
