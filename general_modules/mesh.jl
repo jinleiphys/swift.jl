@@ -35,11 +35,13 @@ mutable struct meshset # channel index for the three body coupling
     hsy::Float64
     xx::Vector{Float64}
     yy::Vector{Float64}
+    ϕx::Vector{Float64}
+    ϕy::Vector{Float64}
 
     
     # Constructor with default initialization
     function meshset()
-        new(20, 40, 40, Float64[], Float64[], Float64[], Float64[], Float64[], Float64[],30.0,30.0,0.0,0.0,0.0,Float64[], Float64[])
+        new(20, 40, 40, Float64[], Float64[], Float64[], Float64[], Float64[], Float64[],30.0,30.0,0.0,0.0,0.0,Float64[], Float64[], Float64[], Float64[])
     end
 end
 
@@ -72,6 +74,9 @@ function initialmesh(nθ::Int,nx::Int,ny::Int,
     grid.yy, dry =  gausslaguerre(ny, alpha) # unscaled Laguerre points
     grid.xi, grid.dxi, grid.hsx = scale_gausslaguerre(nx,xmax,0.0)
     grid.yi, grid.dyi, grid.hsy = scale_gausslaguerre(ny,ymax,0.0)
+    
+    grid.ϕx .= 1.0 ./ sqrt.(grid.dxi)
+    grid.ϕy .= 1.0 ./ sqrt.(grid.dyi)
 
 
 
