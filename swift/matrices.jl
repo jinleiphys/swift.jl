@@ -7,12 +7,13 @@ include("laguerre.jl")
 using .Laguerre
 include("Gcoefficient.jl")
 using .Gcoefficient
+using LinearAlgebra
 
 const amu= 931.49432 # MeV
 const m=1.008665 # amu
 const ħ=197.3269718 # MeV. fm
 
-export cubherm_interp_point
+export Rxy_matrix, T_matrix, V_matrix
 
 # 1.008665 amu for neutron  amu=931.49432 MeV
 
@@ -129,7 +130,9 @@ end
     end 
  end 
 
- return Tx_matrix, Ty_matrix
+ Tmatrix = Tx_matrix + Ty_matrix
+
+ return Tmatrix
  end 
 
 
@@ -168,6 +171,8 @@ end
     
     # Get nuclear potential matrix
     v12 = pot_nucl(α, grid, potname)
+
+    Iy = Matrix{Float64}(I, grid.ny, grid.ny)
     
     # Convert to integer values for loop limits
     nt1 = Int(2 * α.t1)
@@ -181,20 +186,22 @@ end
             col_start = (j - 1) * grid.nx + 1
             col_end = j * grid.nx
             
-            for nmt1 in -nt1:nt1
+            for nmt1 in -nt1:2:nt1
                 mt1 = nmt1 / 2.0
-                for nmt2 in -nt2:nt2
+                for nmt2 in -nt2:2:nt2
                     mt2 = nmt2 / 2.0
-                    for nmt1p in -nt1:nt1
+                    for nmt1p in -nt1:2:nt1
                         mt1p = nmt1p / 2.0
-                        for nmt2p in -nt2:nt2
+                        for nmt2p in -nt2:2:nt2
                             mt2p = nmt2p / 2.0
                             
                             # Conservation of total m_t
                             if nmt1 + nmt2 == nmt1p + nmt2p
                                 # Total magnetic quantum number
                                 mt_total = mt1 + mt2
-                                
+                                if abs(α.MT - mt_total) > α.t3 || abs(mt_total) > α.T12[i] || abs(mt_total) > α.T12[j]
+                                    continue
+                                end
                                 # Common Clebsch-Gordan coefficients that can be precomputed
                                 cg1 = clebschgordan(α.t1, mt1, α.t2, mt2, α.T12[i], mt_total)
                                 cg2 = clebschgordan(α.t1, mt1p, α.t2, mt2p, α.T12[j], mt_total)
@@ -219,8 +226,10 @@ end
             end
         end
     end
+
+    Vmatrix = Vαx ⊗ Iy  # Kronecker product with identity matrix
     
-    return Vαx  # Added return statement
+    return Vmatrix  # Added return statement
 end
 
  function pot_nucl(α, grid, potname)
@@ -235,19 +244,20 @@ end
     for j in 1:α.nchmax
         for i in 1:α.nchmax
             if checkα(i, j, α)
+                li=[α.l[i]]
                 # Compute the potential matrix elements
                 if Int(α.J12[i]) == 0
                     if α.l[i] != α.l[j]
                         error("error: the channel is not allowed")
                     end 
                     for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
-                        v = potential_matrix(potname, grid.xi[ir], α.l[i], Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
+                        v = potential_matrix(potname, grid.xi[ir],li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
                         v12[ir, ir, i, j, 1] = v[1, 1]
                         if α.MT > 0
-                            v = potential_matrix(potname, grid.xi[ir], α.l[i], Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                             v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                         else
-                            v = potential_matrix(potname, grid.xi[ir], α.l[i], Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                             v12[ir, ir, i, j, 2] = v[1, 1]
                         end
                     end 
@@ -257,13 +267,13 @@ end
                         error("error: the channel is not allowed")
                     end
                     for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
-                        v = potential_matrix(potname, grid.xi[ir], α.l[i], Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
+                        v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
                         v12[ir, ir, i, j, 1] = v[1, 1]
                         if α.MT > 0
-                            v = potential_matrix(potname, grid.xi[ir], α.l[i], Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                             v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                         else
-                            v = potential_matrix(potname, grid.xi[ir], α.l[i], Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                             v12[ir, ir, i, j, 2] = v[1, 1]
                         end
                     end

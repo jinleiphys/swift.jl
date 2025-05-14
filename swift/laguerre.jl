@@ -1,5 +1,5 @@
-module laguerre 
-export laguerre_laguerre_basis
+module Laguerre 
+export lagrange_laguerre_basis
 # module used to generate the Lagrange-laguerre functions 
 function lagrange_laguerre_basis(x::Number, 
                                 laguerre_rr::Vector{<:Number}, 
