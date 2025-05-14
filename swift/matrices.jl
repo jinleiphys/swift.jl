@@ -21,25 +21,28 @@ function Rxy_matrix(α, grid)
     # the channel index can be computed by i(iα,ix, iy) = (iα-1) * grid.nx * grid.ny + (ix-1)*grid.ny + iy
     Rxy_32 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny) # Initialize Rxy_32 matrix
     Rxy_31 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny) # Initialize Rxy_31 matrix
-    Gαα = computeGcoffecient(α, grid)
+    
+    # Fixed typo in function name
+    Gαα = computeGcoefficient(α, grid)
     
     # compute the Rxy matrix from α2 to α3
     a = -0.5; b = -1.0; c = 0.75; d = -0.5
-    for iα in 1:α.nchmax
-        for ix in 1:grid.nx
-            xa = grid.xi[ix]
-            for iy in 1:grid.ny
-                ya = grid.yi[iy]
-                i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
-                for iθ in 1:grid.nθ
-                    cosθ = grid.cosθi[iθ]
-                    dcosθ = grid.dcosθi[iθ]
-                    πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
-                    ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
+    for ix in 1:grid.nx
+        xa = grid.xi[ix]
+        for iy in 1:grid.ny
+            ya = grid.yi[iy]
+            for iθ in 1:grid.nθ
+                cosθ = grid.cosθi[iθ]
+                dcosθ = grid.dcosθi[iθ]
+                πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
+                ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
                 
-                    fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α)
-                    fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α)
-                    
+                
+                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α)
+                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α)
+                
+                for iα in 1:α.nchmax
+                    i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
                     for iαp in 1:α.nchmax
                         adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 2] * xa * ya / (πb * ξb)
                         for ixp in 1:grid.nx
@@ -56,21 +59,22 @@ function Rxy_matrix(α, grid)
     
     # compute the Rxy matrix from α1 to α3
     a = -0.5; b = 1.0; c = -0.75; d = -0.5
-    for iα in 1:α.nchmax
-        for ix in 1:grid.nx
-            xa = grid.xi[ix]
-            for iy in 1:grid.ny
-                ya = grid.yi[iy]
-                i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
-                for iθ in 1:grid.nθ
-                    cosθ = grid.cosθi[iθ]
-                    dcosθ = grid.dcosθi[iθ]
-                    πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
-                    ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
-                    
-                    fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α)
-                    fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α)
-                    
+    for ix in 1:grid.nx
+        xa = grid.xi[ix]
+        for iy in 1:grid.ny
+            ya = grid.yi[iy]
+            for iθ in 1:grid.nθ
+                cosθ = grid.cosθi[iθ]
+                dcosθ = grid.dcosθi[iθ]
+                πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
+                ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
+                
+                
+                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α)
+                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α)
+                
+                for iα in 1:α.nchmax
+                    i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
                     for iαp in 1:α.nchmax
                         adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 1] * xa * ya / (πb * ξb)
                         for ixp in 1:grid.nx
