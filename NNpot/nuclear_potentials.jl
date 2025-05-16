@@ -109,7 +109,8 @@ function potential_type_to_lpot(potential_type::String)::Int
         "AV8M" => 8,       # Modified Argonne v8'
         "SSCC_V14" => 101, # Super-Soft Core (C) v14
         "SSCC_V8" => 102,  # Super-Soft Core (C) v8'
-        "SSCC_V8M" => 108  # Modified Super-Soft Core (C) v8'
+        "SSCC_V8M" => 108, # Modified Super-Soft Core (C) v8'
+        "MT" => 200        # Malfliet-Tjon potential
     )
     
     return get(potential_map, uppercase(potential_type), 1)  # Default to AV18 if not found
@@ -138,11 +139,39 @@ function potential_matrix(
         return potential
     end
     
+    # Get the potential type code
+    lpot = potential_type_to_lpot(potential_type)
+    
+    # Special case for MT potential
+    if lpot == 200  # MT potential
+        # MT potential is only defined for s-waves (l=0)
+        for ia in 1:n_channels
+            for ib in 1:n_channels
+                l_ia = angular_momenta[ia]
+                l_ib = angular_momenta[ib]
+                
+                # Only calculate for s-waves and diagonal elements
+                if l_ia == 0 && l_ib == 0 && ia == ib
+                    # Determine wave type based on spin
+                    if s == 0
+                        wave_type = "1S0"
+                    elseif s == 1
+                        wave_type = "3S1"
+                    else
+                        continue  # Skip for other spin values
+                    end
+                    
+                    # Calculate MT potential
+                    potential[ia, ib] = calculate_mt_potential(wave_type, r)
+                end
+            end
+        end
+        
+        return potential
+    end
+    
+    # For Argonne and SSCC potentials - the original implementation continues below
     # Convert tz to nucleon isospins for Argonne potentials
-    # For simplicity, we're using a convention here:
-    # t1z = -1 (neutron), t2z = 1 (proton) for NP
-    # t1z = -1 (neutron), t2z = -1 (neutron) for NN
-    # t1z = 1 (proton), t2z = 1 (proton) for PP
     t1z, t2z = -1, -1  # Default to NN
     if tz == 0
         t1z, t2z = -1, 1  # NP
@@ -150,7 +179,7 @@ function potential_matrix(
         t1z, t2z = 1, 1   # PP
     end
     
-    # Calculate potential matrix elements
+    # Calculate potential matrix elements for non-MT potentials
     for ia in 1:n_channels
         for ib in 1:n_channels
             l_ia = angular_momenta[ia]
@@ -158,8 +187,6 @@ function potential_matrix(
             
             # For Argonne and SSCC potentials
             if r < 140.0  # Distance cutoff
-                lpot = potential_type_to_lpot(potential_type)
-                
                 if ia == ib  # Diagonal element
                     potential[ia, ib] = call_av18(lpot, l_ia, s, j, t, t1z, t2z, r)[1, 1]
                 else  # Off-diagonal element (coupled channels)
@@ -187,6 +214,44 @@ function debug_library_symbols()
         println("Could not run nm command: $e")
         println("Try running in terminal: nm $(Libdl.dlpath(libpot))")
     end
+end
+
+
+"""
+Calculate the Malfliet-Tjon (MT) potential for given parameters
+
+MT potential form:
+V(r) = V_r * exp(-μ_r * r) / r - V_a * exp(-μ_a * r) / r
+
+Arguments:
+- wave_type: string, either "1S0" or "3S1" for different parameter sets
+- r: separation in fm
+"""
+function calculate_mt_potential(wave_type::String, r::Float64)
+    # Constants for the potential
+    μ_r = 3.11  # fm^-1
+    μ_a = 1.55  # fm^-1
+    
+    # Different parameters based on wave type
+    if uppercase(wave_type) == "1S0"
+        V_r = 1438.72  # MeV·fm
+        V_a = 513.968  # MeV·fm
+    elseif uppercase(wave_type) == "3S1"
+        V_r = 1438.72  # MeV·fm
+        V_a = 626.885  # MeV·fm
+    else
+        error("Invalid wave type for MT potential. Must be '1S0' or '3S1'")
+    end
+    
+    # Return zero for r = 0 to avoid division by zero
+    if r ≈ 0.0
+        return 0.0
+    end
+    
+    # Calculate the potential
+    V = V_r * exp(-μ_r * r) / r - V_a * exp(-μ_a * r) / r
+    
+    return V
 end
 
 end # module
