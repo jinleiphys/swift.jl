@@ -49,7 +49,7 @@ end
 # channel index of the three body channels
 #|(l_{12} (s_1 s_2) s_{12}) J_{12}, (\lambda_3 s_3) J_3, J; (t_1 t_2) T_{12}, t_3, T M_T\rangle.
 # Function to count and create three-body channels
-function α3b(J::Float64, T::Float64, parity::Int, 
+function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int, 
     lmax::Int, lmin::Int, 
     λmax::Int, λmin::Int, 
     s1::Float64, s2::Float64, s3::Float64, 
@@ -87,7 +87,7 @@ function α3b(J::Float64, T::Float64, parity::Int,
                             end
                             for nT12 in Int(2*abs(t1-t2)):2:Int(2*(t1+t2))
                                 T12 = nT12/2.0
-                                if (-1)^(l+s12+T12) != -1
+                                if (-1)^(l+s12+T12) != -1 && fermion
                                     continue
                                 end
                                 for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))  # Fixed min/max calculation
@@ -149,7 +149,7 @@ function α3b(J::Float64, T::Float64, parity::Int,
                                 
                                 for nT12 in Int(2*abs(t1-t2)):2:Int(2*(t1+t2))
                                     T12 = nT12/2.0
-                                    if (-1)^(l+s12+T12) !=-1
+                                    if (-1)^(l+s12+T12) !=-1 && fermion
                                         continue
                                     end
                                     for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))
