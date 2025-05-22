@@ -26,8 +26,8 @@ function Rxy_matrix(α, grid)
     Gαα = computeGcoefficient(α, grid)
     
     # compute the Rxy matrix from α2 to α3
-    a = -0.5; b = -1.0; c = 0.75; d = -0.5
-    # a =-0.5; c=-0.5 ; b = sqrt(3.0)/2.0; d = -sqrt(3.0)/2.0
+    # a = -0.5; b = -1.0; c = 0.75; d = -0.5
+    a =-0.5; c=-0.5 ; b = sqrt(3.0)/2.0; d = -sqrt(3.0)/2.0
     for ix in 1:grid.nx
         xa = grid.xi[ix]
         for iy in 1:grid.ny
@@ -38,19 +38,20 @@ function Rxy_matrix(α, grid)
                 πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
                 
-                println("πb: ", πb, " ξb: ", ξb)
-                
                 fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
                 fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
                 
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
                     for iαp in 1:α.nchmax
-                        adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 2] * xa * ya / (πb * ξb)
+                        adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 2] * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy]) 
                         for ixp in 1:grid.nx
                             for iyp in 1:grid.ny
                                 ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
                                 Rxy_32[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
+                                if ixp ==1 && iyp == 1 && ix==1 && iy==1
+                                    println("x=", adj_factor * 2. ) 
+                                end
                             end
                         end
                     end
@@ -78,7 +79,7 @@ function Rxy_matrix(α, grid)
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
                     for iαp in 1:α.nchmax
-                        adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 1] * xa * ya / (πb * ξb)
+                        adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 1] * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy] )
                         for ixp in 1:grid.nx
                             for iyp in 1:grid.ny
                                 ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
