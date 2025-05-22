@@ -27,6 +27,7 @@ function Rxy_matrix(α, grid)
     
     # compute the Rxy matrix from α2 to α3
     a = -0.5; b = -1.0; c = 0.75; d = -0.5
+    # a =-0.5; c=-0.5 ; b = sqrt(3.0)/2.0; d = -sqrt(3.0)/2.0
     for ix in 1:grid.nx
         xa = grid.xi[ix]
         for iy in 1:grid.ny
@@ -37,6 +38,7 @@ function Rxy_matrix(α, grid)
                 πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
                 
+                println("πb: ", πb, " ξb: ", ξb)
                 
                 fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
                 fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
@@ -90,6 +92,7 @@ function Rxy_matrix(α, grid)
     end
     
     Rxy = Rxy_31 + Rxy_32
+    # Rxy = Rxy_32 + Rxy_32
     return Rxy
 end
 
