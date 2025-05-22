@@ -38,8 +38,8 @@ function Rxy_matrix(α, grid)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
                 
                 
-                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α)
-                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α)
+                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
+                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
                 
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
@@ -70,8 +70,8 @@ function Rxy_matrix(α, grid)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
                 
                 
-                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α)
-                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α)
+                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
+                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
                 
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
@@ -135,6 +135,8 @@ end
  end 
 
  Tmatrix = Tx_matrix + Ty_matrix
+
+ Tmatrix = Tx_matrix 
 
  return Tmatrix
  end 

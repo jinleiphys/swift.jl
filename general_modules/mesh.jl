@@ -74,8 +74,8 @@ function initialmesh(nθ::Int,nx::Int,ny::Int,
     grid.cosθi, grid.dcosθi = gausslegendre(nθ)   
     grid.xx, drx =  gausslaguerre(nx, alpha)  # unscaled Laguerre points
     grid.yy, dry =  gausslaguerre(ny, alpha) # unscaled Laguerre points
-    grid.xi, grid.dxi, grid.hsx = scale_gausslaguerre(nx,xmax,0.0)
-    grid.yi, grid.dyi, grid.hsy = scale_gausslaguerre(ny,ymax,0.0)
+    grid.xi, grid.dxi, grid.hsx = scale_gausslaguerre(nx,xmax,alpha)
+    grid.yi, grid.dyi, grid.hsy = scale_gausslaguerre(ny,ymax,alpha)
     
     grid.ϕx .= 1.0 ./ sqrt.(grid.dxi)
     grid.ϕy .= 1.0 ./ sqrt.(grid.dyi)

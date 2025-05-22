@@ -5,6 +5,7 @@ function lagrange_laguerre_basis(x::Number,
                                 laguerre_rr::Vector{<:Number}, 
                                 phi::Vector{<:Number}, 
                                 alpha::Float64,
+                                hs::Float64,
                                 theta::Float64=0.0)
     """
     Compute Lagrange-Laguerre basis functions at point x.
@@ -14,6 +15,7 @@ function lagrange_laguerre_basis(x::Number,
     - laguerre_rr: Array of Laguerre mesh points
     - phi: Precomputed normalization factors (equivalent to Lagrange functions at the mesh points)
     - alpha: Parameter in Laguerre weight function
+    - hs: Scaling factor for the x-coordinate
     - theta: Complex rotation angle in radians (default = 0.0)
     
     Returns:
@@ -27,7 +29,7 @@ function lagrange_laguerre_basis(x::Number,
     eitheta = exp(im * theta)
     
     # Rotated coordinate
-    r = x / eitheta
+    r = x / eitheta 
     
     # Initialize vector to store basis function values
     lag_func = zeros(Complex{Float64}, nr)
@@ -35,12 +37,12 @@ function lagrange_laguerre_basis(x::Number,
     # Compute each basis function
     for i_basis = 1:nr
         # Laguerre mesh point
-        xi = laguerre_rr[i_basis]
+        xi = laguerre_rr[i_basis] 
         
         # Initial part of the basis function with precomputed normalization
         lag_func[i_basis] = phi[i_basis] * 
                            (r/xi)^(alpha/2.0 + 1.0) * 
-                           exp(-(r-xi)/2.0)
+                           exp(-(r-xi)/2.0/hs)
         
         # Compute the product term
         prod = Complex{Float64}(1.0)
