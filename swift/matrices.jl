@@ -38,8 +38,8 @@ function Rxy_matrix(α, grid)
                 πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
                 
-                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
-                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
+                fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
+                fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
                 
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
@@ -50,7 +50,7 @@ function Rxy_matrix(α, grid)
                                 ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
                                 Rxy_32[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
                                 if ixp ==1 && iyp == 1 && ix==1 && iy==1
-                                    println("x=", adj_factor * 2. ) 
+                                    println("Rxy_32[i, ip]=",Rxy_32[i, ip]*2.)
                                 end
                             end
                         end
@@ -73,8 +73,8 @@ function Rxy_matrix(α, grid)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
                 
                 
-                fπb = lagrange_laguerre_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
-                fξb = lagrange_laguerre_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
+                fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
+                fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
                 
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
