@@ -10,9 +10,9 @@ module threebodybound
     Rxy=Rxy_matrix(α, grid)
     T=T_matrix(α,grid) 
     V=V_matrix(α, grid, "MT")
-    H=V*Rxy+T+V
+    # H=V*Rxy+T+V
 
-    H=V*Rxy
+    H=Rxy
 
     eigenvalues, eigenvectors = eigen(H)
 

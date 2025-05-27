@@ -77,8 +77,19 @@ function initialmesh(nθ::Int,nx::Int,ny::Int,
     grid.xi, grid.dxi, grid.hsx = scale_gausslaguerre(nx,xmax,alpha)
     grid.yi, grid.dyi, grid.hsy = scale_gausslaguerre(ny,ymax,alpha)
     
-    grid.ϕx .= 1.0 ./ sqrt.(grid.dxi)
-    grid.ϕy .= 1.0 ./ sqrt.(grid.dyi)
+    for i in 1:nx
+        grid.ϕx[i] = 1.0 / sqrt(grid.dxi[i])
+        if mod(i, 2) != 0
+           grid.ϕx[i] *= -1.0
+        end
+    end
+    for i in 1:ny
+        grid.ϕy[i]= 1.0 / sqrt(grid.dyi[i])
+        if mod(i, 2) != 0
+           grid.ϕy[i] *= -1.0
+        end
+    end
+
 
 
 
