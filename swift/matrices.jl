@@ -49,9 +49,9 @@ function Rxy_matrix(α, grid)
                             for iyp in 1:grid.ny
                                 ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
                                 Rxy_32[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
-                                if ixp ==1 && iy == 2 && iyp==1 
-                                    println("πb=",fπb[ixp],"    ξb=",fξb[iyp], " adj_factor=",adj_factor*2.)
-                                end
+                                # if ixp ==1 && iy == 2 && iyp==1 
+                                #     println("πb=",fπb[ixp],"    ξb=",fξb[iyp], " adj_factor=",adj_factor*2.)
+                                # end
                             end
                         end
                     end

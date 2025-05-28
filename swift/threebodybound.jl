@@ -10,15 +10,14 @@ module threebodybound
     Rxy=Rxy_matrix(α, grid)
     T=T_matrix(α,grid) 
     V=V_matrix(α, grid, "MT")
-    # H=V*Rxy+T+V
+    H=V*Rxy+T+V
 
-    H=Rxy
+    # H=V*Rxy
+    # for i in 1:size(H,1)
+    # println("T: ", T[i,144])
+    # end 
 
     eigenvalues, eigenvectors = eigen(H)
-
-    println("Eigenvalues: ", eigenvalues)
-
-
     
 
     # Extract the bound state energies and wave functions
