@@ -38,6 +38,7 @@ function bound2b(grid, potname)
     Tαx = T_matrix(α,grid) 
     V = V_matrix(α,grid,potname) 
 
+
     # V=gaussianpot(α,grid)
 
     # Construct the Hamiltonian matrix
@@ -182,10 +183,16 @@ function Tx(nx,xi,α0,l)
                 T[i,j] = (-1.0 / (12.0 * xi[i]^2)) * (xi[i]^2 - 2.0 * (2.0 * nx + α0 + 1.0) * xi[i] + α0^2 - 4.0) - 
                          (-1)^(i-j) / (4 * sqrt(xi[i] * xi[j])) + 
                          l * (l + 1) / xi[i]^2
+
+                # T[i,j] = (-1.0 / (12.0 * xi[i]^2)) * (xi[i]^2 - 2.0 * (2.0 * nx + α0 + 1.0) * xi[i] + α0^2 - 4.0) + 
+                #          l * (l + 1) / xi[i]^2
             else
                 # Off-diagonal elements 
                 T[i,j] = (-1.0)^(i-j) * (xi[i] + xi[j]) / (sqrt(xi[i] * xi[j]) * (xi[i] - xi[j])^2) - 
                          (-1)^(i-j) / (4 * sqrt(xi[i] * xi[j]))
+
+
+                # T[i,j] = (-1.0)^(i-j) * (xi[i] + xi[j]) / (sqrt(xi[i] * xi[j]) * (xi[i] - xi[j])^2) 
             end
         end
     end
