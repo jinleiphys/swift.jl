@@ -12,11 +12,6 @@ module threebodybound
     V=V_matrix(α, grid, "MT")
     H=V*Rxy+T+V
 
-    # H=V*Rxy
-    # for i in 1:size(H,1)
-    # println("T: ", T[i,144])
-    # end 
-
     eigenvalues, eigenvectors = eigen(H)
     
 

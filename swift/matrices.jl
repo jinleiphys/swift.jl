@@ -26,8 +26,8 @@ function Rxy_matrix(α, grid)
     Gαα = computeGcoefficient(α, grid)
     
     # compute the Rxy matrix from α2 to α3
-    # a = -0.5; b = -1.0; c = 0.75; d = -0.5
-    a =-0.5; d=-0.5 ; b = sqrt(3.0)/2.0; c = -sqrt(3.0)/2.0
+    a = -0.5; b = -1.0; c = 0.75; d = -0.5
+    # a =-0.5; d=-0.5 ; b = sqrt(3.0)/2.0; c = -sqrt(3.0)/2.0
     for ix in 1:grid.nx
         xa = grid.xi[ix]
         for iy in 1:grid.ny
@@ -92,8 +92,7 @@ function Rxy_matrix(α, grid)
         end
     end
     
-    # Rxy = Rxy_31 + Rxy_32
-    Rxy = Rxy_32 + Rxy_32
+    Rxy = Rxy_31 + Rxy_32
     return Rxy
 end
 
@@ -140,7 +139,6 @@ end
 
  Tmatrix = Tx_matrix + Ty_matrix
 
- Tmatrix = Tx_matrix 
 
  return Tmatrix
  end 
@@ -162,10 +160,15 @@ end
                 T[i,j] = (-1.0 / (12.0 * xi[i]^2)) * (xi[i]^2 - 2.0 * (2.0 * nx + α0 + 1.0) * xi[i] + α0^2 - 4.0) - 
                          (-1)^(i-j) / (4 * sqrt(xi[i] * xi[j])) + 
                          l * (l + 1) / xi[i]^2
+
+                # T[i,j] = (-1.0 / (12.0 * xi[i]^2)) * (xi[i]^2 - 2.0 * (2.0 * nx + α0 + 1.0) * xi[i] + α0^2 - 4.0) + 
+                #          l * (l + 1) / xi[i]^2
             else
                 # Off-diagonal elements 
                 T[i,j] = (-1.0)^(i-j) * (xi[i] + xi[j]) / (sqrt(xi[i] * xi[j]) * (xi[i] - xi[j])^2) - 
                          (-1)^(i-j) / (4 * sqrt(xi[i] * xi[j]))
+
+                # T[i,j] = (-1.0)^(i-j) * (xi[i] + xi[j]) / (sqrt(xi[i] * xi[j]) * (xi[i] - xi[j])^2) 
             end
         end
     end
