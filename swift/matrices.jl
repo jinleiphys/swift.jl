@@ -27,7 +27,6 @@ function Rxy_matrix(α, grid)
     
     # compute the Rxy matrix from α2 to α3
     a = -0.5; b = -1.0; c = 0.75; d = -0.5
-    # a =-0.5; d=-0.5 ; b = sqrt(3.0)/2.0; c = -sqrt(3.0)/2.0
     for ix in 1:grid.nx
         xa = grid.xi[ix]
         for iy in 1:grid.ny
@@ -49,9 +48,6 @@ function Rxy_matrix(α, grid)
                             for iyp in 1:grid.ny
                                 ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
                                 Rxy_32[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
-                                # if ixp ==1 && iy == 2 && iyp==1 
-                                #     println("πb=",fπb[ixp],"    ξb=",fξb[iyp], " adj_factor=",adj_factor*2.)
-                                # end
                             end
                         end
                     end
