@@ -235,7 +235,8 @@ function calculate_mt_potential(wave_type::String, r::Float64)
     # Different parameters based on wave type
     if uppercase(wave_type) == "1S0"
         V_r = 1438.72  # MeV·fm
-        V_a = 513.968  # MeV·fm
+        # V_a = 513.968  # MeV·fm
+        V_a = 626.885  # MeV·fm
     elseif uppercase(wave_type) == "3S1"
         V_r = 1438.72  # MeV·fm
         V_a = 626.885  # MeV·fm

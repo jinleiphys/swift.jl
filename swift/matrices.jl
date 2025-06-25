@@ -43,6 +43,7 @@ function Rxy_matrix(α, grid)
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
                     for iαp in 1:α.nchmax
+                        # println("Gαα= ", Gαα[iθ, iy, ix, iα, iαp, 2])
                         adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 2] * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy]) 
                         for ixp in 1:grid.nx
                             for iyp in 1:grid.ny
