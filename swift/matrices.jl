@@ -43,7 +43,6 @@ function Rxy_matrix(α, grid)
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
                     for iαp in 1:α.nchmax
-                        # println("Gαα= ", Gαα[iθ, iy, ix, iα, iαp, 2])
                         adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 2] * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy]) 
                         for ixp in 1:grid.nx
                             for iyp in 1:grid.ny
@@ -90,6 +89,7 @@ function Rxy_matrix(α, grid)
     end
     
     Rxy = Rxy_31 + Rxy_32
+    
     return Rxy
 end
 
@@ -184,68 +184,72 @@ end
 
     Iy = Matrix{Float64}(I, grid.ny, grid.ny)
     
-    # Convert to integer values for loop limits
-    nt1 = Int(2 * α.t1)
-    nt2 = Int(2 * α.t2)
+    # Implement the three-body matrix element based on the given equation:
+    # V_{α₃,α₃'}(x₃,x₃') = Σ_{m_{t₁₂}} ⟨T₁₂ m_{t₁₂} t₃(M_T - m_{t₁₂}) | T M_T⟩ 
+    #                      × ⟨T₁₂ m_{t₁₂} t₃(M_T - m_{t₁₂}) | T' M_T⟩ δ_{T₁₂,T₁₂'} V₁₂^{T₁₂,m_{t₁₂}}(x₃,x₃')
     
-    for j in 1:α.nchmax
-        for i in 1:α.nchmax
+    for j in 1:α.nchmax  # α₃'
+        for i in 1:α.nchmax  # α₃
             # Calculate start and end indices for blocks in the matrix
             row_start = (i - 1) * grid.nx + 1
             row_end = i * grid.nx
             col_start = (j - 1) * grid.nx + 1
             col_end = j * grid.nx
             
-            for nmt1 in -nt1:2:nt1
-                mt1 = nmt1 / 2.0
-                for nmt2 in -nt2:2:nt2
-                    mt2 = nmt2 / 2.0
-                    for nmt1p in -nt1:2:nt1
-                        mt1p = nmt1p / 2.0
-                        for nmt2p in -nt2:2:nt2
-                            mt2p = nmt2p / 2.0
-                            
-                            # Conservation of total m_t
-                            if nmt1 + nmt2 == nmt1p + nmt2p
-                                # Total magnetic quantum number
-                                mt_total = mt1 + mt2
-                                if abs(α.MT - mt_total) > α.t3 || abs(mt_total) > α.T12[i] || abs(mt_total) > α.T12[j]
-                                    continue
-                                end
-                                # Common Clebsch-Gordan coefficients that can be precomputed
-                                cg1 = clebschgordan(α.t1, mt1, α.t2, mt2, α.T12[i], mt_total)
-                                cg2 = clebschgordan(α.t1, mt1p, α.t2, mt2p, α.T12[j], mt_total)
-                                cg3 = clebschgordan(α.T12[i], mt_total, α.t3, α.MT - mt_total, α.T, α.MT)
-                                cg4 = clebschgordan(α.T12[j], mt_total, α.t3, α.MT - mt_total, α.T, α.MT)
-                                
-                                # Combined CG coefficient
-                                cg_combined = cg1 * cg2 * cg3 * cg4
-                                
-                                # Select potential based on isospin projection
-                                if mt_total == 0
-                                    # np pair (isospin index 1)
-                                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 1] * cg_combined
-                                else
-                                    # pp or nn pair (isospin index 2)
-                                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 2] * cg_combined
-                                end
-                            end
-                        end
-                    end
+            # Check if T₁₂ = T₁₂' (Kronecker delta constraint)
+            if α.T12[i] != α.T12[j]
+                continue  # Skip if T₁₂ ≠ T₁₂'
+            end
+            
+            T12 = α.T12[i]  # = α.T12[j] due to delta function
+            
+            # Sum over m_{t₁₂} (magnetic quantum number of two-body subsystem)
+            nmt12_max = Int(2 * T12)
+            for nmt12 in -nmt12_max:2:nmt12_max
+                mt12 = nmt12 / 2.0
+                mt3 = α.MT - mt12  # From conservation: m_{t₁₂} + m_{t₃} = M_T
+                
+                # Check if |m_{t₃}| ≤ t₃ (physical constraint)
+                if abs(mt3) > α.t3
+                    continue
+                end
+                
+                # Calculate Clebsch-Gordan coefficients
+                # ⟨T₁₂ m_{t₁₂} t₃ m_{t₃} | T M_T⟩
+                cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)
+                # ⟨T₁₂ m_{t₁₂} t₃ m_{t₃} | T' M_T⟩  (T' = T for same total state)
+                cg2 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)
+                
+                # Combined coefficient: cg1 × cg2
+                cg_coefficient = cg1 * cg2
+                
+                if abs(cg_coefficient) < 1e-10  # Skip negligible contributions
+                    continue
+                end
+                
+                # Select appropriate potential matrix element V₁₂^{T₁₂,m_{t₁₂}}
+                # Based on m_{t₁₂} to determine isospin channel
+                if mt12 == 0
+                    # Isospin-0 channel (np pair)
+                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 1] * cg_coefficient
+                else
+                    # Isospin-1 channel (pp or nn pair)
+                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 2] * cg_coefficient
                 end
             end
         end
     end
 
-    Vmatrix = Vαx ⊗ Iy  # Kronecker product with identity matrix
+    Vmatrix = Vαx ⊗ Iy  # Kronecker product with identity matrix    
+
     
-    return Vmatrix  # Added return statement
+    return Vmatrix
 end
 
- function pot_nucl(α, grid, potname)
+function pot_nucl(α, grid, potname)
     # Compute the nuclear potential matrix
     # Parameters:
-    # α: parameters for the Laguerre function
+    # α: channel index
     # grid: grid object containing nx, xi, and other parameters
     # proton m1=+1/2  neutron m2=-1/2
     # for the current function, I only consider the local potential(AV8,NIJM,REID,AV14,AV18), for the non-local potential, one needs to modify this function 
@@ -266,9 +270,10 @@ end
                         if α.MT > 0
                             v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                             v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
-                        else
+                        elseif α.MT < 0
                             v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                             v12[ir, ir, i, j, 2] = v[1, 1]
+                        # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                         end
                     end 
                     
@@ -282,9 +287,10 @@ end
                         if α.MT > 0
                             v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                             v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
-                        else
+                        elseif α.MT < 0
                             v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                             v12[ir, ir, i, j, 2] = v[1, 1]
+                        # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                         end
                     end
                 else
@@ -296,9 +302,10 @@ end
                             if α.MT > 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
-                            else
+                            elseif α.MT < 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[1, 1]
+                            # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
                         elseif α.l[i] == Int(α.J12[i]+1) && α.l[j] == Int(α.J12[i]+1) 
                             v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
@@ -306,9 +313,10 @@ end
                             if α.MT > 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[2, 2] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
-                            else
+                            elseif α.MT < 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[2, 2]
+                            # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
                         elseif α.l[i] == Int(α.J12[i]-1) && α.l[j] == Int(α.J12[i]+1) 
                             v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
@@ -316,9 +324,10 @@ end
                             if α.MT > 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[1, 2] 
-                            else
+                            elseif α.MT < 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[1, 2]
+                            # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
                         elseif α.l[i] == Int(α.J12[i]+1) && α.l[j] == Int(α.J12[i]-1) 
                             v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
@@ -326,9 +335,10 @@ end
                             if α.MT > 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[2, 1]  
-                            else
+                            elseif α.MT < 0
                                 v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[2, 1]
+                            # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
                         end
                     end 
