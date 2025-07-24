@@ -39,14 +39,16 @@ export computeGcoefficient
     for perm_index in 1:2 
         for αout in 1:α.nchmax
             for αin in 1:α.nchmax
-                if perm_index == 1  # compute Gα3α1
-                    phase = (-1)^(α.T12[αin] + α.s12[αin] + 2*s1+s2+s3+2*t1+t2+t3)
+                if perm_index == 1  # compute Gα3α1: phase = (-1)^(s23 + 2s1 + s2 + s3) * (-1)^(T23 + 2t1 + t2 + t3)
+                    # Note: s23 corresponds to α.s12[αin] in the input channel, T23 corresponds to α.T12[αin]
+                    phase = (-1)^(α.s12[αin] + 2*s1 + s2 + s3) * (-1)^(α.T12[αin] + 2*t1 + t2 + t3)
                     Cisospin=hat(α.T12[αin])*hat(α.T12[αout])*wigner6j(t1,t2,α.T12[αout],t3,α.T,α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout]) 
                     nSmin= max(Int(2*abs(α.s12[αin]-s1)), Int(2*abs(α.s12[αout]-s3)))
                     nSmax= min(Int(2*(α.s12[αin]+s1)), Int(2*(α.s12[αout]+s3)))
-                elseif perm_index == 2 # compute Gα3α2
-                    phase = (-1)^(α.T12[αout] + α.s12[αout] + 2*s3+s1+s2+2*t3+t1+t2)
+                elseif perm_index == 2 # compute Gα3α2: phase = (-1)^(s12 + 2s3 + s1 + s2) * (-1)^(T12 + 2t3 + t1 + t2)
+                    # Note: s12 corresponds to α.s12[αout] in the output channel, T12 corresponds to α.T12[αout]
+                    phase = (-1)^(α.s12[αout] + 2*s3 + s1 + s2) * (-1)^(α.T12[αout] + 2*t3 + t1 + t2)
                     Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t3,t1,α.T12[αin],t2,α.T,α.T12[αout])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout])
                     nSmin= max(Int(2*abs(α.s12[αin]-s2)), Int(2*abs(α.s12[αout]-s3)))
@@ -78,7 +80,7 @@ export computeGcoefficient
                             f1=wigner6j(s3, s1, α.s12[αin], s2, SS, α.s12[αout])
                         end
                             
-                        Gαoutαin[:,:,:,αin, αout, perm_index] = Y4[:, :, :, αin, αout, perm_index]  * phase * Cisospin * Cspin * f0 * f1
+                        Gαoutαin[:,:,:,αin, αout, perm_index] += Y4[:, :, :, αin, αout, perm_index]  * phase * Cisospin * Cspin * f0 * f1
 
                     end 
                 end 
@@ -132,6 +134,7 @@ export computeGcoefficient
                     end
                     
                     # Calculate Clebsch-Gordan coefficient for output
+                    # Note: For z-axis (θ=0), ml=0 for the l component
                     CGout = clebschgordan(α.l[αout], 0, α.λ[αout], ML, LL, ML)
                     
                     # Pre-calculate Yout values - use broadcast for efficiency
@@ -206,12 +209,12 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
 
   for perm_index in 1:2 
     # Now compute the spherical harmonics for incoming channels
-       if perm_index == 1  # compute Gα3α1
+       if perm_index == 1  # compute Gα3α1: x1 = -1/2*x3 + 1*y3, y1 = -3/4*x3 - 1/2*y3
            a = -0.5
            b = 1.0
            c = -0.75
            d = -0.5
-        elseif perm_index == 2 # compute Gα3α2
+        elseif perm_index == 2 # compute Gα3α2: x2 = -1/2*x3 - 1*y3, y2 = 3/4*x3 - 1/2*y3
            a = -0.5
            b = -1.0
            c = 0.75
@@ -285,6 +288,23 @@ Uses the racahW function from WignerSymbols.jl for efficient computation.
 """
 function u9(ra::Float64, rb::Float64, rc::Float64, rd::Float64, re::Float64, 
             rf::Float64, rg::Float64, rh::Float64, ri::Float64)::Float64
+    
+    # Check if all inputs are valid angular momenta (non-negative)
+    if any(x < 0 for x in [ra, rb, rc, rd, re, rf, rg, rh, ri])
+        return 0.0
+    end
+    
+    # Check triangle inequalities for all triads
+    triangles = [
+        (ra, rb, rc), (rd, re, rf), (rg, rh, ri),  # rows
+        (ra, rd, rg), (rb, re, rh), (rc, rf, ri)   # columns
+    ]
+    
+    for (j1, j2, j3) in triangles
+        if abs(j1 - j2) > j3 || j1 + j2 < j3
+            return 0.0
+        end
+    end
     
     # Implementation using the sum formula for 9-j symbols in terms of 6-j symbols
     result = 0.0
