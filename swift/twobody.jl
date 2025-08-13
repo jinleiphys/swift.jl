@@ -48,16 +48,32 @@ function bound2b(grid, potname)
     eigenvalues, eigenvectors = eigen(H)
 
     # Extract the bound state energies and wave functions
-    bound_states = []
+    bound_energies = []
+    bound_wavefunctions = []
     for i in 1:grid.nx
         if eigenvalues[i] < 0.0
-            push!(bound_states, (eigenvalues[i], eigenvectors[:, i]))
+            eigenvec = eigenvectors[:, i]
+            norm = sum(abs2.(eigenvec))
+            println("Bound state $i: Energy = $(eigenvalues[i]) MeV, Norm = $norm")
+            if norm ≠ 1.0
+                eigenvec = eigenvec / sqrt(norm)
+                println("  Normalized eigenvector to unit norm")
+            end
+            
+            # Compute the wave function
+            wavefunction = zeros(grid.nx)
+            for j in 1:grid.nx
+                wavefunction[j] = grid.ϕx[j] * eigenvec[j]
+            end
+            
+            push!(bound_energies, eigenvalues[i])
+            push!(bound_wavefunctions, wavefunction)
         end
     end
-    println("Number of bound states: ", length(bound_states))
-    println("Bound state energies: ", [state[1] for state in bound_states])
+    println("Number of bound states: ", length(bound_energies))
+    println("Bound state energies: ", bound_energies)
 
-    return bound_states
+    return bound_energies, bound_wavefunctions
 
 end 
 
