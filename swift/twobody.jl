@@ -50,7 +50,7 @@ function bound2b(grid, potname)
     # Extract the bound state energies and wave functions
     bound_energies = []
     bound_wavefunctions = []
-    for i in 1:grid.nx
+    for i in 1:grid.nx*α.nchmax
         if eigenvalues[i] < 0.0
             eigenvec = eigenvectors[:, i]
             norm = sum(abs2.(eigenvec))
@@ -60,10 +60,13 @@ function bound2b(grid, potname)
                 println("  Normalized eigenvector to unit norm")
             end
             
-            # Compute the wave function
-            wavefunction = zeros(grid.nx)
-            for j in 1:grid.nx
-                wavefunction[j] = grid.ϕx[j] * eigenvec[j]
+            # Compute the wave function with multiple components
+            wavefunction = zeros(grid.nx, α.nchmax)
+            for ich in 1:α.nchmax
+                for j in 1:grid.nx
+                    idx = (ich-1)*grid.nx + j
+                    wavefunction[j, ich] = grid.ϕx[j] * eigenvec[idx]
+                end
             end
             
             push!(bound_energies, eigenvalues[i])
