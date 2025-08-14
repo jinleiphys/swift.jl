@@ -111,9 +111,6 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
     
 
     println("For J=",J, " T=",T," parity=",parity, " Number of channels: ", nch_count)
-    open("channels.dat", "a") do io
-        println(io, "For J=",J, " T=",T," parity=",parity, " Number of channels: ", nch_count)
-    end
     # Now allocate arrays with the correct size
     α.nchmax = nch_count
     α.l = zeros(Int, nch_count)
@@ -128,9 +125,8 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
     ich = 0
     
     if nch_count > 0  # Only do second pass if we have channels
-      open("channels.dat", "a") do io
-        println(io, "---The coupling coefficients are")
-        println(io, " a3b |( l ( s1 s2 ) s12 ) J12 ( λ s3 ) J3 ,   J; ( t1 t2 ) T12 , t3 , T >")
+        println("---The coupling coefficients are")
+        println(" a3b |( l ( s1 s2 ) s12 ) J12 ( λ s3 ) J3 ,   J; ( t1 t2 ) T12 , t3 , T >")
         for l in lmin:lmax
             for ns in Int(2*(s1-s2)):2:Int(2*(s1+s2))
                 s12 = ns/2.0
@@ -167,7 +163,7 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                                         α.λ[ich] = λ
                                         α.J3[ich] = J3
                                         α.T12[ich] = T12
-                                        print_channel_info(io, ich, l, s1, s2, s12, J12, λ, s3, J3, J,t1,t2,T12, t3, T)
+                                        print_channel_info(ich, l, s1, s2, s12, J12, λ, s3, J3, J,t1,t2,T12, t3, T)
                                     end
                                 end
                             end
@@ -176,7 +172,6 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                 end
             end
         end
-      end # end open
     end # end if 
     
 
@@ -184,8 +179,8 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
 end
 
 # Function to print channel information
-function print_channel_info(io, ich, l, s1, s2, s12, J12, λ, s3, J3, J,t1,t2,T12, t3, T)
-    @printf(io, "%4d |(%2d (%2.1f %2.1f) %2.1f) %4.1f (%2d %2.1f) %3.1f, %3.1f; (%2.1f %2.1f) %2.1f, %2.1f, %2.1f > \n",
+function print_channel_info(ich, l, s1, s2, s12, J12, λ, s3, J3, J,t1,t2,T12, t3, T)
+    @printf("%4d |(%2d (%2.1f %2.1f) %2.1f) %4.1f (%2d %2.1f) %3.1f, %3.1f; (%2.1f %2.1f) %2.1f, %2.1f, %2.1f > \n",
             ich, l, s1, s2, s12, J12, λ, s3, J3, J, t1, t2, T12, t3, T)
 end
 
