@@ -50,14 +50,20 @@ function bound2b(grid, potname)
     # Extract the bound state energies and wave functions
     bound_energies = []
     bound_wavefunctions = []
+    
+    println("\n" * "="^60)
+    println("           TWO-BODY BOUND STATE ANALYSIS")
+    println("="^60)
+    
+    bound_count = 0
     for i in 1:grid.nx*α.nchmax
         if eigenvalues[i] < 0.0
+            bound_count += 1
             eigenvec = eigenvectors[:, i]
             norm = sum(abs2.(eigenvec))
-            println("Bound state $i: Energy = $(eigenvalues[i]) MeV, Norm = $norm")
+            
             if norm ≠ 1.0
                 eigenvec = eigenvec / sqrt(norm)
-                println("  Normalized eigenvector to unit norm")
             end
             
             # Compute the wave function with multiple components
@@ -69,12 +75,66 @@ function bound2b(grid, potname)
                 end
             end
             
+            # Calculate component probabilities
+            component_norms = zeros(α.nchmax)
+            for ich in 1:α.nchmax
+                component_norms[ich] = sum(abs2.(wavefunction[:, ich]) .* grid.dxi)
+            end
+            
+            # Normalize component probabilities
+            total_norm = sum(component_norms)
+            component_probs = component_norms / total_norm * 100
+            
+            # Print detailed bound state information
+            println("\nBound State #$bound_count:")
+            println("  Binding Energy: $(round(eigenvalues[i], digits=6)) MeV")
+            println("  Total J^π = $(Int(α.J12))⁺")
+            println("\n  Channel Composition:")
+            
+            for ich in 1:α.nchmax
+                l_val = α.l[ich]
+                s_val = α.s12[ich]
+                # Determine spectroscopic notation
+                if l_val == 0
+                    l_notation = "S"
+                elseif l_val == 1
+                    l_notation = "P"
+                elseif l_val == 2
+                    l_notation = "D"
+                elseif l_val == 3
+                    l_notation = "F"
+                else
+                    l_notation = "L=$l_val"
+                end
+                
+                # Format as 2S+1L_J notation
+                spectro_notation = "$(Int(2*s_val+1))$(l_notation)₁"
+                
+                println("    Channel $ich: $spectro_notation (l=$l_val, s=$(s_val)) - $(round(component_probs[ich], digits=2))%")
+            end
+            
+            # Calculate D-state probability specifically
+            d_state_prob = 0.0
+            for ich in 1:α.nchmax
+                if α.l[ich] == 2  # D-state has l=2
+                    d_state_prob += component_probs[ich]
+                end
+            end
+            
+            println("\n  D-state Probability: $(round(d_state_prob, digits=3))%")
+            println("  S-state Probability: $(round(100.0 - d_state_prob, digits=3))%")
+            
             push!(bound_energies, eigenvalues[i])
             push!(bound_wavefunctions, wavefunction)
         end
     end
-    println("Number of bound states: ", length(bound_energies))
-    println("Bound state energies: ", bound_energies)
+    
+    println("\n" * "="^60)
+    println("SUMMARY: Found $bound_count bound state(s)")
+    if bound_count > 0
+        println("Binding energies (MeV): ", [round(e, digits=6) for e in bound_energies])
+    end
+    println("="^60)
 
     return bound_energies, bound_wavefunctions
 
@@ -159,7 +219,10 @@ function channelindex()
         end 
     end 
 
-    println("For J=",α.J12," parity=+", " Number of channels: ", α.nchmax)
+    println("\nTwo-body channel configuration:")
+    println("  Total angular momentum J = ", α.J12)
+    println("  Parity = +")
+    println("  Number of channels: ", α.nchmax)
 
     α.l = zeros(Int,  α.nchmax)
     α.s12 = zeros(Float64, α.nchmax)
@@ -177,6 +240,11 @@ function channelindex()
                 nch += 1
                 α.l[nch] = l
                 α.s12[nch] = s12
+                
+                # Print channel information
+                l_notation = l == 0 ? "S" : l == 1 ? "P" : l == 2 ? "D" : "L=$l"
+                spectro_notation = "$(Int(2*s12+1))$(l_notation)₁"
+                println("    Channel $nch: $spectro_notation (l=$l, s=$(s12))")
                 
             end 
         end 
