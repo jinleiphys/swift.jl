@@ -1,7 +1,7 @@
 module NuclearPotentials
 
 using Libdl
-export potential_matrix
+export potential_matrix, call_av18, potential_type_to_lpot
 
 # Load the Fortran library with potentials
 const libpot = Libdl.dlopen(joinpath(@__DIR__, "libpotentials.dylib"))
@@ -180,20 +180,41 @@ function potential_matrix(
     end
     
     # Calculate potential matrix elements for non-MT potentials
-    for ia in 1:n_channels
-        for ib in 1:n_channels
-            l_ia = angular_momenta[ia]
-            l_ib = angular_momenta[ib]
+    if r < 140.0  # Distance cutoff
+        if n_channels == 1
+            # Single channel case
+            l = angular_momenta[1]
+            vpw = call_av18(lpot, l, s, j, t, t1z, t2z, r)
+            potential[1, 1] = vpw[1, 1]
+        elseif n_channels == 2 && length(angular_momenta) == 2
+            # Coupled channel case (e.g., 3S1-3D1 coupling)
+            l1 = angular_momenta[1]  # Lower l value (e.g., l=0 for S)
+            l2 = angular_momenta[2]  # Higher l value (e.g., l=2 for D)
             
-            # For Argonne and SSCC potentials
-            if r < 140.0  # Distance cutoff
-                if ia == ib  # Diagonal element
-                    potential[ia, ib] = call_av18(lpot, l_ia, s, j, t, t1z, t2z, r)[1, 1]
-                else  # Off-diagonal element (coupled channels)
-                    # Using proper l values for each channel
-                    vv2 = call_av18(lpot, min(l_ia, l_ib), s, j, t, t1z, t2z, r)
-                    potential[ia, ib] = vv2[1, 2]
+            # Check if this is a valid coupled channel configuration
+            # For Argonne potentials, coupling occurs for s=1, j=l+1 or j=l-1
+            if s == 1 && abs(l2 - l1) == 2 && (j == l1 + 1 || j == l2 - 1)
+                # Valid coupled channel - call Fortran with the lower l value
+                vpw = call_av18(lpot, l1, s, j, t, t1z, t2z, r)
+                
+                potential[1, 1] = vpw[1, 1]  # l1-l1 element
+                potential[1, 2] = vpw[1, 2]  # l1-l2 coupling
+                potential[2, 1] = vpw[2, 1]  # l2-l1 coupling (should equal [1,2])
+                potential[2, 2] = vpw[2, 2]  # l2-l2 element
+            else
+                # Uncoupled channels - diagonal only
+                for ia in 1:n_channels
+                    l_ia = angular_momenta[ia]
+                    vpw = call_av18(lpot, l_ia, s, j, t, t1z, t2z, r)
+                    potential[ia, ia] = vpw[1, 1]
                 end
+            end
+        else
+            # General case for multiple uncoupled channels
+            for ia in 1:n_channels
+                l_ia = angular_momenta[ia]
+                vpw = call_av18(lpot, l_ia, s, j, t, t1z, t2z, r)
+                potential[ia, ia] = vpw[1, 1]
             end
         end
     end
