@@ -139,6 +139,7 @@ function potential_matrix(
         return potential
     end
     
+    
     # Get the potential type code
     lpot = potential_type_to_lpot(potential_type)
     

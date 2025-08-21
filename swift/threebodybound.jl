@@ -109,15 +109,17 @@ module threebodybound
             
             println("  Wave function norm: $(round(sqrt(norm_total), digits=6))")
             
-            # Verify binding energy by computing expectation value ⟨ψ|H|ψ⟩
+            # Verify binding energy by computing expectation value ⟨ψ|H|ψ⟩ and ⟨ψ|T|ψ⟩
             t_verify_start = time()
             H_expectation = real(eigenvec' * H * eigenvec)
+            T_expectation = real(eigenvec' * T * eigenvec)
             energy_difference = abs(H_expectation - energy_real)
             t_verify = time() - t_verify_start
             t_verification_total += t_verify
             
             println("  Eigenvalue energy: $(round(energy_real, digits=6)) MeV")
             println("  ⟨ψ|H|ψ⟩ energy: $(round(H_expectation, digits=6)) MeV")
+            println("  ⟨ψ|T|ψ⟩ kinetic energy: $(round(T_expectation, digits=6)) MeV")
             println("  Energy difference: $(round(energy_difference, digits=8)) MeV")
             
             if energy_difference < 1e-6

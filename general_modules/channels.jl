@@ -54,7 +54,7 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
     λmax::Int, λmin::Int, 
     s1::Float64, s2::Float64, s3::Float64, 
     t1::Float64, t2::Float64, t3::Float64, 
-    MT::Float64)
+    MT::Float64, j2bmax::Float64, parity_pair::Int=1)
     α = nch3b()
     α.s1 = s1
     α.s2 = s2
@@ -75,6 +75,9 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
             s12 = ns/2.0
             for nJ12 in Int(2*abs(l-s12)):2:Int(2*(l+s12))  # Fixed min/max calculation
                 J12 = nJ12/2.0
+                if J12 > j2bmax
+                    continue
+                end
                 for λ in λmin:λmax
                     if (-1)^(l+λ) != parity
                         continue
@@ -110,7 +113,7 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
     end
     
 
-    println("For J=",J, " T=",T," parity=",parity, " Number of channels: ", nch_count)
+    println("For J=",J, " T=",T," parity=",parity, " parity_pair=",parity_pair, " Number of channels: ", nch_count)
     # Now allocate arrays with the correct size
     α.nchmax = nch_count
     α.l = zeros(Int, nch_count)
@@ -132,6 +135,9 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                 s12 = ns/2.0
                 for nJ12 in Int(2*abs(l-s12)):2:Int(2*(l+s12))
                     J12 = nJ12/2.0
+                    if J12 > j2bmax
+                        continue
+                    end
                     for λ in λmin:λmax
                         if (-1)^(l+λ) != parity
                             continue
@@ -145,7 +151,7 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                                 
                                 for nT12 in Int(2*abs(t1-t2)):2:Int(2*(t1+t2))
                                     T12 = nT12/2.0
-                                    if (-1)^(l+s12+T12) !=-1 && fermion
+                                    if (-1)^(l+s12+T12) != -1 && fermion
                                         continue
                                     end
                                     for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))
