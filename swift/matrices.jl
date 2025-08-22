@@ -354,8 +354,10 @@ end
  
  function checkα(i,j,α)
 
-    # Check if the channel is allowed
-    if (-1)^α.l[i] == (-1)^α.l[j] && Int(α.s12[i]*2) == Int(α.s12[j]*2) && Int(α.J12[i]*2) == Int(α.J12[j]*2)
+    # Check if the channel is allowed for two-body potential coupling
+    # The two-body potential should only couple channels with identical quantum numbers
+    # for both the two-body subsystem AND the third particle
+    if (-1)^α.l[i] == (-1)^α.l[j] && Int(α.s12[i]*2) == Int(α.s12[j]*2) && Int(α.J12[i]*2) == Int(α.J12[j]*2) && α.λ[i] == α.λ[j]
         return true
     else
         return false

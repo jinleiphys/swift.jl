@@ -202,7 +202,7 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
         for λ in 0:λmax
            for m in -λ:λ
                 nch = λ^2 + λ + m + 1
-                Yλout[i, nch] =  Yλ[(λ,m)]
+                Yλout[i, nch] =  Yλ[nch]
             end
         end
     end
@@ -249,7 +249,7 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
                 for l in 0:lmax
                     for m in -l:l
                         nch = l^2 + l + m + 1
-                        Ylin[iθ, iy, ix, nch, perm_index] = Yl[(l, m)]
+                        Ylin[iθ, iy, ix, nch, perm_index] = Yl[nch]
                     end
                 end
                 
@@ -257,7 +257,7 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
                 for λ in 0:λmax
                     for m in -λ:λ
                         nch = λ^2 + λ + m + 1
-                        Yλin[iθ, iy, ix, nch, perm_index] = Yλ[(λ, m)]
+                        Yλin[iθ, iy, ix, nch, perm_index] = Yλ[nch]
                     end
                 end
             end

@@ -82,6 +82,10 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                     if (-1)^(l+λ) != parity
                         continue
                     end
+                    # Check parity_pair constraint for the two-body subsystem
+                    if (-1)^l != parity_pair
+                        continue
+                    end
                     for nJ3 in Int(2*abs(λ-s3)):2:Int(2*(λ+s3))  # Fixed min/max calculation
                         J3 = nJ3/2.0
                         for nJ in Int(2*abs(J12-J3)):2:Int(2*(J12+J3))  # Fixed min/max calculation
@@ -140,6 +144,10 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                     end
                     for λ in λmin:λmax
                         if (-1)^(l+λ) != parity
+                            continue
+                        end
+                        # Check parity_pair constraint for the two-body subsystem
+                        if (-1)^l != parity_pair
                             continue
                         end
                         for nJ3 in Int(2*abs(λ-s3)):2:Int(2*(λ+s3))
