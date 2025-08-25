@@ -19,22 +19,22 @@ module threebodybound
     t_rxy_start = time()
     Rxy=Rxy_matrix(α, grid)
     t_rxy = time() - t_rxy_start
-    @printf("  Rxy matrix construction: %.4f seconds\n", t_rxy)
     
     t_t_start = time()
     T=T_matrix(α,grid)
     t_t = time() - t_t_start
-    @printf("  T matrix construction: %.4f seconds\n", t_t)
     
     t_v_start = time()
     V=V_matrix(α, grid, potname)
     t_v = time() - t_v_start
-    @printf("  V matrix construction: %.4f seconds\n", t_v)
     
     t_h_start = time()
     H=V*Rxy+T+V
     t_h = time() - t_h_start
-    @printf("  H matrix assembly: %.4f seconds\n", t_h)
+    
+    t_b_start = time()
+    B=Bmatrix(α,grid)
+    t_b = time() - t_b_start
     
     t_matrices = time() - t_start
     @printf("Total matrix construction time: %.4f seconds\n", t_matrices)
@@ -42,7 +42,7 @@ module threebodybound
     # Time eigenvalue decomposition
     println("\nSolving eigenvalue problem...")
     t_eigen_start = time()
-    eigenvalues, eigenvectors = eigen(H)
+    eigenvalues, eigenvectors = eigen(H,B)
     t_eigen = time() - t_eigen_start
     @printf("Eigenvalue decomposition: %.4f seconds\n", t_eigen)
     
@@ -78,6 +78,14 @@ module threebodybound
             # Compute wave function ψ(x,y,α) based on Laguerre basis functions
             t_wf_start = time()
             eigenvec = eigenvectors[:, i]
+            
+            # For generalized eigenvalue problem, normalize eigenvector properly
+            # The eigenvector should satisfy: eigenvec' * B * eigenvec = 1
+            B_norm = real(eigenvec' * B * eigenvec)
+            if B_norm > 1e-12
+                eigenvec = eigenvec / sqrt(B_norm)
+            end
+            
             ψ = zeros(ComplexF64, grid.nx, grid.ny, α.nchmax)
             
             # Extract coefficients and compute wave function
@@ -108,8 +116,10 @@ module threebodybound
             t_norm_total += t_norm
             
             println("  Wave function norm: $(round(sqrt(norm_total), digits=6))")
+            println("  B-orthogonal norm: $(round(sqrt(real(eigenvec' * B * eigenvec)), digits=6))")
             
             # Verify binding energy by computing expectation value ⟨ψ|H|ψ⟩ and ⟨ψ|T|ψ⟩
+            # Since eigenvector is B-normalized: eigenvec' * B * eigenvec = 1
             t_verify_start = time()
             H_expectation = real(eigenvec' * H * eigenvec)
             T_expectation = real(eigenvec' * T * eigenvec)
@@ -147,11 +157,6 @@ module threebodybound
     println("\n" * "="^60)
     println("         DETAILED TIMING BREAKDOWN")
     println("="^60)
-    @printf("Matrix construction breakdown:\n")
-    @printf("  Rxy matrix:            %.4f seconds (%.1f%%)\n", t_rxy, 100*t_rxy/(t_matrices+t_eigen+t_analysis))
-    @printf("  T matrix:              %.4f seconds (%.1f%%)\n", t_t, 100*t_t/(t_matrices+t_eigen+t_analysis))
-    @printf("  V matrix:              %.4f seconds (%.1f%%)\n", t_v, 100*t_v/(t_matrices+t_eigen+t_analysis))
-    @printf("  H assembly:            %.4f seconds (%.1f%%)\n", t_h, 100*t_h/(t_matrices+t_eigen+t_analysis))
     @printf("Total matrices:          %.4f seconds (%.1f%%)\n", t_matrices, 100*t_matrices/(t_matrices+t_eigen+t_analysis))
     @printf("\n")
     @printf("Eigenvalue solution:     %.4f seconds (%.1f%%)\n", t_eigen, 100*t_eigen/(t_matrices+t_eigen+t_analysis))

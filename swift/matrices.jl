@@ -13,7 +13,7 @@ const amu= 931.49432 # MeV
 const m=1.008665 # amu
 const ħ=197.3269718 # MeV. fm
 
-export Rxy_matrix, T_matrix, V_matrix
+export Rxy_matrix, T_matrix, V_matrix, Bmatrix
 
 # 1.008665 amu for neutron  amu=931.49432 MeV
 
@@ -350,6 +350,39 @@ function pot_nucl(α, grid, potname)
     return v12  
 end
 
+ function Bmatrix(α,grid)
+    # compute the B matrix for the Generalized eigenvalue problem
+    Iα = Matrix{Float64}(I, α.nchmax, α.nchmax)
+    Ix=zeros(grid.nx, grid.nx)
+    Iy=zeros(grid.ny, grid.ny)
+    for i in 1:grid.nx
+        for j in 1:grid.nx
+            if i == j
+                Ix[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+            else
+                Ix[i,j] = (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+            end
+        end
+    
+    end 
+
+    for i in 1:grid.ny
+        for j in 1:grid.ny
+            if i == j
+                Iy[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+            else
+                Iy[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+            end
+        end
+    
+    end
+
+    Bmatrix = Iα ⊗ Ix ⊗ Iy
+
+    return Bmatrix
+
+
+ end 
 
  
  function checkα(i,j,α)

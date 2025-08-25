@@ -3,6 +3,7 @@ module twobodybound
 using LinearAlgebra
 include("../NNpot/nuclear_potentials.jl")
 using .NuclearPotentials
+using Kronecker
 
 export bound2b
 
@@ -37,6 +38,7 @@ function bound2b(grid, potname)
     # Initialize matrices
     Tαx = T_matrix(α,grid) 
     V = V_matrix(α,grid,potname) 
+    B = Bmatrix(α,grid)
 
 
     # V=gaussianpot(α,grid)
@@ -45,7 +47,7 @@ function bound2b(grid, potname)
     H = Tαx + V
 
     # Solve the eigenvalue problem
-    eigenvalues, eigenvectors = eigen(H)
+    eigenvalues, eigenvectors = eigen(H, B)
 
     # Extract the bound state energies and wave functions
     bound_energies = []
@@ -73,7 +75,7 @@ function bound2b(grid, potname)
                     idx = (ich-1)*grid.nx + j
                     wavefunction[j, ich] = grid.ϕx[j] * eigenvec[idx]
                 end
-            end
+            end 
             
             # Calculate component probabilities
             component_norms = zeros(α.nchmax)
@@ -139,6 +141,29 @@ function bound2b(grid, potname)
     return bound_energies, bound_wavefunctions
 
 end 
+
+ function Bmatrix(α,grid)
+    # compute the B matrix for the Generalized eigenvalue problem
+    Iα = Matrix{Float64}(I, α.nchmax, α.nchmax)
+    Ix=zeros(grid.nx, grid.nx)
+    for i in 1:grid.nx
+        for j in 1:grid.nx
+            if i == j
+                Ix[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+            else
+                Ix[i,j] = (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+            end
+        end
+    
+    end 
+
+
+    Bmatrix = Iα ⊗ Ix
+
+    return Bmatrix
+
+
+ end 
 
 
 function V_matrix(α,grid,potname)
