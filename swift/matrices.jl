@@ -101,7 +101,18 @@ end
 α.nchmax is the maximum number of α channel index, α0 is the α parameter in Laguerre function 
 """
  Tαx = zeros(α.nchmax*grid.nx,α.nchmax*grid.nx)  # Initialize Tαx matrix
- Iy = Matrix{Float64}(I, grid.ny, grid.ny)
+ 
+ # Compute correct overlap matrix for y-direction (non-orthogonal basis functions)
+ Iy = zeros(grid.ny, grid.ny)
+ for i in 1:grid.ny
+     for j in 1:grid.ny
+         if i == j
+             Iy[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+         else
+             Iy[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+         end
+     end
+ end
 
  for i in 1:α.nchmax
 
@@ -117,21 +128,45 @@ end
 
  Tx_matrix = Tαx ⊗ Iy
  
- Ty_matrix = zeros(α.nchmax*grid.nx*grid.ny,α.nchmax*grid.nx*grid.ny)  # Initialize Ty_matrix
- i=0
- for iα in 1:α.nchmax
-    for ix in 1:grid.nx 
-       i += 1
-       T= Tx(grid.ny,grid.yy,grid.α,α.λ[iα])
-       T .= T .* ħ^2 * 0.75 / m / amu /grid.hsy^2
-
-       row_start = (i-1)*grid.ny + 1
-       row_end = i*grid.ny
-       col_start = (i-1)*grid.ny + 1
-       col_end = i*grid.ny
-       Ty_matrix[row_start:row_end, col_start:col_end] = T
-
-    end 
+ # Compute correct overlap matrix for x-direction (non-orthogonal basis functions)
+ Ix = zeros(grid.nx, grid.nx)
+ for i in 1:grid.nx
+     for j in 1:grid.nx
+         if i == j
+             Ix[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+         else
+             Ix[i,j] = (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+         end
+     end
+ end
+ 
+ # Precompute Ty matrices for all channels outside the loops
+ Ty_matrices = Array{Matrix{Float64}}(undef, α.nchmax)
+ for i in 1:α.nchmax
+     Ty = Tx(grid.ny, grid.yy, grid.α, α.λ[i])
+     Ty_matrices[i] = Ty * ħ^2 * 0.75 / m / amu / grid.hsy^2
+ end
+ 
+ # Build Ty_matrix with explicit loops to maintain (α,x,y) indexing
+ Ty_matrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
+ 
+ for i in 1:α.nchmax
+     for j in 1:grid.nx
+         for k in 1:grid.ny
+             # Row index: (α-1)*nx*ny + (x-1)*ny + y
+             row_idx = (i-1)*grid.nx*grid.ny + (j-1)*grid.ny + k
+             
+             for jp in 1:grid.nx
+                 for kp in 1:grid.ny
+                     # Column index: same α channel
+                     col_idx = (i-1)*grid.nx*grid.ny + (jp-1)*grid.ny + kp
+                     
+                     # Use precomputed Ty matrix and Ix overlap matrix element
+                     Ty_matrix[row_idx, col_idx] = Ix[j, jp] * Ty_matrices[i][k, kp]
+                 end
+             end
+         end
+     end
  end 
 
  Tmatrix = Tx_matrix + Ty_matrix
@@ -182,7 +217,17 @@ end
     # Get nuclear potential matrix
     v12 = pot_nucl(α, grid, potname)
 
-    Iy = Matrix{Float64}(I, grid.ny, grid.ny)
+    # Compute correct overlap matrix for y-direction (non-orthogonal basis functions)
+    Iy = zeros(grid.ny, grid.ny)
+    for i in 1:grid.ny
+        for j in 1:grid.ny
+            if i == j
+                Iy[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+            else
+                Iy[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+            end
+        end
+    end
     
     # Implement the three-body matrix element based on the given equation:
     # V_{α₃,α₃'}(x₃,x₃') = Σ_{m_{t₁₂}} ⟨T₁₂ m_{t₁₂} t₃(M_T - m_{t₁₂}) | T M_T⟩ 
