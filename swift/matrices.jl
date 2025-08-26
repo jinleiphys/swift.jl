@@ -100,7 +100,6 @@ end
 """
 α.nchmax is the maximum number of α channel index, α0 is the α parameter in Laguerre function 
 """
- Tαx = zeros(α.nchmax*grid.nx,α.nchmax*grid.nx)  # Initialize Tαx matrix
  
  # Compute correct overlap matrix for y-direction (non-orthogonal basis functions)
  Iy = zeros(grid.ny, grid.ny)
@@ -114,19 +113,21 @@ end
      end
  end
 
+ # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Tx^α ⊗ Iy
+ Tx_matrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
+ 
  for i in 1:α.nchmax
-
-    T = Tx(grid.nx,grid.xx,grid.α,α.l[i])  
-    T .= T .* ħ^2 / m / amu / grid.hsx^2
-    row_start = (i-1)*grid.nx + 1
-    row_end = i*grid.nx
-    col_start = (i-1)*grid.nx + 1
-    col_end = i*grid.nx
-    Tαx[row_start:row_end, col_start:col_end] = T
-
- end 
-
- Tx_matrix = Tαx ⊗ Iy
+     # Compute Tx^α for channel α with its specific l[α]
+     Tx_alpha = Tx(grid.nx, grid.xx, grid.α, α.l[i])
+     Tx_alpha .= Tx_alpha .* ħ^2 / m / amu / grid.hsx^2
+     
+     # Create channel selector matrix: δ_{α,α} I_α (only α-th diagonal element is 1)
+     I_alpha = zeros(α.nchmax, α.nchmax)
+     I_alpha[i, i] = 1.0
+     
+     # Add this channel's contribution: δ_{α,α} I_α ⊗ Tx^α ⊗ Iy
+     Tx_matrix += I_alpha ⊗ Tx_alpha ⊗ Iy
+ end
  
  # Compute correct overlap matrix for x-direction (non-orthogonal basis functions)
  Ix = zeros(grid.nx, grid.nx)
@@ -140,33 +141,20 @@ end
      end
  end
  
- # Precompute Ty matrices for all channels outside the loops
- Ty_matrices = Array{Matrix{Float64}}(undef, α.nchmax)
- for i in 1:α.nchmax
-     Ty = Tx(grid.ny, grid.yy, grid.α, α.λ[i])
-     Ty_matrices[i] = Ty * ħ^2 * 0.75 / m / amu / grid.hsy^2
- end
- 
- # Build Ty_matrix with explicit loops to maintain (α,x,y) indexing
+ # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Ix ⊗ Ty^α
  Ty_matrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
  
  for i in 1:α.nchmax
-     for j in 1:grid.nx
-         for k in 1:grid.ny
-             # Row index: (α-1)*nx*ny + (x-1)*ny + y
-             row_idx = (i-1)*grid.nx*grid.ny + (j-1)*grid.ny + k
-             
-             for jp in 1:grid.nx
-                 for kp in 1:grid.ny
-                     # Column index: same α channel
-                     col_idx = (i-1)*grid.nx*grid.ny + (jp-1)*grid.ny + kp
-                     
-                     # Use precomputed Ty matrix and Ix overlap matrix element
-                     Ty_matrix[row_idx, col_idx] = Ix[j, jp] * Ty_matrices[i][k, kp]
-                 end
-             end
-         end
-     end
+     # Compute Ty^α for channel α with its specific λ[α]
+     Ty_alpha = Tx(grid.ny, grid.yy, grid.α, α.λ[i])
+     Ty_alpha .= Ty_alpha .* ħ^2 * 0.75 / m / amu / grid.hsy^2
+     
+     # Create channel selector matrix: δ_{α,α} I_α (only α-th diagonal element is 1)
+     I_alpha = zeros(α.nchmax, α.nchmax)
+     I_alpha[i, i] = 1.0
+     
+     # Add this channel's contribution: δ_{α,α} I_α ⊗ Ix ⊗ Ty^α
+     Ty_matrix += I_alpha ⊗ Ix ⊗ Ty_alpha
  end 
 
  Tmatrix = Tx_matrix + Ty_matrix
@@ -211,9 +199,6 @@ end
  end # end function Tx
 
  function V_matrix(α, grid, potname)
-    # Initialize matrix for storing potential energy
-    Vαx = zeros(α.nchmax * grid.nx, α.nchmax * grid.nx)
-    
     # Get nuclear potential matrix
     v12 = pot_nucl(α, grid, potname)
 
@@ -228,64 +213,59 @@ end
             end
         end
     end
+
+    # Express V_matrix using diagonal decomposition with distinct matrices
+    # V_matrix = ∑_{i,j} E^{ij}_α ⊗ V^{ij}_x ⊗ Iy
+    # where E^{ij}_α has 1 at (i,j) and 0 elsewhere, V^{ij}_x is the potential block
     
-    # Implement the three-body matrix element based on the given equation:
-    # V_{α₃,α₃'}(x₃,x₃') = Σ_{m_{t₁₂}} ⟨T₁₂ m_{t₁₂} t₃(M_T - m_{t₁₂}) | T M_T⟩ 
-    #                      × ⟨T₁₂ m_{t₁₂} t₃(M_T - m_{t₁₂}) | T' M_T⟩ δ_{T₁₂,T₁₂'} V₁₂^{T₁₂,m_{t₁₂}}(x₃,x₃')
+    Vmatrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
     
     for j in 1:α.nchmax  # α₃'
         for i in 1:α.nchmax  # α₃
-            # Calculate start and end indices for blocks in the matrix
-            row_start = (i - 1) * grid.nx + 1
-            row_end = i * grid.nx
-            col_start = (j - 1) * grid.nx + 1
-            col_end = j * grid.nx
-            
-            # Check if T₁₂ = T₁₂' (Kronecker delta constraint)
+            # Check if this channel pair couples
             if α.T12[i] != α.T12[j]
                 continue  # Skip if T₁₂ ≠ T₁₂'
             end
             
-            T12 = α.T12[i]  # = α.T12[j] due to delta function
+            # Create channel coupling matrix E^{ij}_α
+            E_alpha_ij = zeros(α.nchmax, α.nchmax)
+            E_alpha_ij[i, j] = 1.0
             
-            # Sum over m_{t₁₂} (magnetic quantum number of two-body subsystem)
+            # Extract the potential matrix block V^{ij}_x for this channel pair
+            V_x_ij = zeros(grid.nx, grid.nx)
+            
+            T12 = α.T12[i]
+            # Sum over m_{t₁₂} to build the potential block
             nmt12_max = Int(2 * T12)
             for nmt12 in -nmt12_max:2:nmt12_max
                 mt12 = nmt12 / 2.0
-                mt3 = α.MT - mt12  # From conservation: m_{t₁₂} + m_{t₃} = M_T
+                mt3 = α.MT - mt12
                 
-                # Check if |m_{t₃}| ≤ t₃ (physical constraint)
                 if abs(mt3) > α.t3
                     continue
                 end
                 
-                # Calculate Clebsch-Gordan coefficients
-                # ⟨T₁₂ m_{t₁₂} t₃ m_{t₃} | T M_T⟩
                 cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)
-                # ⟨T₁₂ m_{t₁₂} t₃ m_{t₃} | T' M_T⟩  (T' = T for same total state)
                 cg2 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)
-                
-                # Combined coefficient: cg1 × cg2
                 cg_coefficient = cg1 * cg2
                 
-                if abs(cg_coefficient) < 1e-10  # Skip negligible contributions
+                if abs(cg_coefficient) < 1e-10
                     continue
                 end
                 
-                # Select appropriate potential matrix element V₁₂^{T₁₂,m_{t₁₂}}
-                # Based on m_{t₁₂} to determine isospin channel
                 if mt12 == 0
-                    # Isospin-0 channel (np pair)
-                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 1] * cg_coefficient
+                    V_x_ij += v12[:, :, i, j, 1] * cg_coefficient
                 else
-                    # Isospin-1 channel (pp or nn pair)
-                    Vαx[row_start:row_end, col_start:col_end] += v12[:, :, i, j, 2] * cg_coefficient
+                    V_x_ij += v12[:, :, i, j, 2] * cg_coefficient
                 end
             end
+            
+            # Add this channel pair's contribution: E^{ij}_α ⊗ V^{ij}_x ⊗ Iy
+            if norm(V_x_ij) > 1e-12  # Only add non-zero contributions
+                Vmatrix += E_alpha_ij ⊗ V_x_ij ⊗ Iy
+            end
         end
-    end
-
-    Vmatrix = Vαx ⊗ Iy  # Kronecker product with identity matrix    
+    end    
 
     
     return Vmatrix
