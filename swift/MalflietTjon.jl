@@ -274,23 +274,27 @@ function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b;
     # where H0 = T (kinetic energy) and V is the potential
     LHS = E0 * B - T - V
     
-    # Check if matrix is singular
-    cond_num = cond(LHS)
-    if cond_num > 1e12
-        if verbose
-            @warn "Matrix [E0*B - T - V] is near-singular at E0 = $E0, condition number = $(cond_num)"
-        end
-        return NaN, nothing
-    end
+    # # Check if matrix is singular
+    # cond_num = cond(LHS)
+    # if cond_num > 1e12
+    #     if verbose
+    #         @warn "Matrix [E0*B - T - V] is near-singular at E0 = $E0, condition number = $(cond_num)"
+    #     end
+    #     return NaN, nothing
+    # end
     
     # The Faddeev kernel: K(E) = [E*B - T - V]⁻¹ * V*R
     VRxy = V * Rxy
     
     try
         if use_arnoldi
-            # Define the linear operator K(E) as a function
+            # Precompute the matrix solve once for efficiency
+            # K(E) = [E*B - T - V]⁻¹ * V*R
+            RHS = LHS \ VRxy  # Single expensive factorization
+            
+            # Define the linear operator K(E) as a function using precomputed matrix
             K = function(x)
-                return LHS \ (VRxy * x)
+                return RHS * x  # Fast matrix-vector multiplication
             end
             
             # Generate initial vector with better conditioning
