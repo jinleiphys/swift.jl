@@ -90,7 +90,7 @@ This is specifically designed for the Faddeev kernel K(E) = [EB - H0 - V]⁻¹ R
 - `converged`: Convergence flag
 - `iterations`: Number of iterations used
 """
-function arnoldi_eigenvalue(A, v0, m; tol=1e-10, maxiter=300, verbose_arnoldi=false)
+function arnoldi_eigenvalue(A, v0, m; tol=1e-6, maxiter=300, verbose_arnoldi=false)
     n = length(v0)
     
     # Ensure starting vector is normalized
@@ -153,16 +153,41 @@ function arnoldi_eigenvalue(A, v0, m; tol=1e-10, maxiter=300, verbose_arnoldi=fa
             total_iterations += 1
             
             # Early convergence check - compute Ritz values periodically
-            if j >= 5 && j % 5 == 0  # Check every 5 iterations
+            if j >= 3 && j % 2 == 0  # Check every 2 iterations starting from iteration 3
                 H_temp = H[1:j, 1:j]
                 eigenvals_temp, _ = eigen(H_temp)
                 λ_temp = maximum(real.(eigenvals_temp))
                 
-                if abs(real(λ_temp) - λ_old) < tol && j >= 10
-                    # Silent early convergence
+                if verbose_arnoldi
+                    println("    Arnoldi iter $j: λ_temp = $(real(λ_temp)), λ_old = $λ_old, diff = $(abs(real(λ_temp) - λ_old))")
+                end
+                
+                if abs(real(λ_temp) - λ_old) < tol && j >= 5  # Allow early exit after 5 iterations
+                    if verbose_arnoldi
+                        println("    Early convergence at iteration $j")
+                    end
                     actual_m = j
                     break
                 end
+                λ_old = real(λ_temp)  # Update for next comparison
+            end
+            
+            # Very early convergence check for excellent starting vectors
+            if j == 1
+                H_temp = H[1:1, 1:1]
+                λ_temp = real(H_temp[1,1])
+                if verbose_arnoldi
+                    println("    Arnoldi iter 1: λ_temp = $λ_temp, λ_old = $λ_old, diff = $(abs(λ_temp - λ_old))")
+                end
+                
+                if abs(λ_temp - λ_old) < tol * 10  # Slightly relaxed for first iteration
+                    if verbose_arnoldi
+                        println("    Immediate convergence at iteration 1")
+                    end
+                    actual_m = 1
+                    break
+                end
+                λ_old = λ_temp  # Update for next comparison
             end
             
             # Check for breakdown (happy breakdown)
@@ -237,7 +262,7 @@ Returns the eigenvalue closest to 1 and corresponding eigenvector.
 """
 function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b; 
                                   verbose::Bool=false, use_arnoldi::Bool=true,
-                                  krylov_dim::Int=50, arnoldi_tol::Float64=1e-10,
+                                  krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                   previous_eigenvector::Union{Nothing, Vector}=nothing)
     # Construct the matrices
     T = T_matrix(α, grid)           # Kinetic energy H0
@@ -301,11 +326,20 @@ function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b;
                     "random Gaussian"
                 end
                 
+                # Adaptive Krylov dimension based on starting vector quality
+                adaptive_krylov_dim = if i == 1 && previous_eigenvector !== nothing
+                    # For previous eigenvector, use much smaller subspace
+                    min(15, krylov_dim)
+                else
+                    # For random starting vector, use full dimension
+                    krylov_dim
+                end
+                
                 try
                     # Use Arnoldi method to find dominant eigenvalue
-                    λ, eigenvec, converged, iterations = arnoldi_eigenvalue(K, v0, krylov_dim; 
+                    λ, eigenvec, converged, iterations = arnoldi_eigenvalue(K, v0, adaptive_krylov_dim; 
                                                                            tol=arnoldi_tol, maxiter=10,
-                                                                           verbose_arnoldi=verbose)
+                                                                           verbose_arnoldi=true)
                     
                     # Check if result is reasonable
                     if !isnan(λ) && isfinite(λ)
@@ -418,7 +452,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                            E0::Float64=-8.0, E1::Float64=-7.0,
                            tolerance::Float64=1e-6, max_iterations::Int=100,
                            verbose::Bool=true, use_arnoldi::Bool=true,
-                           krylov_dim::Int=50, arnoldi_tol::Float64=1e-10)
+                           krylov_dim::Int=50, arnoldi_tol::Float64=1e-6)
     
     if verbose
         println("\n" * "="^70)
