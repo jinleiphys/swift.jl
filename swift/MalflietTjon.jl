@@ -156,8 +156,7 @@ function arnoldi_eigenvalue(A, v0, m; tol=1e-10, maxiter=300, verbose_arnoldi=fa
             if j >= 5 && j % 5 == 0  # Check every 5 iterations
                 H_temp = H[1:j, 1:j]
                 eigenvals_temp, _ = eigen(H_temp)
-                distances_temp = abs.(eigenvals_temp .- 1.0)
-                λ_temp = eigenvals_temp[argmin(distances_temp)]
+                λ_temp = maximum(real.(eigenvals_temp))
                 
                 if abs(real(λ_temp) - λ_old) < tol && j >= 10
                     # Silent early convergence
@@ -181,11 +180,10 @@ function arnoldi_eigenvalue(A, v0, m; tol=1e-10, maxiter=300, verbose_arnoldi=fa
         # Solve the reduced eigenvalue problem
         eigenvals, eigenvecs = eigen(H_reduced)
         
-        # Find eigenvalue closest to 1 (for Malfiet-Tjon method)
-        distances_from_1 = abs.(eigenvals .- 1.0)
-        closest_idx = argmin(distances_from_1)
-        λ = eigenvals[closest_idx]
-        y = eigenvecs[:, closest_idx]  # Eigenvector in Krylov basis
+        # Find largest eigenvalue (ground state for Malfiet-Tjon method)
+        largest_idx = argmax(real.(eigenvals))
+        λ = eigenvals[largest_idx]
+        y = eigenvecs[:, largest_idx]  # Eigenvector in Krylov basis
         
         # Transform back to original space
         v = Q[:, 1:actual_m] * y
@@ -291,20 +289,6 @@ function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b;
                 v / norm(v)
             end)
             
-            # Strategy 3: Unit vector in direction of largest diagonal element
-            push!(v0_strategies, () -> begin
-                diag_vals = abs.(diag(LHS))
-                max_idx = argmax(diag_vals)
-                v = zeros(ComplexF64, n)
-                v[max_idx] = 1.0
-                v
-            end)
-            
-            # Strategy 4: Uniform vector
-            push!(v0_strategies, () -> begin
-                v = ones(ComplexF64, n)
-                v / norm(v)
-            end)
             
             λ, eigenvec, converged, iterations = NaN, nothing, false, 0
             
@@ -313,10 +297,8 @@ function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b;
                 v0 = strategy()
                 strategy_name = if i == 1 && previous_eigenvector !== nothing
                     "previous eigenvector"
-                elseif (previous_eigenvector !== nothing && i == 2) || (previous_eigenvector === nothing && i == 1)
-                    "random Gaussian"
                 else
-                    "fallback"
+                    "random Gaussian"
                 end
                 
                 try
@@ -373,20 +355,19 @@ function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b;
             eigenvals_real = real.(eigenvals)
             eigenvals_sorted = sort(eigenvals_real, rev=true)  # Sort descending
             
-            # The ground state should correspond to the eigenvalue closest to 1
-            # Find eigenvalue closest to 1
-            distances_from_1 = abs.(eigenvals_real .- 1.0)
-            closest_idx = argmin(distances_from_1)
-            λ_closest = eigenvals[closest_idx]
-            eigenvec = eigenvecs[:, closest_idx]
+            # The ground state should correspond to the largest eigenvalue
+            # Find largest eigenvalue
+            largest_idx = argmax(eigenvals_real)
+            λ_largest = eigenvals[largest_idx]
+            eigenvec = eigenvecs[:, largest_idx]
             
             if verbose
                 println("  Direct method used")
                 println("  Top 5 eigenvalues: ", eigenvals_sorted[1:min(5, length(eigenvals_sorted))])
-                println("  Eigenvalue closest to 1: ", real(λ_closest))
+                println("  Largest eigenvalue: ", real(λ_largest))
             end
             
-            return real(λ_closest), eigenvec
+            return real(λ_largest), eigenvec
         end
         
     catch e
