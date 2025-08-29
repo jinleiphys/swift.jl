@@ -30,6 +30,7 @@ This creates `libpotentials.dylib` (macOS), `libpotentials.so` (Linux), or `libp
 
 ### Running Calculations
 - **Interactive development**: Use Jupyter notebooks in any subdirectory (*.ipynb files)
+- **Memory-optimized runs**: Use `swift_3H_optimized.ipynb` for reduced memory calculations (~1-2 GB instead of 27 GB)
 - **Script execution**: Run Julia files directly with `julia filename.jl`
 - **Testing modules**: Run test files like `julia test.jl` in respective directories
 
@@ -124,6 +125,8 @@ The framework uses sophisticated indexing schemes:
 ### Solver Selection and Performance
 - **Direct method**: Use `ThreeBody_Bound()` when you need all eigenvalues or for initial exploration
 - **Malfiet-Tjon method**: Use `malfiet_tjon_solve()` for ground state targeting, can be faster than direct method
+- **Arnoldi optimization**: Recent performance improvements use optimized Arnoldi eigenvalue solver with adaptive convergence
+- **Memory optimization**: Use smaller mesh sizes (20×20 instead of 30×30) and reduced λmax/lmax for memory-constrained systems
 - **Performance consideration**: Malfiet-Tjon avoids expensive generalized eigenvalue problems
 - **Initial guesses**: Use direct method results to inform Malfiet-Tjon starting energies for optimal convergence
 - **Module conflicts**: Import MalflietTjon functions explicitly: `import .MalflietTjon: malfiet_tjon_solve`

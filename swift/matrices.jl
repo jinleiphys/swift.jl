@@ -10,7 +10,7 @@ using .Gcoefficient
 using LinearAlgebra
 
 const amu= 931.49432 # MeV
-const m=1.008665 # amu
+const m=1.0079713395678829 # amu
 const ħ=197.3269718 # MeV. fm
 
 export Rxy_matrix, T_matrix, V_matrix, Bmatrix

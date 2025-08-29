@@ -260,15 +260,10 @@ where:
 Uses the Arnoldi method for efficient eigenvalue computation of the Faddeev kernel.
 Returns the eigenvalue closest to 1 and corresponding eigenvector.
 """
-function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b; 
+function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy; 
                                   verbose::Bool=false, use_arnoldi::Bool=true,
                                   krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                   previous_eigenvector::Union{Nothing, Vector}=nothing)
-    # Construct the matrices
-    T = T_matrix(α, grid)           # Kinetic energy H0
-    V = V_matrix(α, grid, potname)  # Potential energy
-    B = Bmatrix(α, grid)            # Overlap matrix
-    Rxy = Rxy_matrix(α, grid)       # Rearrangement matrix R
     
     # Form the left-hand side operator: E0*B - H0 - V
     # where H0 = T (kinetic energy) and V is the potential
@@ -290,7 +285,12 @@ function compute_lambda_eigenvalue(E0::Float64, α, grid, potname, e2b;
         if use_arnoldi
             # Precompute the matrix solve once for efficiency
             # K(E) = [E*B - T - V]⁻¹ * V*R
-            RHS = LHS \ VRxy  # Single expensive factorization
+            if verbose
+                print("  Computing RHS = LHS \\ VRxy... ")
+                @time RHS = LHS \ VRxy  # Single expensive factorization
+            else
+                RHS = LHS \ VRxy  # Single expensive factorization
+            end
             
             # Define the linear operator K(E) as a function using precomputed matrix
             K = function(x)
@@ -475,16 +475,32 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         println("-"^70)
     end
     
+    # Pre-compute matrices once (they don't change between iterations)
+    if verbose
+        print("  Building matrices... ")
+        @time begin
+            T = T_matrix(α, grid)           # Kinetic energy H0
+            V = V_matrix(α, grid, potname)  # Potential energy
+            B = Bmatrix(α, grid)            # Overlap matrix
+            Rxy = Rxy_matrix(α, grid)       # Rearrangement matrix R
+        end
+    else
+        T = T_matrix(α, grid)           # Kinetic energy H0
+        V = V_matrix(α, grid, potname)  # Potential energy
+        B = Bmatrix(α, grid)            # Overlap matrix
+        Rxy = Rxy_matrix(α, grid)       # Rearrangement matrix R
+    end
+    
     # Initialize secant method
     E_prev = E0
     E_curr = E1
     
     # Compute initial eigenvalues (no previous eigenvector for first iteration)
-    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, α, grid, potname, e2b; 
+    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy; 
                                                      verbose=verbose, use_arnoldi=use_arnoldi,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol)
     # Use previous eigenvector for second initial guess  
-    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, α, grid, potname, e2b; 
+    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, T, V, B, Rxy; 
                                                      verbose=verbose, use_arnoldi=use_arnoldi,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                      previous_eigenvector=eigenvec_prev)
@@ -530,7 +546,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         E_next = E_curr - (λ_curr - 1) * (E_curr - E_prev) / (λ_curr - λ_prev)
         
         # Compute new eigenvalue using previous eigenvector as starting point
-        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, α, grid, potname, e2b; 
+        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy; 
                                                          verbose=verbose, use_arnoldi=use_arnoldi,
                                                          krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                          previous_eigenvector=eigenvec_curr)
@@ -560,11 +576,29 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
             converged = true
             final_eigenvec = eigenvec_next
             if verbose
+                # Compute Hamiltonian expectation value <ψ|H|ψ> for validation
+                H = T + V + V * Rxy
+                
+                # Normalize the eigenvector properly with respect to the overlap matrix B
+                ψ = eigenvec_next
+                norm_factor = sqrt(real(ψ' * B * ψ))
+                ψ_normalized = ψ / norm_factor
+                
+                # Compute <ψ|H|ψ> / <ψ|B|ψ>
+                H_expectation = real((ψ_normalized' * H * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+                
                 println("-"^70)
                 println("✓ CONVERGED!")
                 @printf("Ground state energy: %10.6f MeV\n", E_next)
                 @printf("Final eigenvalue λ:   %10.6f\n", λ_next)
                 @printf("Binding energy:      %10.6f MeV\n", -E_next)
+                @printf("Hamiltonian <H>:     %10.6f MeV\n", H_expectation)
+                @printf("Energy difference:   %10.6f MeV\n", abs(H_expectation - E_next))
+                if abs(H_expectation - E_next) < 1e-3
+                    println("✓ Energy consistency check: PASSED")
+                else
+                    println("⚠ Energy consistency check: FAILED")
+                end
                 println("="^70)
             end
             return MalflietTjonResult(E_next, λ_next, eigenvec_next, iteration, 

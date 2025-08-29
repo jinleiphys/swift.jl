@@ -40,16 +40,14 @@ export computeGcoefficient
         for αout in 1:α.nchmax
             for αin in 1:α.nchmax
                 if perm_index == 1  # compute Gα3α1: phase = (-1)^(s23 + 2s1 + s2 + s3) * (-1)^(T23 + 2t1 + t2 + t3)
-                    # Note: s23 corresponds to α.s12[αin] in the input channel, T23 corresponds to α.T12[αin]
                     phase = (-1)^(α.s12[αin] + 2*s1 + s2 + s3) * (-1)^(α.T12[αin] + 2*t1 + t2 + t3)
                     Cisospin=hat(α.T12[αin])*hat(α.T12[αout])*wigner6j(t1,t2,α.T12[αout],t3,α.T,α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout]) 
                     nSmin= max(Int(2*abs(α.s12[αin]-s1)), Int(2*abs(α.s12[αout]-s3)))
                     nSmax= min(Int(2*(α.s12[αin]+s1)), Int(2*(α.s12[αout]+s3)))
-                elseif perm_index == 2 # compute Gα3α2: phase = (-1)^(s12 + 2s3 + s1 + s2) * (-1)^(T12 + 2t3 + t1 + t2)
-                    # Note: s12 corresponds to α.s12[αout] in the output channel, T12 corresponds to α.T12[αout]
-                    phase = (-1)^(α.s12[αout] + 2*s3 + s1 + s2) * (-1)^(α.T12[αout] + 2*t3 + t1 + t2)
-                    Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t3,t1,α.T12[αin],t2,α.T,α.T12[αout])
+                elseif perm_index == 2 # compute Gα3α2: phase = (-1)^(s31 + 2s2 + s1 + s3) * (-1)^(T31 + 2t2 + t1 + t3)
+                    phase = (-1)^(α.s12[αin] + 2*s2 + s1 + s3) * (-1)^(α.T12[αin] + 2*t2 + t1 + t3)
+                    Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t2,t1,α.T12[αout],t3,α.T,α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout])
                     nSmin= max(Int(2*abs(α.s12[αin]-s2)), Int(2*abs(α.s12[αout]-s3)))
                     nSmax= min(Int(2*(α.s12[αin]+s2)), Int(2*(α.s12[αout]+s3)))
@@ -77,7 +75,7 @@ export computeGcoefficient
                                               u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
                                                  float(α.λ[αin]), α.s2, α.J3[αin], 
                                                  float(LL), SS, α.J)
-                            f1=wigner6j(s3, s1, α.s12[αin], s2, SS, α.s12[αout])
+                            f1=wigner6j(s2, s1, α.s12[αout], s3, SS, α.s12[αin])
                         end
                             
                         Gαoutαin[:,:,:,αin, αout, perm_index] += Y4[:, :, :, αin, αout, perm_index]  * phase * Cisospin * Cspin * f0 * f1
@@ -115,7 +113,7 @@ export computeGcoefficient
     
     for αout in 1:α.nchmax
         # Calculate Ylαout coefficient
-        Ylαout = sqrt((2 * α.l[αout] + 1) / (4 * π))
+        Ylαout = sqrt((2. * α.l[αout] + 1.) / (4 * π))
         
         for αin in 1:α.nchmax
             # Calculate angular momentum bounds
@@ -286,55 +284,57 @@ Nine-j symbol calculation. Definition as in Brink and Satchler.
 
 Uses the racahW function from WignerSymbols.jl for efficient computation.
 """
-function u9(ra::Float64, rb::Float64, rc::Float64, rd::Float64, re::Float64, 
-            rf::Float64, rg::Float64, rh::Float64, ri::Float64)::Float64
-    
-    # Check if all inputs are valid angular momenta (non-negative)
-    if any(x < 0 for x in [ra, rb, rc, rd, re, rf, rg, rh, ri])
-        return 0.0
-    end
-    
-    # Check triangle inequalities for all triads
+function u9(ra::Float64, rb::Float64, rc::Float64,
+            rd::Float64, re::Float64, rf::Float64,
+            rg::Float64, rh::Float64, ri::Float64)::Float64
+
+    # 0) Basic validity: non-negative and half-integer/integer (within tol)
+    J = (ra,rb,rc,rd,re,rf,rg,rh,ri)
+    if any(x < 0 for x in J); return 0.0; end
+    tol = 1e-9
+    if any(abs(x*2 - round(x*2)) > 1e-8 for x in J); return 0.0; end
+
+    # 1) Quick triangle screens (not strictly required but cheap)
     triangles = [
         (ra, rb, rc), (rd, re, rf), (rg, rh, ri),  # rows
         (ra, rd, rg), (rb, re, rh), (rc, rf, ri)   # columns
     ]
-    
-    for (j1, j2, j3) in triangles
-        if abs(j1 - j2) > j3 || j1 + j2 < j3
+    for (j1,j2,j3) in triangles
+        if (abs(j1-j2) > j3 + tol) || (j1 + j2 < j3 - tol)
             return 0.0
         end
     end
-    
-    # Implementation using the sum formula for 9-j symbols in terms of 6-j symbols
+
+    # 2) Build integer bounds like Fortran (with small guard like +0.01)
+    kmin1 = Int(round(2*abs(ra - ri) + 1e-2))
+    kmin2 = Int(round(2*abs(rb - rf) + 1e-2))
+    kmin3 = Int(round(2*abs(rd - rh) + 1e-2))
+    minrda = max(kmin1, kmin2, kmin3)
+
+    kmax1 = Int(round(2*(ra + ri) + 1e-2))
+    kmax2 = Int(round(2*(rb + rf) + 1e-2))
+    kmax3 = Int(round(2*(rd + rh) + 1e-2))
+    maxrda = min(kmax1, kmax2, kmax3)
+
+    # 3) Enforce common parity: allowed 2r1 must match each pair’s parity
+    p1 = (kmin1 & 1); p2 = (kmin2 & 1); p3 = (kmin3 & 1)
+    if (p1 != p2) || (p1 != p3); return 0.0; end
+    if (minrda & 1) != p1; minrda += 1; end
+    if minrda > maxrda; return 0.0; end
+
+    # 4) Sum
     result = 0.0
-    
-    # Determine the range for the summation variable
-    minr = max(abs(ra - ri), abs(rb - rf), abs(rd - rh))
-    maxr = min(ra + ri, rb + rf, rd + rh)
-    
-    # Skip calculation if the triangle conditions aren't satisfied
-    if minr > maxr
-        return 0.0
-    end
-    
-    # Sum over all valid angular momenta
-    for n1 in Int(2*minr):2:Int(2*maxr)
-        r1 = n1/2.0  # Convert back to angular momentum value
-        
-        # Calculate the triple product of Racah W coefficients
-        # Note: racahW(T, j₁, j₂, J, j₃, J₁₂, J₂₃) computes W(j₁, j₂, J, j₃; J₁₂, J₂₃)
+    for n1 in minrda:2:maxrda
+        r1 = n1 / 2.0
+        # Ensure your racahW is truly Racah W(a,b,c,d;e,f)
         w1 = racahW(Float64, ra, ri, rd, rh, r1, rg)
         w2 = racahW(Float64, rb, rf, rh, rd, r1, re)
         w3 = racahW(Float64, ra, ri, rb, rf, r1, rc)
-        
-        # Add contribution to the sum
-        # Factor of (2*r1 + 1) corresponds to (2x+1) in the sum formula
-        result += (2.0 * r1 + 1.0) * w1 * w2 * w3 * ((-1.0)^(2*r1))
+        result += (n1 + 1.0) * w1 * w2 * w3    # (2r1+1) == n1+1
     end
-    
     return result
 end
+
 
 
 end # end module 
