@@ -576,23 +576,31 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
             converged = true
             final_eigenvec = eigenvec_next
             if verbose
-                # Compute Hamiltonian expectation value <ψ|H|ψ> for validation
-                H = T + V + V * Rxy
-                
                 # Normalize the eigenvector properly with respect to the overlap matrix B
                 ψ = eigenvec_next
                 norm_factor = sqrt(real(ψ' * B * ψ))
                 ψ_normalized = ψ / norm_factor
                 
-                # Compute <ψ|H|ψ> / <ψ|B|ψ>
-                H_expectation = real((ψ_normalized' * H * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+                # Compute individual expectation values
+                T_expectation = real((ψ_normalized' * T * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+                V_expectation = real((ψ_normalized' * V * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+                VRxy_expectation = real((ψ_normalized' * (V * Rxy) * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+                
+                # Total Hamiltonian expectation value
+                H_expectation = T_expectation + V_expectation + VRxy_expectation
                 
                 println("-"^70)
                 println("✓ CONVERGED!")
                 @printf("Ground state energy: %10.6f MeV\n", E_next)
                 @printf("Final eigenvalue λ:   %10.6f\n", λ_next)
                 @printf("Binding energy:      %10.6f MeV\n", -E_next)
-                @printf("Hamiltonian <H>:     %10.6f MeV\n", H_expectation)
+                println()
+                println("Expectation values:")
+                @printf("  <ψ|T|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", T_expectation)
+                @printf("  <ψ|V|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", V_expectation)
+                @printf("  <ψ|V*Rxy|ψ>/<ψ|B|ψ>  = %10.6f MeV\n", VRxy_expectation)
+                @printf("  <ψ|H|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", H_expectation)
+                println()
                 @printf("Energy difference:   %10.6f MeV\n", abs(H_expectation - E_next))
                 if abs(H_expectation - E_next) < 1e-3
                     println("✓ Energy consistency check: PASSED")

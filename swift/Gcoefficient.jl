@@ -136,7 +136,7 @@ export computeGcoefficient
                     CGout = clebschgordan(α.l[αout], 0, α.λ[αout], ML, LL, ML)
                     
                     # Pre-calculate Yout values - use broadcast for efficiency
-                    Yout = Ylαout .* Yλout[:, nchλout]
+                    Yout = conj.(Ylαout .* Yλout[:, nchλout])
                     
                     # Loop over ml and mλ values
                     for ml in -α.l[αin]:α.l[αin]

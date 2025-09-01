@@ -8,16 +8,10 @@ const libpot = Libdl.dlopen(joinpath(@__DIR__, "libpotentials.dylib"))
 
 # Function to list all symbols in the library (useful for debugging)
 function list_symbols(lib)
-    symbols = []
-    Libdl.dllist() do handle, path
-        if handle == lib
-            for sym in Libdl.dlsym_e(handle)
-                push!(symbols, sym)
-            end
-        end
-        return false
-    end
-    return symbols
+    # This is a simplified version - getting all symbols from a dynamic library
+    # is platform-dependent and complex. For debugging, we'll just return an empty list
+    # and rely on direct symbol testing.
+    return String[]
 end
 
 # Try to find symbols with different name mangling patterns
@@ -26,8 +20,7 @@ function find_symbol(lib, base_name)
         base_name,
         "_$base_name",
         "__$base_name",
-        "___$base_name",
-        "_$base_name"
+        "___$base_name"
     ]
     
     for name in possible_names
@@ -47,7 +40,7 @@ function find_symbol(lib, base_name)
     error("Symbol $base_name not found in library")
 end
 
-# Define the function pointers to the Fortran subroutines - with robust symbol finding
+# Define the function pointers to the Fortran subroutines - with robust symbol finding  
 const av18pw_ptr = find_symbol(libpot, "av18_MOD_av18pw")
 
 """
@@ -82,11 +75,12 @@ function call_av18(lpot::Int, l::Int, s::Int, j::Int, t::Int, t1z::Int, t2z::Int
     
     # Call the Fortran function using ccall
     # The signature matches: av18pw(lpot, l, s, j, t, t1z, t2z, r, vpw)
+    # vpw is a 2x2 array that needs to be passed as a pointer to the data
     ccall(
         av18pw_ptr,
         Cvoid,
         (Ref{Int32}, Ref{Int32}, Ref{Int32}, Ref{Int32}, 
-         Ref{Int32}, Ref{Int32}, Ref{Int32}, Ref{Float64}, Ref{Float64}),
+         Ref{Int32}, Ref{Int32}, Ref{Int32}, Ref{Float64}, Ptr{Float64}),
         Int32(lpot), Int32(l), Int32(s), Int32(j), 
         Int32(t), Int32(t1z), Int32(t2z), r, vpw
     )

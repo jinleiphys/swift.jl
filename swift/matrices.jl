@@ -226,6 +226,18 @@ end
             if α.T12[i] != α.T12[j]
                 continue  # Skip if T₁₂ ≠ T₁₂'
             end
+            if α.λ[i] != α.λ[j]
+                continue  # Skip if λ₃ ≠ λ₃'
+            end
+            if α.J3[i] != α.J3[j]
+                continue  # Skip if J₃ ≠ J₃'
+            end
+            if α.s12[i] != α.s12[j]
+                continue  # Skip if s₁₂ ≠ s₁₂'
+            end
+            if α.J12[i] != α.J12[j]
+                continue  # Skip if J₁₂ ≠ J₁₂'
+            end
             
             # Create channel coupling matrix E^{ij}_α
             E_alpha_ij = zeros(α.nchmax, α.nchmax)
@@ -245,7 +257,7 @@ end
                     continue
                 end
                 
-                cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)
+                cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)      
                 cg2 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)
                 cg_coefficient = cg1 * cg2
                 
@@ -261,9 +273,7 @@ end
             end
             
             # Add this channel pair's contribution: E^{ij}_α ⊗ V^{ij}_x ⊗ Iy
-            if norm(V_x_ij) > 1e-12  # Only add non-zero contributions
-                Vmatrix += E_alpha_ij ⊗ V_x_ij ⊗ Iy
-            end
+            Vmatrix += E_alpha_ij ⊗ V_x_ij ⊗ Iy
         end
     end    
 
@@ -285,7 +295,7 @@ function pot_nucl(α, grid, potname)
             if checkα(i, j, α)
                 li=[α.l[i]]
                 # Compute the potential matrix elements
-                if Int(α.J12[i]) == 0
+                if Int(α.J12[i]) == α.l[i]  # Uncoupled states: J12=l (includes J12=0 case)
                     if α.l[i] != α.l[j]
                         error("error: the channel is not allowed")
                     end 
@@ -300,28 +310,13 @@ function pot_nucl(α, grid, potname)
                             v12[ir, ir, i, j, 2] = v[1, 1]
                         # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                         end
-                    end 
-                    
-                elseif Int(α.J12[i]) == α.l[i]
-                    if α.l[i] != α.l[j]
-                        error("error: the channel is not allowed")
-                    end
-                    for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
-                        v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
-                        v12[ir, ir, i, j, 1] = v[1, 1]
-                        if α.MT > 0
-                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
-                            v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
-                        elseif α.MT < 0
-                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
-                            v12[ir, ir, i, j, 2] = v[1, 1]
-                        # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
-                        end
                     end
                 else
-                    l = [Int(α.J12[i])-1, Int(α.J12[i])+1]
+                    # For coupled channels, both i and j should have the same J12 due to delta function constraint
+                    J12_val = Int(α.J12[i])  # Could also use α.J12[j] since they should be equal
+                    l = [J12_val-1, J12_val+1]
                     for ir in 1:grid.nx  
-                        if α.l[i] == Int(α.J12[i]-1) && α.l[j] == Int(α.J12[i]-1) 
+                        if α.l[i] == (J12_val-1) && α.l[j] == (J12_val-1) 
                             v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[1, 1]
                             if α.MT > 0
@@ -332,7 +327,7 @@ function pot_nucl(α, grid, potname)
                                 v12[ir, ir, i, j, 2] = v[1, 1]
                             # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
-                        elseif α.l[i] == Int(α.J12[i]+1) && α.l[j] == Int(α.J12[i]+1) 
+                        elseif α.l[i] == (J12_val+1) && α.l[j] == (J12_val+1) 
                             v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[2, 2]
                             if α.MT > 0
@@ -343,7 +338,7 @@ function pot_nucl(α, grid, potname)
                                 v12[ir, ir, i, j, 2] = v[2, 2]
                             # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
-                        elseif α.l[i] == Int(α.J12[i]-1) && α.l[j] == Int(α.J12[i]+1) 
+                        elseif α.l[i] == (J12_val-1) && α.l[j] == (J12_val+1) 
                             v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[1, 2]
                             if α.MT > 0
@@ -354,7 +349,7 @@ function pot_nucl(α, grid, potname)
                                 v12[ir, ir, i, j, 2] = v[1, 2]
                             # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
-                        elseif α.l[i] == Int(α.J12[i]+1) && α.l[j] == Int(α.J12[i]-1) 
+                        elseif α.l[i] == (J12_val+1) && α.l[j] == (J12_val-1) 
                             v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[2, 1]
                             if α.MT > 0
@@ -415,7 +410,7 @@ end
     # Check if the channel is allowed for two-body potential coupling
     # The two-body potential should only couple channels with identical quantum numbers
     # for both the two-body subsystem AND the third particle
-    if (-1)^α.l[i] == (-1)^α.l[j] && Int(α.s12[i]*2) == Int(α.s12[j]*2) && Int(α.J12[i]*2) == Int(α.J12[j]*2) && α.λ[i] == α.λ[j] && Int(α.J3[i]*2) == Int(α.J3[j]*2)
+    if α.T12[i] == α.T12[j] && α.s12[i] == α.s12[j] && α.J12[i] == α.J12[j] && α.λ[i] == α.λ[j] && α.J3[i] == α.J3[j] && (-1)^α.l[i] == (-1)^α.l[j]
         return true
     else
         return false
