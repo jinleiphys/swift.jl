@@ -6,7 +6,7 @@ using LinearAlgebra
 using Printf
 using Random
 
-export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue
+export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation
 
 """
     MalflietTjonResult
@@ -589,6 +589,9 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 # Total Hamiltonian expectation value
                 H_expectation = T_expectation + V_expectation + VRxy_expectation
                 
+                # Compute position expectation values and RMS radii
+                r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho = compute_position_expectation(ψ_normalized, α, grid, B)
+                
                 println("-"^70)
                 println("✓ CONVERGED!")
                 @printf("Ground state energy: %10.6f MeV\n", E_next)
@@ -600,6 +603,16 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 @printf("  <ψ|V|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", V_expectation)
                 @printf("  <ψ|V*Rxy|ψ>/<ψ|B|ψ>  = %10.6f MeV\n", VRxy_expectation)
                 @printf("  <ψ|H|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", H_expectation)
+                println()
+                println("Position expectation values:")
+                @printf("  ⟨x⟩   = %8.4f fm  (Jacobi coordinate for particles 1,2)\n", r_x_avg)
+                @printf("  ⟨y⟩   = %8.4f fm  (Jacobi coordinate for particle 3)\n", r_y_avg)
+                @printf("  ⟨ρ⟩   = %8.4f fm  (hyperradius √(x²+y²))\n", rho_avg)
+                println()
+                println("RMS radii:")
+                @printf("  √⟨x²⟩ = %8.4f fm  (RMS radius in x-direction)\n", rms_x)
+                @printf("  √⟨y²⟩ = %8.4f fm  (RMS radius in y-direction)\n", rms_y)
+                @printf("  √⟨ρ²⟩ = %8.4f fm  (RMS hyperradius - overall nuclear size)\n", rms_rho)
                 println()
                 @printf("Energy difference:   %10.6f MeV\n", abs(H_expectation - E_next))
                 if abs(H_expectation - E_next) < 1e-3
@@ -665,6 +678,82 @@ function print_convergence_summary(result::MalflietTjonResult)
     end
     
     println("="^50)
+end
+
+"""
+    compute_position_expectation(eigenvector, α, grid, B)
+
+Compute position expectation values and RMS radii for the three-body wave function.
+
+Calculates:
+- ⟨x⟩, ⟨y⟩, ⟨ρ⟩: expectation values of coordinates
+- √⟨x²⟩, √⟨y²⟩, √⟨ρ²⟩: RMS radii
+
+# Arguments
+- `eigenvector`: Ground state wave function from Malfiet-Tjon solver
+- `α`: Channel structure
+- `grid`: Mesh structure containing coordinate grids
+- `B`: Overlap matrix
+
+# Returns
+- `(r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho)`: Expectation values and RMS radii in fm
+"""
+function compute_position_expectation(eigenvector::Vector, α, grid, B)
+    # Normalize the wave function with respect to the overlap matrix B
+    ψ = eigenvector
+    norm_factor = sqrt(real(ψ' * B * ψ))
+    ψ_normalized = ψ / norm_factor
+    
+    # Create position operator matrices
+    n_total = α.nchmax * grid.nx * grid.ny
+    
+    # First and second moment operator matrices (diagonal in coordinate representation)
+    X_matrix = zeros(Float64, n_total, n_total)
+    Y_matrix = zeros(Float64, n_total, n_total)
+    Rho_matrix = zeros(Float64, n_total, n_total)
+    X2_matrix = zeros(Float64, n_total, n_total)
+    Y2_matrix = zeros(Float64, n_total, n_total)
+    Rho2_matrix = zeros(Float64, n_total, n_total)
+    
+    for iα in 1:α.nchmax
+        for ix in 1:grid.nx
+            x_val = grid.xi[ix]  # x-coordinate value
+            for iy in 1:grid.ny
+                y_val = grid.yi[iy]  # y-coordinate value
+                rho_val = sqrt(x_val^2 + y_val^2)  # hyperradius
+                
+                # Linear index for this state |α,ix,iy⟩
+                i = (iα-1) * grid.nx * grid.ny + (ix-1) * grid.ny + iy
+                
+                # Position operators (first moments)
+                X_matrix[i, i] = x_val
+                Y_matrix[i, i] = y_val
+                Rho_matrix[i, i] = rho_val
+                
+                # Position squared operators (second moments)
+                X2_matrix[i, i] = x_val^2
+                Y2_matrix[i, i] = y_val^2
+                Rho2_matrix[i, i] = rho_val^2
+            end
+        end
+    end
+    
+    # Compute expectation values ⟨r⟩
+    r_x_avg = real((ψ_normalized' * X_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+    r_y_avg = real((ψ_normalized' * Y_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+    rho_avg = real((ψ_normalized' * Rho_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+    
+    # Compute second moments ⟨r²⟩
+    r_x2_avg = real((ψ_normalized' * X2_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+    r_y2_avg = real((ψ_normalized' * Y2_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+    rho2_avg = real((ψ_normalized' * Rho2_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
+    
+    # Compute RMS radii √⟨r²⟩
+    rms_x = sqrt(r_x2_avg)
+    rms_y = sqrt(r_y2_avg)
+    rms_rho = sqrt(rho2_avg)
+    
+    return (r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho)
 end
 
 end # module MalflietTjon

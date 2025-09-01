@@ -264,10 +264,15 @@ end
                 if abs(cg_coefficient) < 1e-10
                     continue
                 end
-                
+                # Select the appropriate potential matrix element based on mt12
+                # mt12 = 0 corresponds to np pair (isospin singlet/triplet mixed)  
+                # mt12 ≠ 0 corresponds to nn or pp pair
                 if mt12 == 0
+                    println("DEBUG CG: Channel pair ($i,$j), np pair, mt12=$mt12, CG coefficient=$cg_coefficient")
                     V_x_ij += v12[:, :, i, j, 1] * cg_coefficient
                 else
+                    pair_type = mt12 > 0 ? "pp" : "nn"
+                    println("DEBUG CG: Channel pair ($i,$j), $pair_type pair, mt12=$mt12, CG coefficient=$cg_coefficient")
                     V_x_ij += v12[:, :, i, j, 2] * cg_coefficient
                 end
             end
