@@ -268,12 +268,12 @@ end
                 # mt12 = 0 corresponds to np pair (isospin singlet/triplet mixed)  
                 # mt12 ≠ 0 corresponds to nn or pp pair
                 if mt12 == 0
-                    println("DEBUG CG: Channel pair ($i,$j), np pair, mt12=$mt12, CG coefficient=$cg_coefficient")
-                    V_x_ij += v12[:, :, i, j, 1] * cg_coefficient
+                    println("DEBUG α2bindex: Channel pair ($i,$j) → α2b($(α.α2bindex[i]),$(α.α2bindex[j])), np pair, mt12=$mt12, CG coefficient=$cg_coefficient")
+                    V_x_ij += v12[:, :, α.α2bindex[i], α.α2bindex[j], 1] * cg_coefficient
                 else
                     pair_type = mt12 > 0 ? "pp" : "nn"
-                    println("DEBUG CG: Channel pair ($i,$j), $pair_type pair, mt12=$mt12, CG coefficient=$cg_coefficient")
-                    V_x_ij += v12[:, :, i, j, 2] * cg_coefficient
+                    println("DEBUG α2bindex: Channel pair ($i,$j) → α2b($(α.α2bindex[i]),$(α.α2bindex[j])), $pair_type pair, mt12=$mt12, CG coefficient=$cg_coefficient")
+                    V_x_ij += v12[:, :, α.α2bindex[i], α.α2bindex[j], 2] * cg_coefficient
                 end
             end
             
@@ -293,75 +293,91 @@ function pot_nucl(α, grid, potname)
     # grid: grid object containing nx, xi, and other parameters
     # proton m1=+1/2  neutron m2=-1/2
     # for the current function, I only consider the local potential(AV8,NIJM,REID,AV14,AV18), for the non-local potential, one needs to modify this function 
-    v12 = zeros(grid.nx, grid.nx, α.nchmax, α.nchmax, 2)  # Initialize potential matrix the last dimension is for the isospin 1 for np pair and 2 for nn(MT<0) or pp pair(MT>0)
+    v12 = zeros(grid.nx, grid.nx, α.α2b.nchmax, α.α2b.nchmax, 2)  # Initialize potential matrix the last dimension is for the isospin 1 for np pair and 2 for nn(MT<0) or pp pair(MT>0)
 
-    for j in 1:α.nchmax
-        for i in 1:α.nchmax
-            if checkα(i, j, α)
-                li=[α.l[i]]
+    for j in 1:α.α2b.nchmax
+        for i in 1:α.α2b.nchmax
+            if checkα2b(i, j, α)
+                li=[α.α2b.l[i]]
                 # Compute the potential matrix elements
-                if Int(α.J12[i]) == α.l[i]  # Uncoupled states: J12=l (includes J12=0 case)
-                    if α.l[i] != α.l[j]
+                if Int(α.α2b.J12[i]) == 0  # Special case: J12=0
+                    if α.α2b.l[i] != α.α2b.l[j]
+                        continue  # Skip if l[i] != l[j] for J12=0 case
+                    end
+                    for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
+                        v = potential_matrix(potname, grid.xi[ir],li, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 0)
+                        v12[ir, ir, i, j, 1] = v[1, 1]
+                        if α.MT > 0
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 1) # for pp pair
+                            v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
+                        elseif α.MT < 0
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), -1) # for nn pair
+                            v12[ir, ir, i, j, 2] = v[1, 1]
+                        # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
+                        end
+                    end
+                elseif Int(α.α2b.J12[i]) == α.α2b.l[i]  # Uncoupled states: J12=l (but not J12=0)
+                    if α.α2b.l[i] != α.α2b.l[j]
                         error("error: the channel is not allowed")
                     end 
                     for ir in 1:grid.nx  # note that for nonlocal potential, additional loops is needed
-                        v = potential_matrix(potname, grid.xi[ir],li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
+                        v = potential_matrix(potname, grid.xi[ir],li, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 0)
                         v12[ir, ir, i, j, 1] = v[1, 1]
                         if α.MT > 0
-                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 1) # for pp pair
                             v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                         elseif α.MT < 0
-                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
+                            v = potential_matrix(potname, grid.xi[ir], li, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), -1) # for nn pair
                             v12[ir, ir, i, j, 2] = v[1, 1]
                         # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                         end
                     end
                 else
                     # For coupled channels, both i and j should have the same J12 due to delta function constraint
-                    J12_val = Int(α.J12[i])  # Could also use α.J12[j] since they should be equal
+                    J12_val = Int(α.α2b.J12[i])  # Could also use α.α2b.J12[j] since they should be equal
                     l = [J12_val-1, J12_val+1]
                     for ir in 1:grid.nx  
-                        if α.l[i] == (J12_val-1) && α.l[j] == (J12_val-1) 
-                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
+                        if α.α2b.l[i] == (J12_val-1) && α.α2b.l[j] == (J12_val-1) 
+                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[1, 1]
                             if α.MT > 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[1, 1] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                             elseif α.MT < 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[1, 1]
                             # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
-                        elseif α.l[i] == (J12_val+1) && α.l[j] == (J12_val+1) 
-                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
+                        elseif α.α2b.l[i] == (J12_val+1) && α.α2b.l[j] == (J12_val+1) 
+                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[2, 2]
                             if α.MT > 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[2, 2] + VCOUL_point(grid.xi[ir], 1.0) # for pp pair
                             elseif α.MT < 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[2, 2]
                             # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
-                        elseif α.l[i] == (J12_val-1) && α.l[j] == (J12_val+1) 
-                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
+                        elseif α.α2b.l[i] == (J12_val-1) && α.α2b.l[j] == (J12_val+1) 
+                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[1, 2]
                             if α.MT > 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[1, 2] 
                             elseif α.MT < 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[1, 2]
                             # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
-                        elseif α.l[i] == (J12_val+1) && α.l[j] == (J12_val-1) 
-                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 0)
+                        elseif α.α2b.l[i] == (J12_val+1) && α.α2b.l[j] == (J12_val-1) 
+                            v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 0)
                             v12[ir, ir, i, j, 1] = v[2, 1]
                             if α.MT > 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), 1) # for pp pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), 1) # for pp pair
                                 v12[ir, ir, i, j, 2] = v[2, 1]  
                             elseif α.MT < 0
-                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.s12[i]), Int(α.J12[i]), Int(α.T12[i]), -1) # for nn pair
+                                v = potential_matrix(potname, grid.xi[ir], l, Int(α.α2b.s12[i]), Int(α.α2b.J12[i]), Int(α.α2b.T12[i]), -1) # for nn pair
                                 v12[ir, ir, i, j, 2] = v[2, 1]
                             # else: α.MT == 0, only compute v12[ir, ir, i, j, 1], leave v12[ir, ir, i, j, 2] as zero
                             end
@@ -416,6 +432,16 @@ end
     # The two-body potential should only couple channels with identical quantum numbers
     # for both the two-body subsystem AND the third particle
     if α.T12[i] == α.T12[j] && α.s12[i] == α.s12[j] && α.J12[i] == α.J12[j] && α.λ[i] == α.λ[j] && α.J3[i] == α.J3[j] && (-1)^α.l[i] == (-1)^α.l[j]
+        return true
+    else
+        return false
+    end
+ end
+
+ function checkα2b(i,j,α)
+    # Check if the two-body channels are allowed for potential coupling
+    # The two-body potential should only couple channels with identical quantum numbers
+    if α.α2b.T12[i] == α.α2b.T12[j] && α.α2b.s12[i] == α.α2b.s12[j] && α.α2b.J12[i] == α.α2b.J12[j] && (-1)^α.α2b.l[i] == (-1)^α.α2b.l[j]
         return true
     else
         return false
