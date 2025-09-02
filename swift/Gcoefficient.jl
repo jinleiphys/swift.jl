@@ -1,6 +1,7 @@
 module Gcoefficient
 using WignerSymbols
-using SphericalHarmonics
+include("fortran_spherical_harmonics.jl")
+using .FortranSphericalHarmonics
 export computeGcoefficient
 
 
@@ -196,7 +197,7 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
 
     # Set x_3 as z-direction
     for i in 1:nθ
-        Yλ = computeYlm(acos(cosθi[i]), 0.0, λmax)
+        Yλ = computeYlm_fortran(acos(cosθi[i]), 0.0, λmax)
         for λ in 0:λmax
            for m in -λ:λ
                 nch = λ^2 + λ + m + 1
@@ -241,8 +242,8 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
                 θy = acos(clamp(yzin/yin, -1.0, 1.0))
 
                 
-                Yl = computeYlm(θx, ϕx, lmax)
-                Yλ = computeYlm(θy, ϕy, λmax)
+                Yl = computeYlm_fortran(θx, ϕx, lmax)
+                Yλ = computeYlm_fortran(θy, ϕy, λmax)
                 # Compute spherical harmonics for each (l,m) combination
                 for l in 0:lmax
                     for m in -l:l

@@ -17,7 +17,7 @@ module threebodybound
     t_start = time()
     
     t_rxy_start = time()
-    Rxy=Rxy_matrix(α, grid)
+    Rxy,Rxy_31,Rxy_32=Rxy_matrix(α, grid)
     t_rxy = time() - t_rxy_start
     
     t_t_start = time()

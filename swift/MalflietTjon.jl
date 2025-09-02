@@ -482,13 +482,13 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
             T = T_matrix(α, grid)           # Kinetic energy H0
             V = V_matrix(α, grid, potname)  # Potential energy
             B = Bmatrix(α, grid)            # Overlap matrix
-            Rxy = Rxy_matrix(α, grid)       # Rearrangement matrix R
+            Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
         end
     else
         T = T_matrix(α, grid)           # Kinetic energy H0
         V = V_matrix(α, grid, potname)  # Potential energy
         B = Bmatrix(α, grid)            # Overlap matrix
-        Rxy = Rxy_matrix(α, grid)       # Rearrangement matrix R
+        Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
     end
     
     # Initialize secant method
@@ -580,17 +580,26 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 ψ = eigenvec_next
                 norm_factor = sqrt(real(ψ' * B * ψ))
                 ψ_normalized = ψ / norm_factor
-                
+
+
+
+
+        
+
+                ψtot=compute_total_wavefunction(ψ_normalized, Rxy, B)
+                ψtot23 = Rxy_32 * ψtot
+                ψtot31 = Rxy_31 * ψtot
+
                 # Compute individual expectation values
-                T_expectation = real((ψ_normalized' * T * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-                V_expectation = real((ψ_normalized' * V * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-                VRxy_expectation = real((ψ_normalized' * (V * Rxy) * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-                
+                T_expectation = real(ψtot' * T * ψtot) 
+                V_expectation = real(ψtot' * V * ψtot) + real(ψtot23' * V * ψtot23) + real(ψtot31' * V * ψtot31)
+
+
                 # Total Hamiltonian expectation value
-                H_expectation = T_expectation + V_expectation + VRxy_expectation
+                H_expectation = T_expectation + V_expectation 
                 
                 # Compute position expectation values and RMS radii
-                r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho = compute_position_expectation(ψ_normalized, α, grid, B)
+                r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho = compute_position_expectation(ψtot, α, grid, B)
                 
                 println("-"^70)
                 println("✓ CONVERGED!")
@@ -599,10 +608,9 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 @printf("Binding energy:      %10.6f MeV\n", -E_next)
                 println()
                 println("Expectation values:")
-                @printf("  <ψ|T|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", T_expectation)
-                @printf("  <ψ|V|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", V_expectation)
-                @printf("  <ψ|V*Rxy|ψ>/<ψ|B|ψ>  = %10.6f MeV\n", VRxy_expectation)
-                @printf("  <ψ|H|ψ>/<ψ|B|ψ>      = %10.6f MeV\n", H_expectation)
+                @printf("  <ψ|T|ψ>      = %10.6f MeV\n", T_expectation)
+                @printf("  <ψ|V|ψ>      = %10.6f MeV\n", V_expectation)
+                @printf("  <ψ|H|ψ>      = %10.6f MeV\n", H_expectation)
                 println()
                 println("Position expectation values:")
                 @printf("  ⟨x⟩   = %8.4f fm  (Jacobi coordinate for particles 1,2)\n", r_x_avg)
@@ -754,6 +762,46 @@ function compute_position_expectation(eigenvector::Vector, α, grid, B)
     rms_rho = sqrt(rho2_avg)
     
     return (r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho)
+end
+
+"""
+    compute_total_wavefunction(ψ_normalized, Rxy, B)
+
+Compute the total three-body wave function ψtot = (1 + Rxy)ψ_normalized and its norm.
+
+This function constructs the complete Faddeev wave function by combining the 
+original wave function component with the rearranged components via the 
+permutation operator Rxy = R31 + R32.
+
+# Arguments
+- `ψ_normalized`: Normalized wave function component (typically from malfiet_tjon_solve)
+- `Rxy`: Rearrangement matrix (from Rxy_matrix function)
+- `B`: Overlap matrix (for proper normalization)
+
+# Returns
+- `ψtot`: Total wave function ψtot = (1 + Rxy)ψ_normalized
+- `ψtot_norm`: Norm of the total wave function √⟨ψtot|B|ψtot⟩
+
+# Physics
+The total three-body wave function in the Faddeev formalism is given by:
+    Ψ = ψ₁ + ψ₂ + ψ₃
+where each component ψᵢ represents a different arrangement channel.
+In the (x,y) representation, this becomes:
+    Ψ(x,y) = ψ(x,y) + R₃₁ψ(x,y) + R₃₂ψ(x,y) = (1 + R₃₁ + R₃₂)ψ(x,y)
+    
+The rearrangement operators Rxy = R₃₁ + R₃₂ account for the permutation
+symmetry of identical particles in the three-body system.
+"""
+function compute_total_wavefunction(ψ_normalized::Vector, Rxy, B)
+    # Compute the total wave function: ψtot = (1 + Rxy) * ψ_normalized
+    # The identity operator (1) is represented implicitly
+    ψtot = ψ_normalized + Rxy * ψ_normalized
+    
+    # Compute the norm of the total wave function with respect to the overlap matrix B
+    # ||ψtot||_B = √⟨ψtot|B|ψtot⟩
+    ψtot_norm = ψtot/sqrt(real(ψtot' * B * ψtot))
+    
+    return ψtot_norm
 end
 
 end # module MalflietTjon

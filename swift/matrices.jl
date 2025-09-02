@@ -90,7 +90,7 @@ function Rxy_matrix(α, grid)
     
     Rxy = Rxy_31 + Rxy_32
     
-    return Rxy
+    return Rxy,Rxy_31, Rxy_32
 end
 
 
