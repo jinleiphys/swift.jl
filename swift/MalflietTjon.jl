@@ -5,8 +5,9 @@ using .matrices
 using LinearAlgebra
 using Printf
 using Random
+using Statistics
 
-export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation
+export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation
 
 """
     MalflietTjonResult
@@ -580,6 +581,9 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 ψ = eigenvec_next
                 norm_factor = sqrt(real(ψ' * B * ψ))
                 ψ_normalized = ψ / norm_factor
+                
+                # Test Rxy_31 permutation properties
+                test_rxy31_permutation(ψ_normalized, Rxy_31, B)
 
 
 
@@ -802,6 +806,133 @@ function compute_total_wavefunction(ψ_normalized::Vector, Rxy, B)
     ψtot_norm = ψtot/sqrt(real(ψtot' * B * ψtot))
     
     return ψtot_norm
+end
+
+"""
+    test_rxy31_permutation(ψ_normalized, Rxy_31, B)
+
+Test the permutation properties of the Rxy_31 operator.
+
+For a permutation operator P, we expect:
+1. P*ψ should be related to ψ (since permutations rearrange particles)
+2. P*P*ψ = ψ (since applying the same permutation twice returns to original state)
+
+# Arguments
+- `ψ_normalized`: Normalized wave function vector
+- `Rxy_31`: The R31 rearrangement matrix (particle 1↔3 permutation)
+- `B`: Overlap matrix for proper normalization
+
+# Returns
+- Prints verification results and returns test status
+"""
+function test_rxy31_permutation(ψ_normalized::Vector, Rxy_31, B)
+    println("\n" * "="^70)
+    println("         TESTING Rxy_31 PERMUTATION PROPERTIES")
+    println("="^70)
+    
+    # Compute Rxy_31 * ψ_normalized
+    ψ_perm = Rxy_31 * ψ_normalized
+    
+    # Compute Rxy_31 * Rxy_31 * ψ_normalized 
+    ψ_double_perm = Rxy_31 * ψ_perm
+    
+    # Normalize all vectors with respect to B for proper comparison
+    norm_original = sqrt(real(ψ_normalized' * B * ψ_normalized))
+    norm_perm = sqrt(real(ψ_perm' * B * ψ_perm))
+    norm_double_perm = sqrt(real(ψ_double_perm' * B * ψ_double_perm))
+    
+    ψ_normalized_check = ψ_normalized / norm_original
+    ψ_perm_normalized = ψ_perm / norm_perm
+    ψ_double_perm_normalized = ψ_double_perm / norm_double_perm
+    
+    # Test 1: Check if Rxy_31^2 * ψ = ψ (double permutation returns to original)
+    diff_double = ψ_double_perm_normalized - ψ_normalized_check
+    error_double = sqrt(real(diff_double' * B * diff_double))
+    
+    println("TEST 1: Double permutation property Rxy_31² * ψ = ψ")
+    @printf("  ||Rxy_31² * ψ - ψ||_B = %12.6e\n", error_double)
+    
+    # Test 2: Check overlap between original and single permutation
+    overlap_orig_perm = real(ψ_normalized_check' * B * ψ_perm_normalized)
+    println("\nTEST 2: Overlap between original and permuted states")
+    @printf("  ⟨ψ|B|Rxy_31*ψ⟩ = %12.6f\n", overlap_orig_perm)
+    
+    # Test 3: Check normalization preservation
+    println("\nTEST 3: Norm preservation under permutation")
+    @printf("  ||ψ||_B              = %12.6f\n", norm_original)
+    @printf("  ||Rxy_31*ψ||_B       = %12.6f\n", norm_perm)
+    @printf("  ||Rxy_31²*ψ||_B      = %12.6f\n", norm_double_perm)
+    
+    # Test 4: Detailed analysis of Rxy_31 matrix properties
+    println("\nTEST 4: Matrix properties of Rxy_31")
+    
+    # Check if Rxy_31 is unitary (or at least norm-preserving)
+    Rxy_31_dagger = Rxy_31'
+    identity_test = Rxy_31_dagger * Rxy_31
+    
+    # For large matrices, we'll sample the identity test
+    n = size(Rxy_31, 1)
+    sample_indices = 1:min(100, n)  # Sample first 100 diagonal elements
+    
+    diagonal_elements = [identity_test[i,i] for i in sample_indices]
+    off_diagonal_norm = 0.0
+    count = 0
+    for i in sample_indices[1:min(10, length(sample_indices))]
+        for j in sample_indices[1:min(10, length(sample_indices))]
+            if i != j
+                off_diagonal_norm += abs(identity_test[i,j])^2
+                count += 1
+            end
+        end
+    end
+    off_diagonal_rms = count > 0 ? sqrt(off_diagonal_norm / count) : 0.0
+    
+    @printf("  Diagonal elements (sample): mean = %8.6f, std = %8.6f\n", 
+            mean(real.(diagonal_elements)), std(real.(diagonal_elements)))
+    @printf("  Off-diagonal RMS (sample):  %12.6e\n", off_diagonal_rms)
+    
+    # Test 5: Check if Rxy_31^2 is close to identity
+    Rxy_31_squared = Rxy_31 * Rxy_31
+    identity_matrix = Matrix{ComplexF64}(I, n, n)
+    diff_from_identity = Rxy_31_squared - identity_matrix
+    
+    # Sample the error
+    sampled_error = 0.0
+    sample_size = min(1000, n)
+    for i in 1:sample_size
+        sampled_error += abs(diff_from_identity[i,i])^2
+    end
+    sampled_error = sqrt(sampled_error / sample_size)
+    
+    println("\nTEST 5: Rxy_31² ≈ I (permutation involution property)")
+    @printf("  ||Rxy_31² - I||_F (sampled) = %12.6e\n", sampled_error)
+    
+    # Summary
+    println("\n" * "="^70)
+    println("SUMMARY:")
+    
+    double_perm_ok = error_double < 1e-6
+    norm_preserved = abs(norm_perm - norm_original) < 1e-6
+    involution_ok = sampled_error < 1e-6
+    
+    @printf("  Double permutation test:  %s (error = %8.2e)\n", 
+            double_perm_ok ? "✓ PASS" : "✗ FAIL", error_double)
+    @printf("  Norm preservation:        %s (diff = %8.2e)\n", 
+            norm_preserved ? "✓ PASS" : "✗ FAIL", abs(norm_perm - norm_original))
+    @printf("  Matrix involution:        %s (error = %8.2e)\n", 
+            involution_ok ? "✓ PASS" : "✗ FAIL", sampled_error)
+    
+    all_tests_pass = double_perm_ok && norm_preserved && involution_ok
+    println("\nOverall result: ", all_tests_pass ? "✓ Rxy_31 behaves as expected permutation operator" : "⚠ Some tests failed")
+    println("="^70)
+    
+    return (
+        double_permutation_error = error_double,
+        norm_preservation_error = abs(norm_perm - norm_original), 
+        involution_error = sampled_error,
+        overlap_original_permuted = overlap_orig_perm,
+        all_tests_pass = all_tests_pass
+    )
 end
 
 end # module MalflietTjon

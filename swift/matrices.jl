@@ -268,11 +268,8 @@ end
                 # mt12 = 0 corresponds to np pair (isospin singlet/triplet mixed)  
                 # mt12 ≠ 0 corresponds to nn or pp pair
                 if mt12 == 0
-                    println("DEBUG α2bindex: Channel pair ($i,$j) → α2b($(α.α2bindex[i]),$(α.α2bindex[j])), np pair, mt12=$mt12, CG coefficient=$cg_coefficient")
                     V_x_ij += v12[:, :, α.α2bindex[i], α.α2bindex[j], 1] * cg_coefficient
                 else
-                    pair_type = mt12 > 0 ? "pp" : "nn"
-                    println("DEBUG α2bindex: Channel pair ($i,$j) → α2b($(α.α2bindex[i]),$(α.α2bindex[j])), $pair_type pair, mt12=$mt12, CG coefficient=$cg_coefficient")
                     V_x_ij += v12[:, :, α.α2bindex[i], α.α2bindex[j], 2] * cg_coefficient
                 end
             end
