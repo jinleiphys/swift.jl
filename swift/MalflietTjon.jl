@@ -7,7 +7,7 @@ using Printf
 using Random
 using Statistics
 
-export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation
+export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry
 
 """
     MalflietTjonResult
@@ -476,6 +476,10 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         println("-"^70)
     end
     
+    # Initialize wave function variables
+    ψtot = ComplexF64[]
+    ψ3 = ComplexF64[]
+    
     # Pre-compute matrices once (they don't change between iterations)
     if verbose
         print("  Building matrices... ")
@@ -491,6 +495,10 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         B = Bmatrix(α, grid)            # Overlap matrix
         Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
     end
+    
+    # Check rearrangement matrix symmetry
+    check_rxy_symmetry(Rxy_31, Rxy_32; verbose=verbose)
+    
     
     # Initialize secant method
     E_prev = E0
@@ -523,7 +531,9 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         if verbose
             println("Already converged at initial guess!")
         end
-        return MalflietTjonResult(E_curr, λ_curr, eigenvec_curr, 0, convergence_history, true)
+        ψ = eigenvec_curr
+        ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
+        return MalflietTjonResult(E_curr, λ_curr, eigenvec_curr, 0, convergence_history, true), ψtot, ψ3
     end
     
     # Secant method iteration
@@ -576,34 +586,22 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         if residual < tolerance
             converged = true
             final_eigenvec = eigenvec_next
+            
+            # Normalize the eigenvector properly with respect to the overlap matrix B
+            ψ = eigenvec_next
+            ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
+            
             if verbose
-                # Normalize the eigenvector properly with respect to the overlap matrix B
-                ψ = eigenvec_next
-                norm_factor = sqrt(real(ψ' * B * ψ))
-                ψ_normalized = ψ / norm_factor
-                
-                # Test Rxy_31 permutation properties
-                test_rxy31_permutation(ψ_normalized, Rxy_31, B)
-
-
-
-
-        
-
-                ψtot=compute_total_wavefunction(ψ_normalized, Rxy, B)
-                ψtot23 = Rxy_32 * ψtot
-                ψtot31 = Rxy_31 * ψtot
+ 
 
                 # Compute individual expectation values
-                T_expectation = real(ψtot' * T * ψtot) 
-                V_expectation = real(ψtot' * V * ψtot) + real(ψtot23' * V * ψtot23) + real(ψtot31' * V * ψtot31)
+                T_expectation = 3.0*real(ψtot' * T * ψ3) 
+                V_expectation = 3.0*real(ψtot' * V * ψtot) 
 
 
                 # Total Hamiltonian expectation value
                 H_expectation = T_expectation + V_expectation 
                 
-                # Compute position expectation values and RMS radii
-                r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho = compute_position_expectation(ψtot, α, grid, B)
                 
                 println("-"^70)
                 println("✓ CONVERGED!")
@@ -616,16 +614,6 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 @printf("  <ψ|V|ψ>      = %10.6f MeV\n", V_expectation)
                 @printf("  <ψ|H|ψ>      = %10.6f MeV\n", H_expectation)
                 println()
-                println("Position expectation values:")
-                @printf("  ⟨x⟩   = %8.4f fm  (Jacobi coordinate for particles 1,2)\n", r_x_avg)
-                @printf("  ⟨y⟩   = %8.4f fm  (Jacobi coordinate for particle 3)\n", r_y_avg)
-                @printf("  ⟨ρ⟩   = %8.4f fm  (hyperradius √(x²+y²))\n", rho_avg)
-                println()
-                println("RMS radii:")
-                @printf("  √⟨x²⟩ = %8.4f fm  (RMS radius in x-direction)\n", rms_x)
-                @printf("  √⟨y²⟩ = %8.4f fm  (RMS radius in y-direction)\n", rms_y)
-                @printf("  √⟨ρ²⟩ = %8.4f fm  (RMS hyperradius - overall nuclear size)\n", rms_rho)
-                println()
                 @printf("Energy difference:   %10.6f MeV\n", abs(H_expectation - E_next))
                 if abs(H_expectation - E_next) < 1e-3
                     println("✓ Energy consistency check: PASSED")
@@ -635,7 +623,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 println("="^70)
             end
             return MalflietTjonResult(E_next, λ_next, eigenvec_next, iteration, 
-                                     convergence_history, true)
+                                     convergence_history, true), ψtot, ψ3
         end
         
         # Update for next iteration
@@ -651,6 +639,16 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         end
     end
     
+    # For non-converged case, compute wave functions from final eigenvector
+    if !converged && final_eigenvec !== nothing
+        ψ = final_eigenvec
+        ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
+    elseif !converged
+        # If no final eigenvector, return empty arrays
+        ψtot = ComplexF64[]
+        ψ3 = ComplexF64[]
+    end
+    
     if verbose
         println("-"^70)
         if !converged
@@ -662,7 +660,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
     end
     
     return MalflietTjonResult(E_curr, λ_curr, final_eigenvec, max_iterations, 
-                             convergence_history, converged)
+                             convergence_history, converged), ψtot, ψ3 
 end
 
 """
@@ -692,247 +690,154 @@ function print_convergence_summary(result::MalflietTjonResult)
     println("="^50)
 end
 
+
+
 """
-    compute_position_expectation(eigenvector, α, grid, B)
+    compute_total_wavefunction(ψ, Rxy, B)
 
-Compute position expectation values and RMS radii for the three-body wave function.
+Normalize the three-body wave function using the proper Faddeev normalization scheme.
 
-Calculates:
-- ⟨x⟩, ⟨y⟩, ⟨ρ⟩: expectation values of coordinates
-- √⟨x²⟩, √⟨y²⟩, √⟨ρ²⟩: RMS radii
+This function takes an unnormalized wave function component, constructs the complete 
+Faddeev wave function, applies the correct normalization, and verifies the result.
 
 # Arguments
-- `eigenvector`: Ground state wave function from Malfiet-Tjon solver
-- `α`: Channel structure
-- `grid`: Mesh structure containing coordinate grids
-- `B`: Overlap matrix
-
-# Returns
-- `(r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho)`: Expectation values and RMS radii in fm
-"""
-function compute_position_expectation(eigenvector::Vector, α, grid, B)
-    # Normalize the wave function with respect to the overlap matrix B
-    ψ = eigenvector
-    norm_factor = sqrt(real(ψ' * B * ψ))
-    ψ_normalized = ψ / norm_factor
-    
-    # Create position operator matrices
-    n_total = α.nchmax * grid.nx * grid.ny
-    
-    # First and second moment operator matrices (diagonal in coordinate representation)
-    X_matrix = zeros(Float64, n_total, n_total)
-    Y_matrix = zeros(Float64, n_total, n_total)
-    Rho_matrix = zeros(Float64, n_total, n_total)
-    X2_matrix = zeros(Float64, n_total, n_total)
-    Y2_matrix = zeros(Float64, n_total, n_total)
-    Rho2_matrix = zeros(Float64, n_total, n_total)
-    
-    for iα in 1:α.nchmax
-        for ix in 1:grid.nx
-            x_val = grid.xi[ix]  # x-coordinate value
-            for iy in 1:grid.ny
-                y_val = grid.yi[iy]  # y-coordinate value
-                rho_val = sqrt(x_val^2 + y_val^2)  # hyperradius
-                
-                # Linear index for this state |α,ix,iy⟩
-                i = (iα-1) * grid.nx * grid.ny + (ix-1) * grid.ny + iy
-                
-                # Position operators (first moments)
-                X_matrix[i, i] = x_val
-                Y_matrix[i, i] = y_val
-                Rho_matrix[i, i] = rho_val
-                
-                # Position squared operators (second moments)
-                X2_matrix[i, i] = x_val^2
-                Y2_matrix[i, i] = y_val^2
-                Rho2_matrix[i, i] = rho_val^2
-            end
-        end
-    end
-    
-    # Compute expectation values ⟨r⟩
-    r_x_avg = real((ψ_normalized' * X_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-    r_y_avg = real((ψ_normalized' * Y_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-    rho_avg = real((ψ_normalized' * Rho_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-    
-    # Compute second moments ⟨r²⟩
-    r_x2_avg = real((ψ_normalized' * X2_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-    r_y2_avg = real((ψ_normalized' * Y2_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-    rho2_avg = real((ψ_normalized' * Rho2_matrix * ψ_normalized) / (ψ_normalized' * B * ψ_normalized))
-    
-    # Compute RMS radii √⟨r²⟩
-    rms_x = sqrt(r_x2_avg)
-    rms_y = sqrt(r_y2_avg)
-    rms_rho = sqrt(rho2_avg)
-    
-    return (r_x_avg, r_y_avg, rho_avg, rms_x, rms_y, rms_rho)
-end
-
-"""
-    compute_total_wavefunction(ψ_normalized, Rxy, B)
-
-Compute the total three-body wave function ψtot = (1 + Rxy)ψ_normalized and its norm.
-
-This function constructs the complete Faddeev wave function by combining the 
-original wave function component with the rearranged components via the 
-permutation operator Rxy = R31 + R32.
-
-# Arguments
-- `ψ_normalized`: Normalized wave function component (typically from malfiet_tjon_solve)
+- `ψ`: Unnormalized wave function component ψ₃ (from malfiet_tjon_solve)
 - `Rxy`: Rearrangement matrix (from Rxy_matrix function)
 - `B`: Overlap matrix (for proper normalization)
 
 # Returns
-- `ψtot`: Total wave function ψtot = (1 + Rxy)ψ_normalized
-- `ψtot_norm`: Norm of the total wave function √⟨ψtot|B|ψtot⟩
+- `ψ_normalized`: Properly normalized total wave function |Ψ̄⟩
 
-# Physics
+# Physics and Normalization
 The total three-body wave function in the Faddeev formalism is given by:
-    Ψ = ψ₁ + ψ₂ + ψ₃
-where each component ψᵢ represents a different arrangement channel.
-In the (x,y) representation, this becomes:
-    Ψ(x,y) = ψ(x,y) + R₃₁ψ(x,y) + R₃₂ψ(x,y) = (1 + R₃₁ + R₃₂)ψ(x,y)
-    
-The rearrangement operators Rxy = R₃₁ + R₃₂ account for the permutation
-symmetry of identical particles in the three-body system.
+    |Ψ⟩ = (1 + P⁺ + P⁻)|ψ₃⟩ = (1 + Rxy)|ψ₃⟩
+
+The wave function is normalized using the condition:
+    ⟨Ψ|Ψ⟩ = ⟨Ψ|(1 + P⁺ + P⁻)|ψ₃⟩ = 3⟨Ψ|ψ₃⟩
+
+where the factor of 3 comes from the sum of identity and permutation operators.
+The normalized wave functions are:
+    |Ψ̄⟩ = |Ψ⟩/√(3⟨Ψ|ψ₃⟩)
+    |ψ̄₃⟩ = |ψ₃⟩/√(3⟨Ψ|ψ₃⟩)
+
+This normalization avoids issues with higher partial wave components outside 
+the truncated model space by using ⟨Ψ|ψ₃⟩ instead of ⟨Ψ|Ψ⟩.
 """
-function compute_total_wavefunction(ψ_normalized::Vector, Rxy, B)
-    # Compute the total wave function: ψtot = (1 + Rxy) * ψ_normalized
+function compute_total_wavefunction(ψ::Vector, Rxy, B)
+    # Compute the total wave function: |Ψ⟩ = (1 + Rxy)|ψ₃⟩
     # The identity operator (1) is represented implicitly
-    ψtot = ψ_normalized + Rxy * ψ_normalized
+    ψ_total = ψ + Rxy * ψ
     
-    # Compute the norm of the total wave function with respect to the overlap matrix B
-    # ||ψtot||_B = √⟨ψtot|B|ψtot⟩
-    ψtot_norm = ψtot/sqrt(real(ψtot' * B * ψtot))
+    # Compute the inner product ⟨Ψ|ψ₃⟩ with respect to the overlap matrix B
+    psi_psi3_inner = real(ψ_total' * B * ψ)
     
-    return ψtot_norm
+    # Check if the inner product is positive (required for normalization)
+    if psi_psi3_inner <= 0
+        error("Inner product ⟨Ψ|ψ₃⟩ = $psi_psi3_inner ≤ 0, cannot normalize wave function")
+    end
+    
+    # Apply the proper Faddeev normalization: |Ψ̄⟩ = |Ψ⟩/√(3⟨Ψ|ψ₃⟩)
+    normalization_factor = sqrt(3.0 * psi_psi3_inner)
+    ψ_normalized = ψ_total / normalization_factor
+    
+    # Verify normalization: Check that ⟨Ψ̄|(1 + P⁺ + P⁻)|ψ̄₃⟩ = 1
+    ψ3_normalized = ψ / normalization_factor
+    verification_inner = real(ψ_normalized' * B * ψ3_normalized)
+    expected_value = 1.0 / 3.0  # Since ⟨Ψ̄|Ψ̄⟩ = 3⟨Ψ̄|ψ̄₃⟩ = 1
+    
+    # Check normalization accuracy (tolerance for numerical precision)
+    normalization_error = abs(verification_inner - expected_value)
+    if normalization_error > 1e-10
+        @warn "Normalization verification failed: ⟨Ψ̄|ψ̄₃⟩ = $verification_inner, expected = $expected_value, error = $normalization_error"
+    end
+    
+    # Also verify that ⟨Ψ̄|B|Ψ̄⟩ = 1 (total norm should be 1)
+    total_norm_squared = real(ψ_normalized' * B * ψ_normalized)
+    total_norm_error = abs(total_norm_squared - 1.0)
+    if total_norm_error > 1e-10
+        println("Total normalization check: ⟨Ψ̄|B|Ψ̄⟩ = $total_norm_squared, expected = 1.0")
+    end
+    
+    return ψ_normalized, ψ3_normalized
 end
 
 """
-    test_rxy31_permutation(ψ_normalized, Rxy_31, B)
-
-Test the permutation properties of the Rxy_31 operator.
-
-For a permutation operator P, we expect:
-1. P*ψ should be related to ψ (since permutations rearrange particles)
-2. P*P*ψ = ψ (since applying the same permutation twice returns to original state)
-
-# Arguments
-- `ψ_normalized`: Normalized wave function vector
-- `Rxy_31`: The R31 rearrangement matrix (particle 1↔3 permutation)
-- `B`: Overlap matrix for proper normalization
-
-# Returns
-- Prints verification results and returns test status
-"""
-function test_rxy31_permutation(ψ_normalized::Vector, Rxy_31, B)
-    println("\n" * "="^70)
-    println("         TESTING Rxy_31 PERMUTATION PROPERTIES")
-    println("="^70)
+        check_rxy_symmetry(Rxy_31, Rxy_32; tolerance=1e-12, verbose=true)
     
-    # Compute Rxy_31 * ψ_normalized
-    ψ_perm = Rxy_31 * ψ_normalized
+    Check if the rearrangement matrices Rxy_31 and Rxy_32 are equal.
     
-    # Compute Rxy_31 * Rxy_31 * ψ_normalized 
-    ψ_double_perm = Rxy_31 * ψ_perm
+    In a three-body system with identical particles (like three nucleons),
+    the rearrangement operators R₃₁ and R₃₂ should be equal due to particle
+    exchange symmetry: R₃₁ (1↔3) should equal R₃₂ (2↔3) when particles 
+    1 and 2 are identical.
     
-    # Normalize all vectors with respect to B for proper comparison
-    norm_original = sqrt(real(ψ_normalized' * B * ψ_normalized))
-    norm_perm = sqrt(real(ψ_perm' * B * ψ_perm))
-    norm_double_perm = sqrt(real(ψ_double_perm' * B * ψ_double_perm))
+    # Arguments
+    - `Rxy_31`: Rearrangement matrix for 1↔3 particle exchange
+    - `Rxy_32`: Rearrangement matrix for 2↔3 particle exchange  
+    - `tolerance`: Numerical tolerance for matrix comparison (default: 1e-12)
+    - `verbose`: Print detailed comparison results (default: true)
     
-    ψ_normalized_check = ψ_normalized / norm_original
-    ψ_perm_normalized = ψ_perm / norm_perm
-    ψ_double_perm_normalized = ψ_double_perm / norm_double_perm
-    
-    # Test 1: Check if Rxy_31^2 * ψ = ψ (double permutation returns to original)
-    diff_double = ψ_double_perm_normalized - ψ_normalized_check
-    error_double = sqrt(real(diff_double' * B * diff_double))
-    
-    println("TEST 1: Double permutation property Rxy_31² * ψ = ψ")
-    @printf("  ||Rxy_31² * ψ - ψ||_B = %12.6e\n", error_double)
-    
-    # Test 2: Check overlap between original and single permutation
-    overlap_orig_perm = real(ψ_normalized_check' * B * ψ_perm_normalized)
-    println("\nTEST 2: Overlap between original and permuted states")
-    @printf("  ⟨ψ|B|Rxy_31*ψ⟩ = %12.6f\n", overlap_orig_perm)
-    
-    # Test 3: Check normalization preservation
-    println("\nTEST 3: Norm preservation under permutation")
-    @printf("  ||ψ||_B              = %12.6f\n", norm_original)
-    @printf("  ||Rxy_31*ψ||_B       = %12.6f\n", norm_perm)
-    @printf("  ||Rxy_31²*ψ||_B      = %12.6f\n", norm_double_perm)
-    
-    # Test 4: Detailed analysis of Rxy_31 matrix properties
-    println("\nTEST 4: Matrix properties of Rxy_31")
-    
-    # Check if Rxy_31 is unitary (or at least norm-preserving)
-    Rxy_31_dagger = Rxy_31'
-    identity_test = Rxy_31_dagger * Rxy_31
-    
-    # For large matrices, we'll sample the identity test
-    n = size(Rxy_31, 1)
-    sample_indices = 1:min(100, n)  # Sample first 100 diagonal elements
-    
-    diagonal_elements = [identity_test[i,i] for i in sample_indices]
-    off_diagonal_norm = 0.0
-    count = 0
-    for i in sample_indices[1:min(10, length(sample_indices))]
-        for j in sample_indices[1:min(10, length(sample_indices))]
-            if i != j
-                off_diagonal_norm += abs(identity_test[i,j])^2
-                count += 1
+    # Returns
+    - `are_equal`: Boolean indicating if matrices are equal within tolerance
+    - `max_diff`: Maximum absolute difference between matrix elements
+    """
+    function check_rxy_symmetry(Rxy_31, Rxy_32; tolerance=1e-12, verbose=true)
+        # Check that matrices have the same dimensions
+        if size(Rxy_31) != size(Rxy_32)
+            if verbose
+                println("ERROR: Matrix dimensions differ")
+                println("  Rxy_31 size: $(size(Rxy_31))")
+                println("  Rxy_32 size: $(size(Rxy_32))")
             end
+            return false, Inf
         end
+        
+        # Compute element-wise absolute differences
+        diff_matrix = abs.(Rxy_31 - Rxy_32)
+        max_diff = maximum(diff_matrix)
+        mean_diff = mean(diff_matrix)
+        
+        # Check if matrices are equal within tolerance
+        are_equal = max_diff < tolerance
+        
+        if verbose
+            println("\n" * "="^60)
+            println("         REARRANGEMENT MATRIX SYMMETRY CHECK")
+            println("="^60)
+            println("Matrix dimensions: $(size(Rxy_31))")
+            @printf("Maximum difference: %12.6e\n", max_diff)
+            @printf("Mean difference:    %12.6e\n", mean_diff)
+            @printf("Tolerance:          %12.6e\n", tolerance)
+            println()
+            
+            if are_equal
+                println("✓ PASSED: Rxy_31 = Rxy_32 (within tolerance)")
+                println("  This confirms particle exchange symmetry")
+            else
+                println("✗ FAILED: Rxy_31 ≠ Rxy_32")
+                println("  This may indicate:")
+                println("    - Incorrect implementation of rearrangement matrices")
+                println("    - Non-identical particle system")
+                println("    - Numerical precision issues")
+                
+                # Show some of the largest differences for debugging
+                if max_diff > tolerance
+                    flat_diff = vec(diff_matrix)
+                    sorted_indices = sortperm(flat_diff, rev=true)
+                    println("\n  Largest differences:")
+                    n_show = min(5, length(flat_diff))
+                    for i in 1:n_show
+                        idx = sorted_indices[i]
+                        row, col = divrem(idx-1, size(diff_matrix, 1)) .+ (1, 1)
+                        @printf("    [%d,%d]: %12.6e\n", row, col, flat_diff[idx])
+                    end
+                end
+            end
+            println("="^60)
+        end
+        
+        return are_equal, max_diff
     end
-    off_diagonal_rms = count > 0 ? sqrt(off_diagonal_norm / count) : 0.0
-    
-    @printf("  Diagonal elements (sample): mean = %8.6f, std = %8.6f\n", 
-            mean(real.(diagonal_elements)), std(real.(diagonal_elements)))
-    @printf("  Off-diagonal RMS (sample):  %12.6e\n", off_diagonal_rms)
-    
-    # Test 5: Check if Rxy_31^2 is close to identity
-    Rxy_31_squared = Rxy_31 * Rxy_31
-    identity_matrix = Matrix{ComplexF64}(I, n, n)
-    diff_from_identity = Rxy_31_squared - identity_matrix
-    
-    # Sample the error
-    sampled_error = 0.0
-    sample_size = min(1000, n)
-    for i in 1:sample_size
-        sampled_error += abs(diff_from_identity[i,i])^2
-    end
-    sampled_error = sqrt(sampled_error / sample_size)
-    
-    println("\nTEST 5: Rxy_31² ≈ I (permutation involution property)")
-    @printf("  ||Rxy_31² - I||_F (sampled) = %12.6e\n", sampled_error)
-    
-    # Summary
-    println("\n" * "="^70)
-    println("SUMMARY:")
-    
-    double_perm_ok = error_double < 1e-6
-    norm_preserved = abs(norm_perm - norm_original) < 1e-6
-    involution_ok = sampled_error < 1e-6
-    
-    @printf("  Double permutation test:  %s (error = %8.2e)\n", 
-            double_perm_ok ? "✓ PASS" : "✗ FAIL", error_double)
-    @printf("  Norm preservation:        %s (diff = %8.2e)\n", 
-            norm_preserved ? "✓ PASS" : "✗ FAIL", abs(norm_perm - norm_original))
-    @printf("  Matrix involution:        %s (error = %8.2e)\n", 
-            involution_ok ? "✓ PASS" : "✗ FAIL", sampled_error)
-    
-    all_tests_pass = double_perm_ok && norm_preserved && involution_ok
-    println("\nOverall result: ", all_tests_pass ? "✓ Rxy_31 behaves as expected permutation operator" : "⚠ Some tests failed")
-    println("="^70)
-    
-    return (
-        double_permutation_error = error_double,
-        norm_preservation_error = abs(norm_perm - norm_original), 
-        involution_error = sampled_error,
-        overlap_original_permuted = overlap_orig_perm,
-        all_tests_pass = all_tests_pass
-    )
-end
+
 
 end # module MalflietTjon

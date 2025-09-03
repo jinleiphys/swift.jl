@@ -66,7 +66,7 @@ function α2b(fermion::Bool,
     lmax::Int, lmin::Int, 
     s1::Float64, s2::Float64, 
     t1::Float64, t2::Float64, 
-    j2bmax::Float64, parity_pair::Int=1)
+    j2bmax::Float64, parity_pair::Union{Int,Nothing}=nothing)
     
     α = nch2b()
     
@@ -74,8 +74,8 @@ function α2b(fermion::Bool,
     nch_count = 0
     
     for l in lmin:lmax
-        # Check parity_pair constraint for the two-body subsystem
-        if (-1)^l != parity_pair
+        # Check parity_pair constraint for the two-body subsystem only if defined
+        if parity_pair !== nothing && (-1)^l != parity_pair
             continue
         end
         for ns in Int(2*(s1-s2)):2:Int(2*(s1+s2))
@@ -107,8 +107,8 @@ function α2b(fermion::Bool,
     ich = 0
     
     for l in lmin:lmax
-        # Check parity_pair constraint for the two-body subsystem
-        if (-1)^l != parity_pair
+        # Check parity_pair constraint for the two-body subsystem only if defined
+        if parity_pair !== nothing && (-1)^l != parity_pair
             continue
         end
         for ns in Int(2*(s1-s2)):2:Int(2*(s1+s2))
@@ -144,7 +144,7 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
     λmax::Int, λmin::Int, 
     s1::Float64, s2::Float64, s3::Float64, 
     t1::Float64, t2::Float64, t3::Float64, 
-    MT::Float64, j2bmax::Float64, parity_pair::Int=1)
+    MT::Float64, j2bmax::Float64, parity_pair::Union{Int,Nothing}=nothing)
     α = nch3b()
     α.s1 = s1
     α.s2 = s2

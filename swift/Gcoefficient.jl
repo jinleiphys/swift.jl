@@ -39,14 +39,14 @@ export computeGcoefficient
     for perm_index in 1:2 
         for αout in 1:α.nchmax
             for αin in 1:α.nchmax
-                if perm_index == 1  # compute Gα3α1: phase = (-1)^(s23 + 2s1 + s2 + s3) * (-1)^(T23 + 2t1 + t2 + t3)
-                    phase = (-1)^(α.s12[αin] + 2*s1 + s2 + s3) * (-1)^(α.T12[αin] + 2*t1 + t2 + t3)
+                if perm_index == 1  # compute Gα3α1: phase = (-1)^(s23 + 2s1 + s2 + s3) * (-1)^(T23 + 2t1 + t2 + t3)  out: α3; in:α1
+                    phase = (-1)^Int(α.s12[αin] + 2*s1 + s2 + s3) * (-1)^Int(α.T12[αin] + 2*t1 + t2 + t3)
                     Cisospin=hat(α.T12[αin])*hat(α.T12[αout])*wigner6j(t1,t2,α.T12[αout],t3,α.T,α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout]) 
                     nSmin= max(Int(2*abs(α.s12[αin]-s1)), Int(2*abs(α.s12[αout]-s3)))
                     nSmax= min(Int(2*(α.s12[αin]+s1)), Int(2*(α.s12[αout]+s3)))
-                elseif perm_index == 2 # compute Gα3α2: phase = (-1)^(s31 + 2s2 + s1 + s3) * (-1)^(T31 + 2t2 + t1 + t3)
-                    phase = (-1)^(α.s12[αin] + 2*s2 + s1 + s3) * (-1)^(α.T12[αin] + 2*t2 + t1 + t3)
+                elseif perm_index == 2 # compute Gα3α2: phase = (-1)^(s31 + 2s2 + s1 + s3) * (-1)^(T31 + 2t2 + t1 + t3)   out: α3; in:α2
+                    phase = (-1)^Int(α.s12[αin] + 2*s2 + s1 + s3) * (-1)^Int(α.T12[αin] + 2*t2 + t1 + t3)
                     Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t2,t1,α.T12[αout],t3,α.T,α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout])
                     nSmin= max(Int(2*abs(α.s12[αin]-s2)), Int(2*abs(α.s12[αout]-s3)))
