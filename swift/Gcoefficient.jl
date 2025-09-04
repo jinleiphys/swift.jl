@@ -35,22 +35,22 @@ export computeGcoefficient
     t1 = α.t1
     t2 = α.t2
     t3 = α.t3
-    Gαoutαin = zeros(ComplexF64, nθ, ny, nx, α.nchmax, α.nchmax, 2)
+    Gαoutαin = zeros(Float64, nθ, ny, nx, α.nchmax, α.nchmax, 2)
     for perm_index in 1:2 
         for αout in 1:α.nchmax
             for αin in 1:α.nchmax
                 if perm_index == 1  # compute Gα3α1: phase = (-1)^(s23 + 2s1 + s2 + s3) * (-1)^(T23 + 2t1 + t2 + t3)  out: α3; in:α1
-                    phase = (-1)^Int(α.s12[αin] + 2*s1 + s2 + s3) * (-1)^Int(α.T12[αin] + 2*t1 + t2 + t3)
+                    phase = (-1)^round(Int, α.s12[αin] + 2*s1 + s2 + s3) * (-1)^round(Int, α.T12[αin] + 2*t1 + t2 + t3)
                     Cisospin=hat(α.T12[αin])*hat(α.T12[αout])*wigner6j(t1,t2,α.T12[αout],t3,α.T,α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout]) 
-                    nSmin= max(Int(2*abs(α.s12[αin]-s1)), Int(2*abs(α.s12[αout]-s3)))
-                    nSmax= min(Int(2*(α.s12[αin]+s1)), Int(2*(α.s12[αout]+s3)))
+                    nSmin= max(round(Int, 2*abs(α.s12[αin]-s1)), round(Int, 2*abs(α.s12[αout]-s3)))
+                    nSmax= min(round(Int, 2*(α.s12[αin]+s1)), round(Int, 2*(α.s12[αout]+s3)))
                 elseif perm_index == 2 # compute Gα3α2: phase = (-1)^(s31 + 2s2 + s1 + s3) * (-1)^(T31 + 2t2 + t1 + t3)   out: α3; in:α2
-                    phase = (-1)^Int(α.s12[αin] + 2*s2 + s1 + s3) * (-1)^Int(α.T12[αin] + 2*t2 + t1 + t3)
+                    phase = (-1)^round(Int, α.s12[αin] + 2*s2 + s1 + s3) * (-1)^round(Int, α.T12[αin] + 2*t2 + t1 + t3)
                     Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t2,t1,α.T12[αout],t3,α.T,α.T12[αin])
                     Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout])
-                    nSmin= max(Int(2*abs(α.s12[αin]-s2)), Int(2*abs(α.s12[αout]-s3)))
-                    nSmax= min(Int(2*(α.s12[αin]+s2)), Int(2*(α.s12[αout]+s3)))
+                    nSmin= max(round(Int, 2*abs(α.s12[αin]-s2)), round(Int, 2*abs(α.s12[αout]-s3)))
+                    nSmax= min(round(Int, 2*(α.s12[αin]+s2)), round(Int, 2*(α.s12[αout]+s3)))
                 else
                     error("Parameter P must be '+' or '-'")
                 end
@@ -63,7 +63,7 @@ export computeGcoefficient
                     
                     for nSS in nSmin:nSmax
                         SS = nSS/2.
-                        if (Int(2*abs(LL-SS)) > Int(2*α.J) && Int(2*(LL+SS)) < Int(2*α.J))
+                        if (round(Int, 2*abs(LL-SS)) > round(Int, 2*α.J) || round(Int, 2*(LL+SS)) < round(Int, 2*α.J))
                             continue
                         end
                         if perm_index == 1
@@ -84,7 +84,7 @@ export computeGcoefficient
                             f1=wigner6j(s2, s1, α.s12[αout], s3, SS, α.s12[αin])
                         end
                             
-                        Gαoutαin[:,:,:,αin, αout, perm_index] += Y4[:, :, :, perm_index] * phase * Cisospin * Cspin * f0 * f1
+                        Gαoutαin[:,:,:,αout, αin, perm_index] += Y4[:, :, :, perm_index] * phase * Cisospin * Cspin * f0 * f1
 
                     end 
                 end 
@@ -104,24 +104,24 @@ export computeGcoefficient
 
     
     # Initialize output array for specific channel pair
-    Y4 = zeros(ComplexF64, nθ, ny, nx, 2)
+    Y4 = zeros(Float64, nθ, ny, nx, 2)
     
-    # Calculate Ylαout coefficient
-    Ylαout = sqrt((2. * α.l[αout] + 1.) / (4 * π))
+    # Calculate Ylαout coefficient for Y_l^0 (m=0 component)
+    Ylαout = sqrt( (2.0 * α.l[αout] + 1.0) / (4.0 * π) )
     
-    
+    # The ML loop range is constrained by both LL and λ[αout] due to the Clebsch-Gordan coefficient
     minl = min(LL, α.λ[αout])
     
     for ML in -minl:minl
         # Calculate nchλout index with bounds check
-        nchλout = Int(α.λ[αout]^2 + α.λ[αout] + ML + 1)
+        nchλout = round(Int, α.λ[αout]^2 + α.λ[αout] + ML + 1)
         
         # Calculate Clebsch-Gordan coefficient for output
         # Note: For z-axis (θ=0), ml=0 for the l component
         CGout = clebschgordan(α.l[αout], 0, α.λ[αout], ML, LL, ML)
         
-        # Pre-calculate Yout values - use broadcast for efficiency
-        Yout = conj.(Ylαout .* Yλout[:, nchλout])
+        # Pre-calculate Yout values - since arrays are now real, no conjugation needed
+        Yout = Ylαout .* Yλout[:, nchλout]
         
         # Loop over ml and mλ values
         for ml in -α.l[αin]:α.l[αin]
@@ -132,8 +132,8 @@ export computeGcoefficient
                 end
                 
                 # Calculate indices for input channel components with bounds check
-                nchlin = Int(α.l[αin]^2 + α.l[αin] + ml + 1)
-                nchλin = Int(α.λ[αin]^2 + α.λ[αin] + mλ + 1)
+                nchlin = round(Int, α.l[αin]^2 + α.l[αin] + ml + 1)
+                nchλin = round(Int, α.λ[αin]^2 + α.λ[αin] + mλ + 1)
                 
  
                 # Calculate Clebsch-Gordan coefficient for input
@@ -167,9 +167,9 @@ end
 
 function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
     
-    Yλout = zeros(ComplexF64, nθ, λmax^2 + 2*λmax + 1)
-    Ylin = zeros(ComplexF64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)    
-    Yλin = zeros(ComplexF64, nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
+    Yλout = zeros(Float64, nθ, λmax^2 + 2*λmax + 1)
+    Ylin = zeros(Float64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)    
+    Yλin = zeros(Float64, nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
 
     # Set x_3 as z-direction
     for i in 1:nθ
@@ -177,7 +177,7 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
         for λ in 0:λmax
            for m in -λ:λ
                 nch = λ^2 + λ + m + 1
-                Yλout[i, nch] =  Yλ[nch]
+                Yλout[i, nch] = real(Yλ[nch])  # Extract real part
             end
         end
     end
@@ -199,22 +199,25 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
         end
     
     # Set the ϕ angle for the spherical harmonics
-    ϕx = b < 0 ? π : 0
-    ϕy = d < 0 ? π : 0
-    
+    ϕx = b < 0 ? π : 0.0
+    ϕy = d < 0 ? π : 0.0
+
     for ix in 1:nx
         for iy in 1:ny
             for iθ in 1:nθ
-                # Compute transformed coordinates
-                xin = sqrt(a^2*xi[ix]^2 + b^2*yi[iy]^2 + 2*a*b*xi[ix]*yi[iy]*cosθi[iθ])
-                yin = sqrt(c^2*xi[ix]^2 + d^2*yi[iy]^2 + 2*c*d*xi[ix]*yi[iy]*cosθi[iθ])
+                # Compute transformed coordinates with safety checks
+                xin_squared = a^2*xi[ix]^2 + b^2*yi[iy]^2 + 2*a*b*xi[ix]*yi[iy]*cosθi[iθ]
+                yin_squared = c^2*xi[ix]^2 + d^2*yi[iy]^2 + 2*c*d*xi[ix]*yi[iy]*cosθi[iθ]
+                
+                
+                xin = sqrt(max(xin_squared, 1e-15))  # Avoid zero
+                yin = sqrt(max(yin_squared, 1e-15))  # Avoid zero
                 
                 xzin = a*xi[ix] + b*yi[iy]*cosθi[iθ]
-                # Ensure argument to acos is in valid range [-1, 1]
-                θx = acos(clamp(xzin/xin, -1.0, 1.0))
-                
                 yzin = c*xi[ix] + d*yi[iy]*cosθi[iθ]
-                # Ensure argument to acos is in valid range [-1, 1]
+                
+                # Ensure argument to acos is in valid range [-1, 1] and avoid division by zero
+                θx = acos(clamp(xzin/xin, -1.0, 1.0))
                 θy = acos(clamp(yzin/yin, -1.0, 1.0))
 
                 
@@ -224,7 +227,7 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
                 for l in 0:lmax
                     for m in -l:l
                         nch = l^2 + l + m + 1
-                        Ylin[iθ, iy, ix, nch, perm_index] = Yl[nch]
+                        Ylin[iθ, iy, ix, nch, perm_index] = real(Yl[nch])  # Extract real part
                     end
                 end
                 
@@ -232,7 +235,7 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
                 for λ in 0:λmax
                     for m in -λ:λ
                         nch = λ^2 + λ + m + 1
-                        Yλin[iθ, iy, ix, nch, perm_index] = Yλ[nch]
+                        Yλin[iθ, iy, ix, nch, perm_index] = real(Yλ[nch])  # Extract real part
                     end
                 end
             end

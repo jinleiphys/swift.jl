@@ -7,7 +7,7 @@ using Printf
 using Random
 using Statistics
 
-export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry
+export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry, compute_channel_probabilities
 
 """
     MalflietTjonResult
@@ -592,6 +592,18 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
             ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
             
             if verbose
+
+                # compute the probabilities in each channel
+                channel_probs, channel_info = compute_channel_probabilities(ψtot, ψ3, B, α, grid)
+                
+                # Print channel probability results
+                println()
+                println("Channel probability contributions:")
+                println("-"^60)
+                for (i, (prob, info)) in enumerate(zip(channel_probs, channel_info))
+                    @printf("  %s: %8.4f%%\n", info, prob * 100.0)
+                end
+                println("-"^60)
  
 
                 # Compute individual expectation values
@@ -838,6 +850,77 @@ end
         
         return are_equal, max_diff
     end
+
+"""
+    compute_channel_probabilities(ψ_normalized, ψ3_normalized, B, α, grid)
+
+Compute the probability contribution of each channel in the three-body wave function.
+
+The probability contribution of each channel i is computed as:
+    P_i = 3 * real(ψ_normalized[i]' * B[i,i] * ψ3_normalized[i])
+
+This represents the overlap between the total normalized wave function and the 
+normalized component wave function for each channel, scaled by the factor of 3
+from the Faddeev normalization.
+
+# Arguments
+- `ψ_normalized`: Normalized total wave function |Ψ̄⟩
+- `ψ3_normalized`: Normalized component wave function |ψ̄₃⟩  
+- `B`: Overlap matrix
+- `α`: Channel structure (used to get channel information)
+- `grid`: Mesh structure (used to get grid dimensions)
+
+# Returns
+- `channel_probs`: Vector of probability contributions for each channel
+- `channel_info`: Vector of channel descriptions for labeling
+
+# Physics
+In the Faddeev formalism, each channel represents a specific coupling of
+angular momentum and isospin quantum numbers. The probability contribution
+shows how much each channel contributes to the total three-body bound state.
+"""
+function compute_channel_probabilities(ψ_normalized, ψ3_normalized, B, α, grid)
+    # Get the number of channels and grid points per channel
+    nchannels = α.nchmax
+    nx, ny = grid.nx, grid.ny
+    points_per_channel = nx * ny
+    
+    # Initialize arrays for results
+    channel_probs = Float64[]
+    channel_info = String[]
+    
+    # Loop over each channel
+    for i in 1:nchannels
+        # Calculate index range for this channel
+        start_idx = (i-1) * points_per_channel + 1
+        end_idx = i * points_per_channel
+        
+        # Extract the wave function components for this channel
+        ψ_channel = ψ_normalized[start_idx:end_idx]
+        ψ3_channel = ψ3_normalized[start_idx:end_idx]
+        
+        # Extract the overlap matrix block for this channel
+        B_channel = B[start_idx:end_idx, start_idx:end_idx]
+        
+        # Compute the probability contribution: 3 * real(ψ'* B * ψ3)
+        prob = 3.0 * real(ψ_channel' * B_channel * ψ3_channel)
+        push!(channel_probs, prob)
+        
+        # Create channel description using the nch3b structure fields
+        # Format: (l₁₂(s₁s₂)s₁₂)J₁₂, (λ₃s₃)J₃, J; (t₁t₂)T₁₂, t₃, T
+        channel_desc = @sprintf("Ch %2d: (l₁₂=%d,s₁₂=%.1f)J₁₂=%.1f, (λ₃=%d,s₃=%.1f)J₃=%.1f, J=%.1f; T₁₂=%.1f, t₃=%.1f, T=%.1f", 
+                               i, α.l[i], α.s12[i], α.J12[i], α.λ[i], α.s3, α.J3[i], α.J, α.T12[i], α.t3, α.T)
+        push!(channel_info, channel_desc)
+    end
+    
+    # Verify that probabilities sum to approximately 1
+    total_prob = sum(channel_probs)
+    if abs(total_prob - 1.0) > 1e-6
+        @warn "Channel probabilities do not sum to 1: sum = $total_prob"
+    end
+    
+    return channel_probs, channel_info
+end
 
 
 end # module MalflietTjon
