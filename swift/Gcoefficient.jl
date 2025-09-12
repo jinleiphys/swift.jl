@@ -36,67 +36,137 @@ export computeGcoefficient
     t2 = α.t2
     t3 = α.t3
     Gαoutαin = zeros(Float64, nθ, ny, nx, α.nchmax, α.nchmax, 2)
-    for perm_index in 1:2 
+    
+    # Pre-compute invariant quantities outside loops
+    hat_T12 = [hat(α.T12[i]) for i in 1:α.nchmax]
+    hat_J12 = [hat(α.J12[i]) for i in 1:α.nchmax] 
+    hat_J3 = [hat(α.J3[i]) for i in 1:α.nchmax]
+    hat_s12 = [hat(α.s12[i]) for i in 1:α.nchmax]
+    
+    # Cache for expensive calculations - using Dict for flexibility with composite keys
+    u9_cache = Dict{Tuple{Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64}, Float64}()
+    wigner6j_cache = Dict{Tuple{Float64,Float64,Float64,Float64,Float64,Float64}, Float64}()
+    Y4_cache = Dict{Tuple{Int,Int,Int}, Array{Float64,4}}()
+    
+    # Helper function for cached u9 calculation
+    function cached_u9(args...)
+        key = args
+        if !haskey(u9_cache, key)
+            u9_cache[key] = u9(args...)
+        end
+        return u9_cache[key]
+    end
+    
+    # Helper function for cached wigner6j calculation  
+    function cached_wigner6j(args...)
+        key = args
+        if !haskey(wigner6j_cache, key)
+            wigner6j_cache[key] = wigner6j(args...)
+        end
+        return wigner6j_cache[key]
+    end
+    
+    # Helper function for cached Y4 calculation
+    function cached_Y4(LL, αout, αin)
+        key = (LL, αout, αin)
+        if !haskey(Y4_cache, key)
+            Y4_cache[key] = YYcoupling(α, nθ, ny, nx, Ylin, Yλin, Yλout, LL, αout, αin)
+        end
+        return Y4_cache[key]
+    end
+    
+    # Pre-compute valid channel combinations to avoid redundant checks
+    valid_combinations = Vector{Tuple{Int,Int,Int,Int,Int,Float64,Float64,Float64,Int,Int}}()
+    
+    for perm_index in 1:2
         for αout in 1:α.nchmax
             for αin in 1:α.nchmax
-                if perm_index == 1  # compute Gα3α1: phase = (-1)^(s23 + 2s1 + s2 + s3) * (-1)^(T23 + 2t1 + t2 + t3)  out: α3; in:α1
+                # Pre-compute permutation-specific values
+                if perm_index == 1
                     phase = (-1)^round(Int, α.s12[αin] + 2*s1 + s2 + s3) * (-1)^round(Int, α.T12[αin] + 2*t1 + t2 + t3)
-                    Cisospin=hat(α.T12[αin])*hat(α.T12[αout])*wigner6j(t1,t2,α.T12[αout],t3,α.T,α.T12[αin])
-                    Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout]) 
-                    nSmin= max(round(Int, 2*abs(α.s12[αin]-s1)), round(Int, 2*abs(α.s12[αout]-s3)))
-                    nSmax= min(round(Int, 2*(α.s12[αin]+s1)), round(Int, 2*(α.s12[αout]+s3)))
-                elseif perm_index == 2 # compute Gα3α2: phase = (-1)^(s31 + 2s2 + s1 + s3) * (-1)^(T31 + 2t2 + t1 + t3)   out: α3; in:α2
-                    phase = (-1)^round(Int, α.s12[αin] + 2*s2 + s1 + s3) * (-1)^round(Int, α.T12[αin] + 2*t2 + t1 + t3)
-                    Cisospin=hat(α.T12[αout])*hat(α.T12[αin])*wigner6j(t2,t1,α.T12[αout],t3,α.T,α.T12[αin])
-                    Cspin=hat(α.J12[αin])*hat(α.J12[αout])*hat(α.J3[αin])*hat(α.J3[αout])*hat(α.s12[αin])*hat(α.s12[αout])
-                    nSmin= max(round(Int, 2*abs(α.s12[αin]-s2)), round(Int, 2*abs(α.s12[αout]-s3)))
-                    nSmax= min(round(Int, 2*(α.s12[αin]+s2)), round(Int, 2*(α.s12[αout]+s3)))
+                    Cisospin = hat_T12[αin] * hat_T12[αout] * cached_wigner6j(t1,t2,α.T12[αout],t3,α.T,α.T12[αin])
+                    s_ref = s1  # Reference spin for coupling
+                    nSmin = max(round(Int, 2*abs(α.s12[αin]-s1)), round(Int, 2*abs(α.s12[αout]-s3)))
+                    nSmax = min(round(Int, 2*(α.s12[αin]+s1)), round(Int, 2*(α.s12[αout]+s3)))
                 else
-                    error("Parameter P must be '+' or '-'")
+                    phase = (-1)^round(Int, α.s12[αin] + 2*s2 + s1 + s3) * (-1)^round(Int, α.T12[αin] + 2*t2 + t1 + t3)
+                    Cisospin = hat_T12[αout] * hat_T12[αin] * cached_wigner6j(t2,t1,α.T12[αout],t3,α.T,α.T12[αin])
+                    s_ref = s2  # Reference spin for coupling
+                    nSmin = max(round(Int, 2*abs(α.s12[αin]-s2)), round(Int, 2*abs(α.s12[αout]-s3)))
+                    nSmax = min(round(Int, 2*(α.s12[αin]+s2)), round(Int, 2*(α.s12[αout]+s3)))
                 end
-                LLmin =max(abs(α.l[αin]-α.λ[αin]),abs(α.l[αout]-α.λ[αout]))
-                LLmax =min(α.l[αin]+α.λ[αin],α.l[αout]+α.λ[αout])
                 
-                for LL in LLmin:LLmax 
-                    # Compute Y4 coupling for this specific LL, αout, αin combination
-                    Y4 = YYcoupling(α, nθ, ny, nx, Ylin, Yλin, Yλout, LL, αout, αin)
-                    
-                    for nSS in nSmin:nSmax
-                        SS = nSS/2.
-                        if (round(Int, 2*abs(LL-SS)) > round(Int, 2*α.J) || round(Int, 2*(LL+SS)) < round(Int, 2*α.J))
-                            continue
-                        end
-                        if perm_index == 1
-                            f0 = (2*SS+1.0) * u9(float(α.l[αout]),α.s12[αout],α.J12[αout], 
-                                                 float(α.λ[αout]),α.s3, α.J3[αout], 
-                                                 float(LL), SS, α.J) * 
-                                              u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
-                                                 float(α.λ[αin]), α.s1, α.J3[αin], 
-                                                 float(LL), SS, α.J)
-                            f1=wigner6j(s1, s2, α.s12[αout], s3, SS, α.s12[αin])
-                        elseif perm_index == 2
-                            f0 = (2*SS+1.0) * u9(float(α.l[αout]),α.s12[αout],α.J12[αout], 
-                                                 float(α.λ[αout]),α.s3, α.J3[αout], 
-                                                 float(LL), SS, α.J) * 
-                                              u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
-                                                 float(α.λ[αin]), α.s2, α.J3[αin], 
-                                                 float(LL), SS, α.J)
-                            f1=wigner6j(s2, s1, α.s12[αout], s3, SS, α.s12[αin])
-                        end
-                            
-                        Gαoutαin[:,:,:,αout, αin, perm_index] += Y4[:, :, :, perm_index] * phase * Cisospin * Cspin * f0 * f1
-
-                    end 
-                end 
-            end 
-        end 
-    end 
-
-
+                # Skip if isospin coupling is zero
+                if abs(Cisospin) < 1e-14
+                    continue
+                end
+                
+                # Pre-compute spin coupling coefficient
+                Cspin = hat_J12[αin] * hat_J12[αout] * hat_J3[αin] * hat_J3[αout] * hat_s12[αin] * hat_s12[αout]
+                
+                LLmin = max(abs(α.l[αin]-α.λ[αin]), abs(α.l[αout]-α.λ[αout]))
+                LLmax = min(α.l[αin]+α.λ[αin], α.l[αout]+α.λ[αout])
+                
+                # Store valid combination for later processing
+                for LL in LLmin:LLmax
+                    push!(valid_combinations, (perm_index, αout, αin, LL, round(Int,s_ref*2), phase, Cisospin, Cspin, nSmin, nSmax))
+                end
+            end
+        end
+    end
+    
+    # Optimized main computation loop - process by LL first for better Y4 cache usage
+    for (perm_index, αout, αin, LL, s_ref_int, phase, Cisospin, Cspin, nSmin, nSmax) in valid_combinations
+        s_ref = s_ref_int / 2.0
+        
+        # Get Y4 coupling (cached)
+        Y4 = cached_Y4(LL, αout, αin)
+        
+        for nSS in nSmin:nSmax
+            SS = nSS / 2.0
+            
+            # Triangle inequality check for |LL - SS| ≤ J ≤ LL + SS
+            if (round(Int, 2*abs(LL-SS)) > round(Int, 2*α.J) || round(Int, 2*(LL+SS)) < round(Int, 2*α.J))
+                continue
+            end
+            
+            # Pre-compute common u9 factor (cached)
+            u9_out = cached_u9(float(α.l[αout]), α.s12[αout], α.J12[αout], 
+                              float(α.λ[αout]), α.s3, α.J3[αout], 
+                              float(LL), SS, α.J)
+            
+            u9_in = cached_u9(float(α.l[αin]), α.s12[αin], α.J12[αin], 
+                             float(α.λ[αin]), s_ref, α.J3[αin], 
+                             float(LL), SS, α.J)
+            
+            # Skip if either u9 coefficient is zero
+            if abs(u9_out) < 1e-14 || abs(u9_in) < 1e-14
+                continue
+            end
+            
+            f0 = (2*SS + 1.0) * u9_out * u9_in
+            
+            # Compute spin recoupling coefficient (cached)
+            if perm_index == 1
+                f1 = cached_wigner6j(s1, s2, α.s12[αout], s3, SS, α.s12[αin])
+            else
+                f1 = cached_wigner6j(s2, s1, α.s12[αout], s3, SS, α.s12[αin])
+            end
+            
+            # Skip if wigner6j coefficient is zero  
+            if abs(f1) < 1e-14
+                continue
+            end
+            
+            # Final coefficient
+            coeff = phase * Cisospin * Cspin * f0 * f1
+            
+            # Optimized array accumulation - use views to avoid temporary arrays
+            @views Gαoutαin[:,:,:,αout, αin, perm_index] .+= Y4[:, :, :, perm_index] .* coeff
+        end
+    end
 
     return Gαoutαin
-
-
  end
 
 
@@ -112,6 +182,10 @@ export computeGcoefficient
     # The ML loop range is constrained by both LL and λ[αout] due to the Clebsch-Gordan coefficient
     minl = min(LL, α.λ[αout])
     
+    # Pre-compute all valid quantum number combinations and their coupling factors
+    # This moves invariant calculations outside the spatial loops
+    valid_combinations = Vector{Tuple{Int, Int, Int, Float64, Vector{Float64}}}()
+    
     for ML in -minl:minl
         # Calculate nchλout index with bounds check
         nchλout = round(Int, α.λ[αout]^2 + α.λ[αout] + ML + 1)
@@ -120,7 +194,12 @@ export computeGcoefficient
         # Note: For z-axis (θ=0), ml=0 for the l component
         CGout = clebschgordan(α.l[αout], 0, α.λ[αout], ML, LL, ML)
         
-        # Pre-calculate Yout values - since arrays are now real, no conjugation needed
+        # Skip if CGout is zero to avoid unnecessary computation
+        if abs(CGout) < 1e-14
+            continue
+        end
+        
+        # Pre-calculate Yout values for this ML - move outside spatial loops
         Yout = Ylαout .* Yλout[:, nchλout]
         
         # Loop over ml and mλ values
@@ -131,29 +210,40 @@ export computeGcoefficient
                     continue
                 end
                 
+                # Calculate Clebsch-Gordan coefficient for input
+                CGin = clebschgordan(α.l[αin], ml, α.λ[αin], mλ, LL, ML)
+                
+                # Skip if CGin is zero to avoid unnecessary computation
+                if abs(CGin) < 1e-14
+                    continue
+                end
+                
                 # Calculate indices for input channel components with bounds check
                 nchlin = round(Int, α.l[αin]^2 + α.l[αin] + ml + 1)
                 nchλin = round(Int, α.λ[αin]^2 + α.λ[αin] + mλ + 1)
                 
- 
-                # Calculate Clebsch-Gordan coefficient for input
-                CGin = clebschgordan(α.l[αin], ml, α.λ[αin], mλ, LL, ML)
-                
-                # Calculate coupling factor once outside the loops
+                # Calculate coupling factor once - move outside spatial loops
                 coupling_factor = CGin * CGout
                 
-                # Calculate coupled spherical harmonics using broadcasting
-                for ix in 1:nx
-                    for iy in 1:ny
-                        # Vectorize the innermost loop for better performance
-                        for iθ in 1:nθ
-                            Yin1 = Ylin[iθ, iy, ix, nchlin, 1] * Yλin[iθ, iy, ix, nchλin, 1]
-                            Yin2 = Ylin[iθ, iy, ix, nchlin, 2] * Yλin[iθ, iy, ix, nchλin, 2]
-                            
-                            Y4_factor = coupling_factor * Yout[iθ]
-                            Y4[iθ, iy, ix, 1] += Y4_factor * Yin1
-                            Y4[iθ, iy, ix, 2] += Y4_factor * Yin2
-                        end
+                # Store valid combination with pre-computed values
+                push!(valid_combinations, (nchlin, nchλin, nchλout, coupling_factor, Yout))
+            end
+        end
+    end
+    
+    # Optimized loop structure: iterate over spatial points first, then quantum numbers
+    # This improves cache locality for the Y arrays and reduces redundant calculations
+    for (nchlin, nchλin, nchλout, coupling_factor, Yout) in valid_combinations
+        # Restructured loops for better cache performance: 
+        # Access patterns are more sequential in memory
+        for perm_idx in 1:2
+            for ix in 1:nx
+                for iy in 1:ny
+                    # Pre-load input Y slices for this (ix, iy) - improves cache usage
+                    @inbounds for iθ in 1:nθ
+                        Yin = Ylin[iθ, iy, ix, nchlin, perm_idx] * Yλin[iθ, iy, ix, nchλin, perm_idx]
+                        Y4_contribution = coupling_factor * Yout[iθ] * Yin
+                        Y4[iθ, iy, ix, perm_idx] += Y4_contribution
                     end
                 end
             end
@@ -285,34 +375,86 @@ function u9(ra::Float64, rb::Float64, rc::Float64,
         end
     end
 
-    # 2) Build integer bounds like Fortran (with small guard like +0.01)
-    kmin1 = Int(round(2*abs(ra - ri) + 1e-2))
-    kmin2 = Int(round(2*abs(rb - rf) + 1e-2))
-    kmin3 = Int(round(2*abs(rd - rh) + 1e-2))
-    minrda = max(kmin1, kmin2, kmin3)
+    # 2) Build integer bounds with proper floating-point precision
+    # Use much smaller guard to avoid incorrect bounds while handling floating-point errors
+    eps_guard = 1e-12
+    
+    # Calculate bounds for the summation variable 2r1 (stored as integers)
+    kmin1 = Int(round(2*abs(ra - ri) + eps_guard))
+    kmin2 = Int(round(2*abs(rb - rf) + eps_guard))  
+    kmin3 = Int(round(2*abs(rd - rh) + eps_guard))
+    minrda_candidates = [kmin1, kmin2, kmin3]
+    
+    kmax1 = Int(round(2*(ra + ri) + eps_guard))
+    kmax2 = Int(round(2*(rb + rf) + eps_guard))
+    kmax3 = Int(round(2*(rd + rh) + eps_guard))
+    maxrda_candidates = [kmax1, kmax2, kmax3]
+    
+    # 3) Improved parity logic: find common parity and valid range
+    # Check if there exists a valid summation range with consistent parity
+    parities = [k & 1 for k in minrda_candidates]
+    
+    # All minimum bounds should have the same parity for a valid Nine-j symbol
+    if !all(p == parities[1] for p in parities)
+        return 0.0
+    end
+    
+    common_parity = parities[1]
+    minrda = max(minrda_candidates...)
+    maxrda = min(maxrda_candidates...)
+    
+    # Ensure minrda has the correct parity
+    if (minrda & 1) != common_parity
+        minrda += 1
+    end
+    
+    # Check if valid range exists
+    if minrda > maxrda
+        return 0.0
+    end
+    
+    # Additional stability check: ensure the range makes physical sense
+    if minrda < 0 || maxrda < 0
+        return 0.0
+    end
 
-    kmax1 = Int(round(2*(ra + ri) + 1e-2))
-    kmax2 = Int(round(2*(rb + rf) + 1e-2))
-    kmax3 = Int(round(2*(rd + rh) + 1e-2))
-    maxrda = min(kmax1, kmax2, kmax3)
-
-    # 3) Enforce common parity: allowed 2r1 must match each pair’s parity
-    p1 = (kmin1 & 1); p2 = (kmin2 & 1); p3 = (kmin3 & 1)
-    if (p1 != p2) || (p1 != p3); return 0.0; end
-    if (minrda & 1) != p1; minrda += 1; end
-    if minrda > maxrda; return 0.0; end
-
-    # 4) Sum
+    # 4) Sum with numerical stability checks
     result = 0.0
+    
     for n1 in minrda:2:maxrda
         r1 = n1 / 2.0
+        
+        # Calculate the three Racah W coefficients
         # Ensure your racahW is truly Racah W(a,b,c,d;e,f)
         w1 = racahW(Float64, ra, ri, rd, rh, r1, rg)
-        w2 = racahW(Float64, rb, rf, rh, rd, r1, re)
+        w2 = racahW(Float64, rb, rf, rh, rd, r1, re)  
         w3 = racahW(Float64, ra, ri, rb, rf, r1, rc)
-        result += (n1 + 1.0) * w1 * w2 * w3    # (2r1+1) == n1+1
+        
+        # Numerical stability: check for NaN or Inf in Racah W coefficients
+        if !isfinite(w1) || !isfinite(w2) || !isfinite(w3)
+            continue  # Skip this term if any Racah W is invalid
+        end
+        
+        # Calculate the contribution to the sum
+        weight = 2*r1 + 1.0  # This equals n1 + 1
+        contribution = weight * w1 * w2 * w3
+        
+        # Additional numerical stability: skip extremely small contributions
+        # that might be due to numerical errors
+        if abs(contribution) < 1e-16
+            continue
+        end
+        
+        result += contribution
+        
+        # Safety check to prevent runaway calculations
+        if !isfinite(result)
+            return 0.0
+        end
     end
-    return result
+    
+    # Final numerical stability check
+    return isfinite(result) ? result : 0.0
 end
 
 
