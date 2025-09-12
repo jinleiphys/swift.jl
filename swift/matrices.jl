@@ -102,18 +102,18 @@ end
 """
  
  # Compute correct overlap matrix for y-direction (non-orthogonal basis functions)
- Iy = zeros(grid.ny, grid.ny)
+ Ny = zeros(grid.ny, grid.ny)
  for i in 1:grid.ny
      for j in 1:grid.ny
          if i == j
-             Iy[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+             Ny[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
          else
-             Iy[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+             Ny[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
          end
      end
  end
 
- # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Tx^α ⊗ Iy
+ # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Tx^α ⊗ Ny
  Tx_matrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
  
  for i in 1:α.nchmax
@@ -125,23 +125,23 @@ end
      I_alpha = zeros(α.nchmax, α.nchmax)
      I_alpha[i, i] = 1.0
      
-     # Add this channel's contribution: δ_{α,α} I_α ⊗ Tx^α ⊗ Iy
-     Tx_matrix += I_alpha ⊗ Tx_alpha ⊗ Iy
+     # Add this channel's contribution: δ_{α,α} I_α ⊗ Tx^α ⊗ Ny
+     Tx_matrix += I_alpha ⊗ Tx_alpha ⊗ Ny
  end
  
  # Compute correct overlap matrix for x-direction (non-orthogonal basis functions)
- Ix = zeros(grid.nx, grid.nx)
+ Nx = zeros(grid.nx, grid.nx)
  for i in 1:grid.nx
      for j in 1:grid.nx
          if i == j
-             Ix[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+             Nx[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
          else
-             Ix[i,j] = (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+             Nx[i,j] = (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
          end
      end
  end
  
- # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Ix ⊗ Ty^α
+ # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Nx ⊗ Ty^α
  Ty_matrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
  
  for i in 1:α.nchmax
@@ -153,8 +153,8 @@ end
      I_alpha = zeros(α.nchmax, α.nchmax)
      I_alpha[i, i] = 1.0
      
-     # Add this channel's contribution: δ_{α,α} I_α ⊗ Ix ⊗ Ty^α
-     Ty_matrix += I_alpha ⊗ Ix ⊗ Ty_alpha
+     # Add this channel's contribution: δ_{α,α} I_α ⊗ Nx ⊗ Ty^α
+     Ty_matrix += I_alpha ⊗ Nx ⊗ Ty_alpha
  end 
 
  Tmatrix = Tx_matrix + Ty_matrix
@@ -203,20 +203,20 @@ end
     v12 = pot_nucl(α, grid, potname)
 
     # Compute correct overlap matrix for y-direction (non-orthogonal basis functions)
-    Iy = zeros(grid.ny, grid.ny)
+    Ny = zeros(grid.ny, grid.ny)
     for i in 1:grid.ny
         for j in 1:grid.ny
             if i == j
-                Iy[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+                Ny[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
             else
-                Iy[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+                Ny[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
             end
         end
     end
 
     # Express V_matrix using diagonal decomposition with distinct matrices
-    # V_matrix = ∑_{i,j} E^{ij}_α ⊗ V^{ij}_x ⊗ Iy
-    # where E^{ij}_α has 1 at (i,j) and 0 elsewhere, V^{ij}_x is the potential block
+    # V_matrix = ∑_{α₃,α₃'} δ_{allowed}(α₃',α₃) [P^{α₃',α₃}] ⊗ [V_{kₓ}^{α₃',α₃}] ⊗ [N_{k_y}]
+    # where P^{α₃',α₃} is the channel projection matrix with 1 at (α₃',α₃) and 0 elsewhere
     
     Vmatrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
     
@@ -239,9 +239,9 @@ end
                 continue  # Skip if J₁₂ ≠ J₁₂'
             end
             
-            # Create channel coupling matrix E^{ij}_α
-            E_alpha_ij = zeros(α.nchmax, α.nchmax)
-            E_alpha_ij[i, j] = 1.0
+            # Create channel projection matrix P^{α₃',α₃}
+            P_channel = zeros(α.nchmax, α.nchmax)
+            P_channel[i, j] = 1.0
             
             # Extract the potential matrix block V^{ij}_x for this channel pair
             V_x_ij = zeros(grid.nx, grid.nx)
@@ -274,8 +274,8 @@ end
                 end
             end
             
-            # Add this channel pair's contribution: E^{ij}_α ⊗ V^{ij}_x ⊗ Iy
-            Vmatrix += E_alpha_ij ⊗ V_x_ij ⊗ Iy
+            # Add this channel pair's contribution: P^{α₃',α₃} ⊗ V_{kₓ}^{α₃',α₃} ⊗ N_{k_y}
+            Vmatrix += P_channel ⊗ V_x_ij ⊗ Ny
         end
     end    
 
@@ -391,14 +391,14 @@ end
  function Bmatrix(α,grid)
     # compute the B matrix for the Generalized eigenvalue problem
     Iα = Matrix{Float64}(I, α.nchmax, α.nchmax)
-    Ix=zeros(grid.nx, grid.nx)
-    Iy=zeros(grid.ny, grid.ny)
+    Nx=zeros(grid.nx, grid.nx)
+    Ny=zeros(grid.ny, grid.ny)
     for i in 1:grid.nx
         for j in 1:grid.nx
             if i == j
-                Ix[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+                Nx[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
             else
-                Ix[i,j] = (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
+                Nx[i,j] = (-1.)^(j-i)/sqrt(grid.xx[i]*grid.xx[j])
             end
         end
     
@@ -407,15 +407,15 @@ end
     for i in 1:grid.ny
         for j in 1:grid.ny
             if i == j
-                Iy[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+                Ny[i,j] = 1 + (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
             else
-                Iy[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
+                Ny[i,j] = (-1.)^(j-i)/sqrt(grid.yy[i]*grid.yy[j])
             end
         end
     
     end
 
-    Bmatrix = Iα ⊗ Ix ⊗ Iy
+    Bmatrix = Iα ⊗ Nx ⊗ Ny
 
     return Bmatrix
 
