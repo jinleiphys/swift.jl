@@ -140,6 +140,9 @@ The framework uses sophisticated indexing schemes:
 - **Energy guesses**: For Malfiet-Tjon, start within ±1 MeV of expected ground state energy
 - **Performance analysis**: Built-in timing analysis in main calculation routines
 - **Notebook debugging**: Use `.ipynb` files for interactive problem investigation and method comparison
+- **Symmetry checks**: Built-in rearrangement matrix symmetry validation with tolerance checking
+- **Wave function analysis**: Channel probability contributions and normalization verification
+- **Energy consistency**: Automated checks that ⟨ψ|H|ψ⟩ matches eigenvalue within tolerance
 
 ### Required Julia Packages
 The project uses specific Julia packages that must be installed:
@@ -171,3 +174,11 @@ The project uses specific Julia packages that must be installed:
 - **Energy convergence**: Both methods should agree to at least 6 decimal places for ground state
 - **Computational trade-offs**: Malfiet-Tjon faster for single state, direct method gives complete spectrum
 - **Physical insight**: Malfiet-Tjon iteration demonstrates bound state formation mechanism via λ → 1
+
+### Advanced Features and Optimizations
+- **Arnoldi eigenvalue solver**: Adaptive convergence with early termination for computational efficiency
+- **Caching system**: Automated caching of expensive Wigner coefficients and angular momentum calculations
+- **Memory optimization**: Progressive mesh refinement and sparse matrix representations where applicable
+- **Cross-platform symbol resolution**: Automatic handling of Fortran name-mangling across different platforms
+- **Comprehensive validation framework**: Built-in physics consistency checks and numerical stability monitoring
+- **Performance profiling**: Integrated timing analysis for identifying computational bottlenecks
