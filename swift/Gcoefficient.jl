@@ -81,16 +81,21 @@ export computeGcoefficient
     for perm_index in 1:2
         for αout in 1:α.nchmax
             for αin in 1:α.nchmax
+                # Check if channels can couple - they must have the same total isospin T
+                if α.T[αin] != α.T[αout]
+                    continue
+                end
+                
                 # Pre-compute permutation-specific values
                 if perm_index == 1
                     phase = (-1)^round(Int, α.s12[αin] + 2*s1 + s2 + s3) * (-1)^round(Int, α.T12[αin] + 2*t1 + t2 + t3)
-                    Cisospin = hat_T12[αin] * hat_T12[αout] * cached_wigner6j(t1,t2,α.T12[αout],t3,α.T,α.T12[αin])
+                    Cisospin = hat_T12[αin] * hat_T12[αout] * cached_wigner6j(t1,t2,α.T12[αout],t3,α.T[αout],α.T12[αin])
                     s_ref = s1  # Reference spin for coupling
                     nSmin = max(round(Int, 2*abs(α.s12[αin]-s1)), round(Int, 2*abs(α.s12[αout]-s3)))
                     nSmax = min(round(Int, 2*(α.s12[αin]+s1)), round(Int, 2*(α.s12[αout]+s3)))
                 else
                     phase = (-1)^round(Int, α.s12[αin] + 2*s2 + s1 + s3) * (-1)^round(Int, α.T12[αin] + 2*t2 + t1 + t3)
-                    Cisospin = hat_T12[αout] * hat_T12[αin] * cached_wigner6j(t2,t1,α.T12[αout],t3,α.T,α.T12[αin])
+                    Cisospin = hat_T12[αout] * hat_T12[αin] * cached_wigner6j(t2,t1,α.T12[αout],t3,α.T[αout],α.T12[αin])
                     s_ref = s2  # Reference spin for coupling
                     nSmin = max(round(Int, 2*abs(α.s12[αin]-s2)), round(Int, 2*abs(α.s12[αout]-s3)))
                     nSmax = min(round(Int, 2*(α.s12[αin]+s2)), round(Int, 2*(α.s12[αout]+s3)))

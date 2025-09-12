@@ -257,8 +257,8 @@ end
                     continue
                 end
                 
-                cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)      
-                cg2 = clebschgordan(T12, mt12, α.t3, mt3, α.T, α.MT)
+                cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T[i], α.MT)      
+                cg2 = clebschgordan(T12, mt12, α.t3, mt3, α.T[j], α.MT)
                 cg_coefficient = cg1 * cg2
                 
                 if abs(cg_coefficient) < 1e-10
@@ -422,18 +422,6 @@ end
 
  end 
 
- 
- function checkα(i,j,α)
-
-    # Check if the channel is allowed for two-body potential coupling
-    # The two-body potential should only couple channels with identical quantum numbers
-    # for both the two-body subsystem AND the third particle
-    if α.T12[i] == α.T12[j] && α.s12[i] == α.s12[j] && α.J12[i] == α.J12[j] && α.λ[i] == α.λ[j] && α.J3[i] == α.J3[j] && (-1)^α.l[i] == (-1)^α.l[j]
-        return true
-    else
-        return false
-    end
- end
 
  function checkα2b(i,j,α)
     # Check if the two-body channels are allowed for potential coupling

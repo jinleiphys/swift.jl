@@ -49,14 +49,14 @@ mutable struct nch3b # channel index for the three body coupling
     J3::Vector{Float64}
     J::Float64
     T12::Vector{Float64}
-    T::Float64
+    T::Vector{Float64}
     MT :: Float64
     α2b::nch2b # two-body channel coupling data
     α2bindex::Vector{Int} # mapping from α3b channel index to α2b channel index
     
     # Constructor with default initialization
     function nch3b()
-        new(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, Int[], Float64[], Float64[], Int[], Float64[], 0.0, Float64[], 0.5,-0.5, nch2b(), Int[])
+        new(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, Int[], Float64[], Float64[], Int[], Float64[], 0.0, Float64[], Float64[], -0.5, nch2b(), Int[])
     end
 end
 
@@ -154,7 +154,6 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
     α.t3 = t3
     α.J = J
     α.MT = MT
-    α.T = T
 
     
     # First pass to count channels
@@ -181,11 +180,15 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                         continue
                     end
                     for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))  # Fixed min/max calculation
-                        if nT != Int(2*T)
-                            continue
+                        T_current = nT/2.0
+                        if T >= 0
+                            # T is defined, use the specified value
+                            if nT != Int(2*T)
+                                continue
+                            end
                         end
-                        # check if MT is in the range of -T to T
-                        if abs(MT) > T
+                        # check if MT is in the range of -T_current to T_current
+                        if abs(MT) > T_current
                             continue
                         end
                         
@@ -206,6 +209,7 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
     α.λ = zeros(Int, nch_count)
     α.J3 = zeros(Float64, nch_count)
     α.T12 = zeros(Float64, nch_count)
+    α.T = zeros(Float64, nch_count)
     α.α2bindex = zeros(Int, nch_count)
 
     
@@ -233,11 +237,15 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                             continue
                         end
                         for nT in Int(2*abs(T12-t3)):2:Int(2*(T12+t3))
-                            if nT != Int(2*T)
-                                continue
+                            T_current = nT/2.0
+                            if T >= 0
+                                # T is defined, use the specified value
+                                if nT != Int(2*T)
+                                    continue
+                                end
                             end
-                            # check if MT is in the range of -T to T
-                            if abs(MT) > T
+                            # check if MT is in the range of -T_current to T_current
+                            if abs(MT) > T_current
                                 continue
                             end
                             ich += 1
@@ -247,8 +255,9 @@ function α3b(fermion::Bool,J::Float64, T::Float64, parity::Int,
                             α.λ[ich] = λ
                             α.J3[ich] = J3
                             α.T12[ich] = T12
+                            α.T[ich] = T_current
                             α.α2bindex[ich] = i2b
-                            print_channel_info(ich, i2b, l, s1, s2, s12, J12, λ, s3, J3, J,t1,t2,T12, t3, T)
+                            print_channel_info(ich, i2b, l, s1, s2, s12, J12, λ, s3, J3, J,t1,t2,T12, t3, T_current)
                         end
                     end
                 end

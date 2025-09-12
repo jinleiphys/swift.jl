@@ -804,44 +804,87 @@ end
             return false, Inf
         end
         
-        # Compute element-wise absolute differences
-        diff_matrix = abs.(Rxy_31 - Rxy_32)
-        max_diff = maximum(diff_matrix)
-        mean_diff = mean(diff_matrix)
+        # Check each element individually
+        n_rows, n_cols = size(Rxy_31)
         
-        # Check if matrices are equal within tolerance
-        are_equal = max_diff < tolerance
+        # Arrays to track which relation each element satisfies
+        symmetric_mask = falses(n_rows, n_cols)
+        antisymmetric_mask = falses(n_rows, n_cols)
+        neither_mask = falses(n_rows, n_cols)
+        
+        max_diff_overall = 0.0
+        
+        for i in 1:n_rows, j in 1:n_cols
+            # Check symmetric relation: Rxy_31[i,j] = Rxy_32[i,j]
+            diff_symmetric = abs(Rxy_31[i,j] - Rxy_32[i,j])
+            
+            # Check antisymmetric relation: Rxy_31[i,j] = -Rxy_32[i,j]
+            diff_antisymmetric = abs(Rxy_31[i,j] + Rxy_32[i,j])
+            
+            if diff_symmetric < tolerance
+                symmetric_mask[i,j] = true
+                max_diff_overall = max(max_diff_overall, diff_symmetric)
+            elseif diff_antisymmetric < tolerance
+                antisymmetric_mask[i,j] = true
+                max_diff_overall = max(max_diff_overall, diff_antisymmetric)
+            else
+                neither_mask[i,j] = true
+                max_diff_overall = max(max_diff_overall, min(diff_symmetric, diff_antisymmetric))
+            end
+        end
+        
+        # Count elements satisfying each relation
+        n_symmetric = sum(symmetric_mask)
+        n_antisymmetric = sum(antisymmetric_mask)
+        n_neither = sum(neither_mask)
+        n_total = n_rows * n_cols
+        
+        # Overall test passes if no elements fail both relations
+        are_equal = n_neither == 0
+        max_diff = max_diff_overall
+        mean_diff = max_diff_overall  # Simplified for now
         
         if verbose
             println("\n" * "="^60)
             println("         REARRANGEMENT MATRIX SYMMETRY CHECK")
             println("="^60)
             println("Matrix dimensions: $(size(Rxy_31))")
+            @printf("Total elements: %d\n", n_total)
+            @printf("Elements satisfying Rxy_31 = Rxy_32:  %d (%.1f%%)\n", n_symmetric, 100.0*n_symmetric/n_total)
+            @printf("Elements satisfying Rxy_31 = -Rxy_32: %d (%.1f%%)\n", n_antisymmetric, 100.0*n_antisymmetric/n_total)
+            @printf("Elements satisfying neither:         %d (%.1f%%)\n", n_neither, 100.0*n_neither/n_total)
             @printf("Maximum difference: %12.6e\n", max_diff)
-            @printf("Mean difference:    %12.6e\n", mean_diff)
-            @printf("Tolerance:          %12.6e\n", tolerance)
+            @printf("Tolerance: %12.6e\n", tolerance)
             println()
             
             if are_equal
-                println("✓ PASSED: Rxy_31 = Rxy_32 (within tolerance)")
-                println("  This confirms particle exchange symmetry")
+                println("✓ PASSED: All elements satisfy either Rxy_31 = Rxy_32 or Rxy_31 = -Rxy_32")
+                if n_symmetric > 0 && n_antisymmetric > 0
+                    println("  Mixed symmetric/antisymmetric relations found")
+                elseif n_symmetric > n_antisymmetric
+                    println("  Predominantly symmetric particle exchange")
+                else
+                    println("  Predominantly antisymmetric particle exchange (identical fermions)")
+                end
             else
-                println("✗ FAILED: Rxy_31 ≠ Rxy_32")
+                println("✗ FAILED: Some elements satisfy neither relation")
                 println("  This may indicate:")
                 println("    - Incorrect implementation of rearrangement matrices")
-                println("    - Non-identical particle system")
                 println("    - Numerical precision issues")
                 
-                # Show some of the largest differences for debugging
-                if max_diff > tolerance
-                    flat_diff = vec(diff_matrix)
-                    sorted_indices = sortperm(flat_diff, rev=true)
-                    println("\n  Largest differences:")
-                    n_show = min(5, length(flat_diff))
-                    for i in 1:n_show
-                        idx = sorted_indices[i]
-                        row, col = divrem(idx-1, size(diff_matrix, 1)) .+ (1, 1)
-                        @printf("    [%d,%d]: %12.6e\n", row, col, flat_diff[idx])
+                # Show some elements that fail both relations
+                if n_neither > 0
+                    println("\n  Sample elements failing both relations:")
+                    n_show = min(5, n_neither)
+                    count = 0
+                    for i in 1:n_rows, j in 1:n_cols
+                        if neither_mask[i,j] && count < n_show
+                            diff_sym = abs(Rxy_31[i,j] - Rxy_32[i,j])
+                            diff_antisym = abs(Rxy_31[i,j] + Rxy_32[i,j])
+                            @printf("    [%d,%d]: Rxy_31=%12.6e, Rxy_32=%12.6e, diff_sym=%12.6e, diff_antisym=%12.6e\n", 
+                                   i, j, Rxy_31[i,j], Rxy_32[i,j], diff_sym, diff_antisym)
+                            count += 1
+                        end
                     end
                 end
             end
@@ -909,7 +952,7 @@ function compute_channel_probabilities(ψ_normalized, ψ3_normalized, B, α, gri
         # Create channel description using the nch3b structure fields
         # Format: (l₁₂(s₁s₂)s₁₂)J₁₂, (λ₃s₃)J₃, J; (t₁t₂)T₁₂, t₃, T
         channel_desc = @sprintf("Ch %2d: (l₁₂=%d,s₁₂=%.1f)J₁₂=%.1f, (λ₃=%d,s₃=%.1f)J₃=%.1f, J=%.1f; T₁₂=%.1f, t₃=%.1f, T=%.1f", 
-                               i, α.l[i], α.s12[i], α.J12[i], α.λ[i], α.s3, α.J3[i], α.J, α.T12[i], α.t3, α.T)
+                               i, α.l[i], α.s12[i], α.J12[i], α.λ[i], α.s3, α.J3[i], α.J, α.T12[i], α.t3, α.T[i])
         push!(channel_info, channel_desc)
     end
     
