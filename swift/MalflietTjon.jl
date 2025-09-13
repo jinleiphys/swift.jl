@@ -497,7 +497,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
     end
     
     # Check rearrangement matrix symmetry
-    check_rxy_symmetry(Rxy_31, Rxy_32; verbose=verbose)
+    check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; verbose=verbose)
     
     
     # Initialize secant method
@@ -774,7 +774,7 @@ function compute_total_wavefunction(ψ::Vector, Rxy, B)
 end
 
 """
-        check_rxy_symmetry(Rxy_31, Rxy_32; tolerance=1e-12, verbose=true)
+        check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; tolerance=1e-12, verbose=true)
     
     Check if the rearrangement matrices Rxy_31 and Rxy_32 are equal.
     
@@ -786,6 +786,8 @@ end
     # Arguments
     - `Rxy_31`: Rearrangement matrix for 1↔3 particle exchange
     - `Rxy_32`: Rearrangement matrix for 2↔3 particle exchange  
+    - `α`: Channel structure with quantum numbers
+    - `grid`: Spatial grid information
     - `tolerance`: Numerical tolerance for matrix comparison (default: 1e-12)
     - `verbose`: Print detailed comparison results (default: true)
     
@@ -793,7 +795,7 @@ end
     - `are_equal`: Boolean indicating if matrices are equal within tolerance
     - `max_diff`: Maximum absolute difference between matrix elements
     """
-    function check_rxy_symmetry(Rxy_31, Rxy_32; tolerance=1e-12, verbose=true)
+    function check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; tolerance=1e-12, verbose=true)
         # Check that matrices have the same dimensions
         if size(Rxy_31) != size(Rxy_32)
             if verbose
@@ -855,6 +857,103 @@ end
             @printf("Elements satisfying neither:         %d (%.1f%%)\n", n_neither, 100.0*n_neither/n_total)
             @printf("Maximum difference: %12.6e\n", max_diff)
             @printf("Tolerance: %12.6e\n", tolerance)
+            
+            # Analyze channel-by-channel symmetry
+            println("\nChannel-by-channel analysis:")
+            println("────────────────────────────────────────────────────────")
+            
+            # Debug matrix structure
+            println("Matrix size: $(n_rows) × $(n_cols)")
+            println("Number of channels: $(α.nchmax)")
+            println("Grid points: nx=$(grid.nx), ny=$(grid.ny), nθ=$(grid.nθ)")
+            # Rxy matrix uses only nx × ny, not nθ (based on matrices.jl)
+            grid_points_per_channel = grid.nx * grid.ny
+            println("Grid points per channel (nx×ny): $grid_points_per_channel")
+            println("Expected total matrix size: $(α.nchmax * grid_points_per_channel)")
+            
+            # Check if matrix organization matches expectation
+            if n_rows == α.nchmax * grid_points_per_channel
+                println("✓ Matrix structure matches expected channel×grid organization")
+                
+                # Group analysis by channel pairs
+                symmetric_channels = Tuple{Int,Int}[]
+                antisymmetric_channels = Tuple{Int,Int}[]
+                mixed_channels = Tuple{Int,Int}[]
+                
+                for αout in 1:α.nchmax
+                    for αin in 1:α.nchmax
+                        # Calculate the matrix block for this channel pair
+                        row_start = (αout-1) * grid_points_per_channel + 1
+                        row_end = αout * grid_points_per_channel
+                        col_start = (αin-1) * grid_points_per_channel + 1
+                        col_end = αin * grid_points_per_channel
+                        
+                        # Extract the block for this channel pair
+                        block_symmetric = symmetric_mask[row_start:row_end, col_start:col_end]
+                        block_antisymmetric = antisymmetric_mask[row_start:row_end, col_start:col_end]
+                        
+                        n_sym_block = sum(block_symmetric)
+                        n_antisym_block = sum(block_antisymmetric)
+                        n_total_block = length(block_symmetric)
+                        
+                        # Classify this channel pair
+                        if n_sym_block == n_total_block && n_sym_block > 0
+                            push!(symmetric_channels, (αout, αin))
+                        elseif n_antisym_block == n_total_block && n_antisym_block > 0
+                            push!(antisymmetric_channels, (αout, αin))
+                        elseif n_sym_block > 0 && n_antisym_block > 0
+                            push!(mixed_channels, (αout, αin))
+                        end
+                    end
+                end
+                
+                # Display results by channel type
+                if !isempty(symmetric_channels)
+                    println("\nChannels satisfying Rxy_31 = Rxy_32 (symmetric): $(length(symmetric_channels)) pairs")
+                    for (i, (αout, αin)) in enumerate(symmetric_channels)
+                        if i <= 10  # Show first 10
+                            @printf("  (αout=%2d, αin=%2d): J₁₂=%.1f, J₃=%.1f, J=%.1f, T₁₂=%.1f, T=%.1f\n", 
+                                   αout, αin, α.J12[αout], α.J3[αout], α.J, α.T12[αout], α.T[αout])
+                        elseif i == 11
+                            println("  ... and $(length(symmetric_channels)-10) more")
+                            break
+                        end
+                    end
+                end
+                
+                if !isempty(antisymmetric_channels)
+                    println("\nChannels satisfying Rxy_31 = -Rxy_32 (antisymmetric): $(length(antisymmetric_channels)) pairs")
+                    for (i, (αout, αin)) in enumerate(antisymmetric_channels)
+                        if i <= 10  # Show first 10
+                            @printf("  (αout=%2d, αin=%2d): J₁₂=%.1f, J₃=%.1f, J=%.1f, T₁₂=%.1f, T=%.1f\n", 
+                                   αout, αin, α.J12[αout], α.J3[αout], α.J, α.T12[αout], α.T[αout])
+                        elseif i == 11
+                            println("  ... and $(length(antisymmetric_channels)-10) more")
+                            break
+                        end
+                    end
+                end
+                
+                if !isempty(mixed_channels)
+                    println("\nChannels with mixed symmetry: $(length(mixed_channels)) pairs")
+                    for (i, (αout, αin)) in enumerate(mixed_channels)
+                        if i <= 5  # Show first 5 for mixed channels
+                            @printf("  (αout=%2d, αin=%2d): J₁₂=%.1f, J₃=%.1f, J=%.1f, T₁₂=%.1f, T=%.1f\n", 
+                                   αout, αin, α.J12[αout], α.J3[αout], α.J, α.T12[αout], α.T[αout])
+                        elseif i == 6
+                            println("  ... and $(length(mixed_channels)-5) more")
+                            break
+                        end
+                    end
+                end
+                
+                if isempty(symmetric_channels) && isempty(antisymmetric_channels) && isempty(mixed_channels)
+                    println("\n⚠ No clear channel patterns found - all blocks may have zero or uniform entries")
+                end
+            else
+                println("⚠ Matrix structure doesn't match expected channel organization")
+                println("  Cannot perform channel-by-channel analysis")
+            end
             println()
             
             if are_equal
