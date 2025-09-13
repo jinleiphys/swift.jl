@@ -271,8 +271,9 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
         Yλ = computeYlm_fortran(acos(cosθi[i]), 0.0, λmax)
         for λ in 0:λmax
            for m in -λ:λ
-                nch = λ^2 + λ + m + 1
-                Yλout[i, nch] = real(Yλ[nch])  # Extract real part
+              nch = λ^2 + λ + m + 1  # Standard indexing for Y_λ^m
+              nch_conj = λ^2 + λ + (-m) + 1  # Index for Y_λ^{-m}
+              Yλout[i, nch] = real(Yλ[nch_conj]) * (-1)^m  # Y_λ^m* = (-1)^m* Y_λ^{-m}
             end
         end
     end
