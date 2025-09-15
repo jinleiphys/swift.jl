@@ -95,7 +95,7 @@ export computeGcoefficient
                     nSmax = min(round(Int, 2*(α.s12[αin]+s1)), round(Int, 2*(α.s12[αout]+s3)))
                 else
                     phase = (-1)^round(Int, α.s12[αin] + 2*s2 + s1 + s3) * (-1)^round(Int, α.T12[αin] + 2*t2 + t1 + t3)
-                    Cisospin = hat_T12[αout] * hat_T12[αin] * cached_wigner6j(t2,t1,α.T12[αout],t3,α.T[αout],α.T12[αin])
+                    Cisospin =  hat_T12[αin] * hat_T12[αout] * cached_wigner6j(t2,t1,α.T12[αout],t3,α.T[αout],α.T12[αin])
                     s_ref = s2  # Reference spin for coupling
                     nSmin = max(round(Int, 2*abs(α.s12[αin]-s2)), round(Int, 2*abs(α.s12[αout]-s3)))
                     nSmax = min(round(Int, 2*(α.s12[αin]+s2)), round(Int, 2*(α.s12[αout]+s3)))
@@ -290,8 +290,6 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
            b = -1.0
            c = 0.75
            d = -0.5
-        else
-           error("Parameter P must be '+' or '-'")
         end
     
     # Set the ϕ angle for the spherical harmonics
