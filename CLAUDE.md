@@ -68,16 +68,21 @@ The codebase is organized into three main module directories:
    - `laguerre.jl`: Basis function implementations
    - `Gcoefficient.jl`: Angular momentum coupling coefficients
 
+4. **3Npot/**: Three-body nuclear force models
+   - `UIX.jl`: Urbana IX three-body force implementation with Y(r) and T(r) functions
+
 ### Key Physics Concepts
 - **Faddeev equations**: Three-body quantum mechanics using coordinate transformations
 - **Hyperspherical coordinates**: (x,y) representing relative distances in three-body system
 - **Channel coupling**: Multi-channel approach with different angular momentum states
 - **Nuclear potentials**: Realistic NN interactions (AV18, AV14, Nijmegen, Malfliet-Tjon)
+- **Three-body forces**: Urbana IX (UIX) model with Y(r) and T(r) radial functions
 
 ### Computational Workflow
 1. **Channel generation**: `α3b()` creates allowed quantum states based on conservation laws
 2. **Mesh initialization**: `initialmesh()` sets up hyperspherical coordinate grids
 3. **Matrix construction**: Build Hamiltonian H = T + V + V*Rxy using Faddeev rearrangement
+   - Optional: Include three-body forces H₃ = T + V + V*Rxy + X₁₂ (UIX model)
 4. **Eigenvalue solution**: Two approaches available:
    - **Direct method**: `ThreeBody_Bound()` solves generalized eigenvalue problem `eigen(H, B)`
    - **Iterative method**: `malfiet_tjon_solve()` uses secant iteration to find λ(E) = 1
@@ -117,10 +122,18 @@ The framework uses sophisticated indexing schemes:
 3. Add Julia wrapper function in `nuclear_potentials.jl`
 4. Update `potential_type_to_lpot()` mapping
 
+### Working with Three-Body Forces
+- **UIX model**: Use `UIX.X12_matrix(α, grid)` to compute three-body force matrix
+- **Matrix indexing**: Same as V and T matrices: `i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy`
+- **Angular momentum basis**: UIX functions implemented in Lagrange function basis, not Jacobi coordinate basis
+- **Physical constants**: Uses PDG pion mass values with proper averaging formula
+- **Delta functions**: Matrix elements include channel selection rules and coordinate constraints
+
 ### Modifying Calculations
 - Channel configurations: Edit parameters in notebook initialization cells
 - Mesh parameters: Adjust `nx`, `ny`, `xmax`, `ymax`, `alpha` for convergence
 - Potential models: Change `potname` variable to switch between models
+- Three-body forces: Include UIX terms by adding X12_matrix to Hamiltonian construction
 
 ### Solver Selection and Performance
 - **Direct method**: Use `ThreeBody_Bound()` when you need all eigenvalues or for initial exploration
@@ -140,7 +153,7 @@ The framework uses sophisticated indexing schemes:
 - **Energy guesses**: For Malfiet-Tjon, start within ±1 MeV of expected ground state energy
 - **Performance analysis**: Built-in timing analysis in main calculation routines
 - **Notebook debugging**: Use `.ipynb` files for interactive problem investigation and method comparison
-- **Symmetry checks**: Built-in rearrangement matrix symmetry validation with tolerance checking
+- **Symmetry checks**: Built-in rearrangement matrix transpose relationship validation (`Rxy_32 = Rxy_31^T`) with tolerance checking
 - **Wave function analysis**: Channel probability contributions and normalization verification
 - **Energy consistency**: Automated checks that ⟨ψ|H|ψ⟩ matches eigenvalue within tolerance
 
@@ -181,4 +194,5 @@ The project uses specific Julia packages that must be installed:
 - **Memory optimization**: Progressive mesh refinement and sparse matrix representations where applicable
 - **Cross-platform symbol resolution**: Automatic handling of Fortran name-mangling across different platforms
 - **Comprehensive validation framework**: Built-in physics consistency checks and numerical stability monitoring
+- **Rearrangement matrix validation**: Automatic verification that `Rxy_32 = Rxy_31^T` (transpose relationship) as required by Faddeev coordinate transformation symmetry
 - **Performance profiling**: Integrated timing analysis for identifying computational bottlenecks
