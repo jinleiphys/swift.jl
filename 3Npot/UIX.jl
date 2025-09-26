@@ -8,12 +8,13 @@
 module UIX
 
 using WignerSymbols
+using LinearAlgebra
 include("../swift/laguerre.jl")
 using .Laguerre
 include("../swift/Gcoefficient.jl")
 using .Gcoefficient
 
-export Y, T, S_matrix, X12_matrix, I31_minus_matrix
+export Y, T, S_matrix, X12_matrix, I31_minus_matrix, X23_with_permutations
 
 # Physical constants for Urbana IX model
 const c = 2.1  # fm^-2, Gaussian cutoff parameter    
@@ -380,6 +381,44 @@ function I31_minus_matrix(α, grid)
     end
 
     return I31_minus
+end
+
+"""
+    X23_with_permutations(α, grid, Rxy)
+
+Compute X23 × (1 + P⁺ + P⁻) for Urbana IX three-body force.
+
+This function computes X23 matrix (equivalent to X12 but for particles 2-3)
+and multiplies it by (I + Rxy) where:
+- I is the identity matrix
+- Rxy = Rxy_31 + Rxy_32 (rearrangement matrices from permutation operators)
+
+The result represents the full three-body force contribution X23(1 + P⁺ + P⁻).
+
+Parameters:
+- α: channel structure
+- grid: coordinate grid
+- Rxy: rearrangement matrix Rxy = Rxy_31 + Rxy_32
+
+Returns:
+- X23_full: Matrix representing X23 × (I + Rxy)
+"""
+function X23_with_permutations(α, grid, Rxy)
+    # Compute X23 matrix (same structure as X12, but for particles 2-3)
+    # For UIX model, X23 has the same functional form as X12
+    X23 = X12_matrix(α, grid)  # X23 has same structure as X12
+
+    # Create identity matrix of same size
+    matrix_size = α.nchmax * grid.nx * grid.ny
+    I_matrix = Matrix{Float64}(I, matrix_size, matrix_size)
+
+    # Compute (I + Rxy)
+    I_plus_Rxy = I_matrix + Rxy
+
+    # Compute X23 × (I + Rxy)
+    X23_full = X23 * I_plus_Rxy
+
+    return X23_full
 end
 
 end  # module UIX
