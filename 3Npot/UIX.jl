@@ -7,7 +7,13 @@
 
 module UIX
 
-export Y, T, S_matrix, X12_matrix
+using WignerSymbols
+include("../swift/laguerre.jl")
+using .Laguerre
+include("../swift/Gcoefficient.jl")
+using .Gcoefficient
+
+export Y, T, S_matrix, X12_matrix, I31_minus_matrix
 
 # Physical constants for Urbana IX model
 const c = 2.1  # fm^-2, Gaussian cutoff parameter    
@@ -202,6 +208,178 @@ function X12_matrix(α, grid)
     end
 
     return X12
+end
+
+"""
+    tau3_dot_tau1(T12, T12_prime, T)
+
+Compute the isospin matrix element ⟨((t₁t₂)T₁₂ t₃)T | τ₃·τ₁ |((t₂t₃)T₁₂' t₁)T'⟩
+
+Returns the matrix element using 6j symbols according to:
+δ_{T,T'}(-1)^{T₁₂+1} × 6√(T̂₁₂T̂₁₂') × {1/2  1/2  T₁₂' ; 1/2  1  1/2 ; T₁₂  1/2  T}
+
+Where T̂ = 2T + 1 (dimension factor).
+"""
+function tau3_dot_tau1(T12::Float64, T12_prime::Float64, T::Float64, T_prime::Float64)
+    # Check if T == T' (delta function) - use integer comparison for exact match
+    if round(Int, 2*T) ≠ round(Int, 2*T_prime)
+        return 0.0
+    end
+
+    # Compute dimension factors: T̂ = 2T + 1
+    T12_hat = 2 * T12 + 1
+    T12_prime_hat = 2 * T12_prime + 1
+
+    # Phase factor: (-1)^{T₁₂+1}
+    phase = (-1)^(round(Int, T12) + 1)
+
+    # 9j symbol: {1/2  1/2  T₁₂' ; 1/2  1  1/2 ; T₁₂  1/2  T}
+    ninej = u9(0.5, 0.5, T12_prime,
+               0.5, 1.0, 0.5,
+               T12, 0.5, T)
+
+    return phase * 6 * sqrt(T12_hat * T12_prime_hat) * ninej
+end
+
+"""
+    tau2_dot_tau3_cross_tau1(T12, T12_prime, T)
+
+Compute the isospin matrix element -i/4⟨((t₁t₂)T₁₂ t₃)T | τ₂·τ₃×τ₁ |((t₂t₃)T₁₂' t₁)T'⟩
+
+Returns the matrix element using 6j symbols according to:
+δ_{T,T'} × 6√(T̂₁₂T̂₁₂') × Σ_ξ∈{1/2,3/2} (-1)^{2T-ξ+1/2} ×
+{ξ  1/2  1 ; 1/2  1/2  T₁₂} × {T  1/2  T₁₂ ; 1/2  1  ξ ; T₁₂'  1/2  1/2}
+"""
+function tau2_dot_tau3_cross_tau1(T12::Float64, T12_prime::Float64, T::Float64, T_prime::Float64)
+    # Check if T == T' (delta function) - use integer comparison for exact match
+    if round(Int, 2*T) ≠ round(Int, 2*T_prime)
+        return 0.0
+    end
+
+    # Compute dimension factors: T̂ = 2T + 1
+    T12_hat = 2 * T12 + 1
+    T12_prime_hat = 2 * T12_prime + 1
+
+    # Sum over ξ ∈ {1/2, 3/2}
+    result = 0.0
+    for xi in [0.5, 1.5]
+        # Phase factor: (-1)^{2T-ξ+1/2}
+        phase = (-1)^(round(Int, 2*T - xi + 0.5))
+
+        # First 6j symbol: {ξ  1/2  1 ; 1/2  1/2  T₁₂}
+        sixj1 = wigner6j(xi, 0.5, 1.0,
+                         0.5, 0.5, T12)
+
+        # Second 9j symbol: {T  1/2  T₁₂ ; 1/2  1  ξ ; T₁₂'  1/2  1/2}
+        ninej = u9(T, 0.5, T12,
+                   0.5, 1.0, xi,
+                   T12_prime, 0.5, 0.5)
+
+        result += phase * sixj1 * ninej
+    end
+
+    return 6 * sqrt(T12_hat * T12_prime_hat) * result
+end
+
+"""
+    I31_minus_matrix(α, grid)
+
+Compute the I₃₁⁻ matrix for Urbana IX three-body force.
+
+I₃₁⁻ = 2(τ₃·τ₁ - i/4 τ₂·τ₃×τ₁)
+
+The matrix elements are computed similarly to Rxy_31 but with modified G-coefficients
+where only the isospin part is replaced by the new isospin operators.
+The spatial (spherical harmonics) and spin parts remain the same as the regular G-coefficient.
+
+Returns the I31⁻ matrix with the same indexing as other matrices:
+i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
+"""
+function I31_minus_matrix(α, grid)
+    # Initialize I31⁻ matrix
+    I31_minus = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
+
+    # Compute the regular G-coefficient to get spatial and spin parts
+    Gαα = computeGcoefficient(α, grid)
+
+    # Coordinate transformation parameters (same as Rxy_31)
+    a = -0.5; b = 1.0; c = -0.75; d = -0.5
+
+    # Loop over coordinate grids
+    for ix in 1:grid.nx
+        xa = grid.xi[ix]
+        for iy in 1:grid.ny
+            ya = grid.yi[iy]
+            for iθ in 1:grid.nθ
+                cosθ = grid.cosθi[iθ]
+                dcosθ = grid.dcosθi[iθ]
+
+                # Compute transformed coordinates
+                πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
+                ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
+
+                # Compute basis functions at transformed coordinates
+                fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
+                fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
+
+                # Loop over channel combinations
+                for iα in 1:α.nchmax
+                    i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
+
+                    for iαp in 1:α.nchmax
+                        # Get the regular G-coefficient (contains spatial + spin + isospin)
+                        regular_G = Gαα[iθ, iy, ix, iα, iαp, 1]  # permutation index 1 for α1→α3
+
+                        # Skip if regular G-coefficient is zero
+                        if abs(regular_G) < 1e-14
+                            continue
+                        end
+
+                        # Extract isospin quantum numbers for channels
+                        T12 = α.T12[iα]
+                        T12_prime = α.T12[iαp]
+                        T = α.T[iα]
+                        T_prime = α.T[iαp]
+
+                        # Compute the regular isospin part that was used in G-coefficient
+                        # For Rxy_31 (α1→α3): Cisospin = hat(T12_in) * hat(T12_out) * wigner6j(t1,t2,T12_out,t3,T,T12_in)
+                        # where hat(x) = √(2x+1), and includes isospin phase factor
+                        hat_T12_in = sqrt(2 * T12 + 1)
+                        hat_T12_out = sqrt(2 * T12_prime + 1)
+                        isospin_phase = (-1)^round(Int, 2*T12 + 2*α.t1 + α.t2 + α.t3)
+                        regular_isospin = isospin_phase * hat_T12_in * hat_T12_out * wigner6j(α.t1, α.t2, T12_prime, α.t3, T, T12)
+
+                        # Compute new isospin matrix elements for I31⁻
+                        tau3_tau1_element = tau3_dot_tau1(T12, T12_prime, T, T_prime)
+                        tau2_tau3_tau1_element = tau2_dot_tau3_cross_tau1(T12, T12_prime, T, T_prime)
+
+                        # Combined new isospin factor: 2(τ₃·τ₁ + τ₂·τ₃×τ₁)
+                        # Note: tau2_tau3_tau1_element already includes the -i/4 factor
+                        new_isospin_factor = 2 * (tau3_tau1_element + tau2_tau3_tau1_element)
+
+                        # Replace isospin part: G_new = G_regular * (new_isospin / old_isospin)
+                        if abs(regular_isospin) > 1e-14
+                            modified_G = regular_G * (new_isospin_factor / regular_isospin)
+                        else
+                            modified_G = 0.0
+                        end
+
+                        # Apply the same transformation as Rxy_31
+                        adj_factor = dcosθ * modified_G * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy])
+
+                        for ixp in 1:grid.nx
+                            for iyp in 1:grid.ny
+                                ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
+                                I31_minus[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return I31_minus
 end
 
 end  # module UIX
