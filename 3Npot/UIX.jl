@@ -14,7 +14,7 @@ using .Laguerre
 include("../swift/Gcoefficient.jl")
 using .Gcoefficient
 
-export Y, T, S_matrix, X12_matrix, I31_minus_matrix, X23_with_permutations
+export Y, T, S_matrix, X12_matrix, I31_minus_matrix, X23_with_permutations, X12X31I23_plus_X12X23I31_matrix, T12_matrix
 
 # Physical constants for Urbana IX model
 const c = 2.1  # fm^-2, Gaussian cutoff parameter    
@@ -419,6 +419,88 @@ function X23_with_permutations(α, grid, Rxy)
     X23_full = X23 * I_plus_Rxy
 
     return X23_full
+end
+
+"""
+    X12X31I23_plus_X12X23I31_matrix(α, grid)
+
+Compute the composite UIX three-body force matrix element:
+X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻
+
+Based on the mathematical formula:
+⟨f_{k_x}f_{k_y} α₃ |X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻ |Ψ⟩ =
+(1+ε_{α₃'}ε_{α₁}) ∑_{k_x'k_y'α₃'} ⟨f_{k_x} f_{k_y} α₃ | X₁₂ | f_{k_x'} f_{k_y'} α₃'⟩
+∑_{i_x i_yα₁} ⟨f_{k'_x}f_{k'_y}α₃'| I₃₁⁻|f_{i_x}f_{i_y}α₁⟩ ⟨f_{i_x}f_{i_y}α₁ |X₂₃ | Ψ⟩
+
+This represents a three-step process:
+1. X₁₂ acts on the initial state
+2. I₃₁⁻ performs coordinate transformation with modified isospin coupling
+3. X₂₃ acts on the final transformed state
+4. Includes permutation symmetry factor (1+ε_{α₃'}ε_{α₁})
+
+The matrix multiplication order follows the operator sequence: X₁₂ × I₃₁⁻ × X₂₃
+
+Parameters:
+- α: channel structure containing quantum numbers
+- grid: coordinate grid for spatial integration
+
+Returns:
+- Composite matrix representing the full X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻ operator
+"""
+function X12X31I23_plus_X12X23I31_matrix(α, grid, Rxy)
+    # Compute individual matrix components
+    X12 = X12_matrix(α, grid)
+    I31_minus = I31_minus_matrix(α, grid)
+    X23 = X23_with_permutations(α, grid, Rxy)  # Use the proper X23 function with permutations
+
+    # Compute the composite matrix: X12 × I31⁻ × X23
+    # Note: Matrix multiplication order follows operator sequence
+    composite_matrix = X12 * I31_minus * X23
+
+    # Apply permutation symmetry factor (1+ε_{α₃'}ε_{α₁}) = 2
+    # Set the symmetry factor directly to 2 as requested
+    final_matrix = 2 * composite_matrix
+
+    return final_matrix
+end
+
+"""
+    T12_matrix(α, grid)
+
+Compute the T12 matrix for UIX three-body force with delta function constraints.
+
+The matrix elements are:
+⟨f_{k_x} f_{k_y} α | T₁₂ | f_{k_x'} f_{k_y'} α'⟩ =
+δ_{α,α'} δ_{k_x,k_x'} δ_{k_y,k_y'} T(x_{k_x})
+
+Where:
+- δ_{α,α'}: Channel delta function (all quantum numbers must match)
+- δ_{k_x,k_x'}: x-coordinate grid point delta function
+- δ_{k_y,k_y'}: y-coordinate grid point delta function
+- T(x_{k_x}): UIX T function evaluated at x coordinate
+
+Returns the T12 matrix with the same indexing as other matrices:
+i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
+"""
+function T12_matrix(α, grid)
+    # Initialize T12 matrix with same dimensions as other matrices
+    T12 = zeros(α.nchmax * grid.nx * grid.ny, α.nchmax * grid.nx * grid.ny)
+
+    # Loop over all matrix elements - all delta functions mean i = i_prime (diagonal matrix)
+    for iα in 1:α.nchmax
+        for ix in 1:grid.nx
+            for iy in 1:grid.ny
+                # Compute matrix index (same for both i and i_prime due to delta functions)
+                i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+                # Get x coordinate for T function evaluation
+                x_kx = grid.xi[ix]
+                # Apply T function: T12[i, i] = T(x_{k_x}) (diagonal element)
+                T12[i, i] = T(x_kx)
+            end
+        end
+    end
+
+    return T12
 end
 
 end  # module UIX
