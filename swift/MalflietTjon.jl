@@ -7,7 +7,23 @@ using Printf
 using Random
 using Statistics
 
-export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry, compute_channel_probabilities
+export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry, compute_channel_probabilities, compute_uix_potential
+
+"""
+    compute_uix_potential(α, grid, Rxy_31, Rxy)
+
+Helper function to compute UIX three-body potential.
+This function handles loading the UIX module and computing the potential.
+"""
+function compute_uix_potential(α, grid, Rxy_31, Rxy)
+    # Load UIX module dynamically
+    uix_path = joinpath(dirname(@__FILE__), "..", "3Npot", "UIX.jl")
+    include(uix_path)
+
+    # Access the UIX module functions
+    # Note: We use eval to access the UIX module that was just included
+    return eval(:(UIX.full_UIX_potential($α, $grid, $Rxy_31, $Rxy)))
+end
 
 """
     MalflietTjonResult
@@ -261,10 +277,11 @@ where:
 Uses the Arnoldi method for efficient eigenvalue computation of the Faddeev kernel.
 Returns the eigenvalue closest to 1 and corresponding eigenvector.
 """
-function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy; 
+function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy;
                                   verbose::Bool=false, use_arnoldi::Bool=true,
                                   krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
-                                  previous_eigenvector::Union{Nothing, Vector}=nothing)
+                                  previous_eigenvector::Union{Nothing, Vector}=nothing,
+                                  V_UIX=nothing)
     
     # Form the left-hand side operator: E0*B - H0 - V
     # where H0 = T (kinetic energy) and V is the potential
@@ -279,8 +296,13 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy;
     #     return NaN, nothing
     # end
     
-    # The Faddeev kernel: K(E) = [E*B - T - V]⁻¹ * V*R
+    # The Faddeev kernel: K(E) = [E*B - T - V]⁻¹ * (V*R + UIX)
     VRxy = V * Rxy
+
+    # Add UIX three-body force to the right-hand side if provided
+    if V_UIX !== nothing
+        VRxy = VRxy + V_UIX  # K(E) = [E*B - T - V]⁻¹ * (V*R + UIX)
+    end
     
     try
         if use_arnoldi
@@ -416,9 +438,10 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy;
 end
 
 """
-    malfiet_tjon_solve(α, grid, potname, e2b; E0=-8.0, E1=-7.0, 
+    malfiet_tjon_solve(α, grid, potname, e2b; E0=-8.0, E1=-7.0,
                       tolerance=1e-6, max_iterations=100, verbose=true,
-                      use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-10)
+                      use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-10,
+                      include_uix=false)
 
 Solve the Faddeev equation using the Malfiet-Tjon method with secant iteration
 and efficient Arnoldi eigenvalue computation.
@@ -428,7 +451,7 @@ where the ground state energy satisfies λ(E_gs) = 1.
 
 # Arguments
 - `α`: Channel structure from channels module
-- `grid`: Mesh structure from mesh module  
+- `grid`: Mesh structure from mesh module
 - `potname`: Nuclear potential name (e.g., "AV18", "MT")
 - `e2b`: Two-body threshold energies
 - `E0`: First initial energy guess (default: -8.0 MeV)
@@ -439,6 +462,7 @@ where the ground state energy satisfies λ(E_gs) = 1.
 - `use_arnoldi`: Use Arnoldi method for eigenvalue computation (default: true)
 - `krylov_dim`: Krylov subspace dimension for Arnoldi (default: 50)
 - `arnoldi_tol`: Arnoldi convergence tolerance (default: 1e-10)
+- `include_uix`: Include UIX three-body force (default: false)
 
 # Returns
 - `MalflietTjonResult`: Structure containing converged energy, eigenvalue, and diagnostics
@@ -453,17 +477,19 @@ expensive full matrix diagonalization.
 
 Convergence occurs when |λ(E_n) - 1| < tolerance.
 """
-function malfiet_tjon_solve(α, grid, potname, e2b; 
+function malfiet_tjon_solve(α, grid, potname, e2b;
                            E0::Float64=-8.0, E1::Float64=-7.0,
                            tolerance::Float64=1e-6, max_iterations::Int=100,
                            verbose::Bool=true, use_arnoldi::Bool=true,
-                           krylov_dim::Int=50, arnoldi_tol::Float64=1e-6)
+                           krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
+                           include_uix::Bool=true)
     
     if verbose
         println("\n" * "="^70)
         println("         MALFIET-TJON EIGENVALUE SOLVER")
         println("="^70)
-        println("Potential: $potname")
+        potential_str = include_uix ? "$potname + UIX" : potname
+        println("Potential: $potential_str")
         println("Two-body threshold: $(round(e2b[1], digits=6)) MeV")
         println("Initial energy guesses: E0 = $E0 MeV, E1 = $E1 MeV")
         println("Convergence tolerance: $tolerance")
@@ -473,6 +499,9 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         if use_arnoldi
             println("Arnoldi tolerance: $arnoldi_tol")
         end
+        if include_uix
+            println("Three-body force: UIX (Urbana IX)")
+        end
         println("-"^70)
     end
     
@@ -481,19 +510,34 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
     ψ3 = ComplexF64[]
     
     # Pre-compute matrices once (they don't change between iterations)
+    V_UIX = nothing  # Initialize UIX potential
+
     if verbose
         print("  Building matrices... ")
         @time begin
             T = T_matrix(α, grid)           # Kinetic energy H0
-            V = V_matrix(α, grid, potname)  # Potential energy
+            V = V_matrix(α, grid, potname)  # Two-body potential energy
             B = Bmatrix(α, grid)            # Overlap matrix
             Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
+
+            # Compute UIX three-body force if requested (separate from V)
+            if include_uix
+                V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
+                if verbose
+                    println("    ✓ UIX three-body force computed")
+                end
+            end
         end
     else
         T = T_matrix(α, grid)           # Kinetic energy H0
-        V = V_matrix(α, grid, potname)  # Potential energy
+        V = V_matrix(α, grid, potname)  # Two-body potential energy
         B = Bmatrix(α, grid)            # Overlap matrix
         Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
+
+        # Compute UIX three-body force if requested (separate from V)
+        if include_uix
+            V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
+        end
     end
     
     # Check rearrangement matrix symmetry
@@ -505,14 +549,16 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
     E_curr = E1
     
     # Compute initial eigenvalues (no previous eigenvector for first iteration)
-    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy; 
-                                                     verbose=verbose, use_arnoldi=use_arnoldi,
-                                                     krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol)
-    # Use previous eigenvector for second initial guess  
-    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, T, V, B, Rxy; 
+    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy;
                                                      verbose=verbose, use_arnoldi=use_arnoldi,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
-                                                     previous_eigenvector=eigenvec_prev)
+                                                     V_UIX=V_UIX)
+    # Use previous eigenvector for second initial guess
+    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, T, V, B, Rxy;
+                                                     verbose=verbose, use_arnoldi=use_arnoldi,
+                                                     krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
+                                                     previous_eigenvector=eigenvec_prev,
+                                                     V_UIX=V_UIX)
     
     if isnan(λ_prev) || isnan(λ_curr)
         error("Failed to compute initial eigenvalues. Check energy guesses and matrix conditions.")
@@ -557,10 +603,11 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         E_next = E_curr - (λ_curr - 1) * (E_curr - E_prev) / (λ_curr - λ_prev)
         
         # Compute new eigenvalue using previous eigenvector as starting point
-        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy; 
+        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy;
                                                          verbose=verbose, use_arnoldi=use_arnoldi,
                                                          krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
-                                                         previous_eigenvector=eigenvec_curr)
+                                                         previous_eigenvector=eigenvec_curr,
+                                                         V_UIX=V_UIX)
         
         if isnan(λ_next)
             @warn "Eigenvalue calculation failed at E = $E_next, stopping iteration"
@@ -607,12 +654,17 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
  
 
                 # Compute individual expectation values
-                T_expectation = 3.0*real(ψtot' * T * ψ3) 
-                V_expectation = 3.0*real(ψtot' * V * ψtot) 
+                T_expectation = 3.0*real(ψtot' * T * ψ3)
+                V_expectation = 3.0*real(ψtot' * V * ψtot)
 
+                # Include UIX expectation value if present
+                UIX_expectation = 0.0
+                if V_UIX !== nothing
+                    UIX_expectation = 3.0*real(ψtot' * V_UIX * ψtot)
+                end
 
-                # Total Hamiltonian expectation value
-                H_expectation = T_expectation + V_expectation 
+                # Total Hamiltonian expectation value: H = T + V + UIX
+                H_expectation = T_expectation + V_expectation + UIX_expectation 
                 
                 
                 println("-"^70)
@@ -624,6 +676,9 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 println("Expectation values:")
                 @printf("  <ψ|T|ψ>      = %10.6f MeV\n", T_expectation)
                 @printf("  <ψ|V|ψ>      = %10.6f MeV\n", V_expectation)
+                if V_UIX !== nothing
+                    @printf("  <ψ|UIX|ψ>    = %10.6f MeV\n", UIX_expectation)
+                end
                 @printf("  <ψ|H|ψ>      = %10.6f MeV\n", H_expectation)
                 println()
                 @printf("Energy difference:   %10.6f MeV\n", abs(H_expectation - E_next))

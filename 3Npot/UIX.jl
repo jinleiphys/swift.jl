@@ -14,7 +14,7 @@ using .Laguerre
 include("../swift/Gcoefficient.jl")
 using .Gcoefficient
 
-export Y, T, S_matrix, X12_matrix, I31_minus_matrix, X23_with_permutations, X12X31I23_plus_X12X23I31_matrix, T12_matrix, T23_matrix, T2_T2_composite_matrix, full_UIX_potential
+export full_UIX_potential
 
 # Physical constants for Urbana IX model
 const c = 2.1  # fm^-2, Gaussian cutoff parameter    
@@ -205,7 +205,6 @@ function X12_matrix(α, grid)
                         end
 
                         X12[i, i_prime] = first_term + second_term
-                        end
                     end
                 end
             end
