@@ -283,26 +283,26 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy;
                                   previous_eigenvector::Union{Nothing, Vector}=nothing,
                                   V_UIX=nothing)
     
-    # Form the left-hand side operator: E0*B - H0 - V - UIX
-    # where H0 = T (kinetic energy), V is the potential, and UIX is the three-body force
+    # Form the left-hand side operator: E0*B - H0 - V
+    # where H0 = T (kinetic energy) and V is the potential
     LHS = E0 * B - T - V
-
-    # Add UIX three-body force to the left-hand side if provided
-    if V_UIX !== nothing
-        LHS = LHS - V_UIX  # K(E) = [E*B - T - V - UIX]⁻¹ * (V*R)
-    end
 
     # # Check if matrix is singular
     # cond_num = cond(LHS)
     # if cond_num > 1e12
     #     if verbose
-    #         @warn "Matrix [E0*B - T - V - UIX] is near-singular at E0 = $E0, condition number = $(cond_num)"
+    #         @warn "Matrix [E0*B - T - V] is near-singular at E0 = $E0, condition number = $(cond_num)"
     #     end
     #     return NaN, nothing
     # end
 
-    # The Faddeev kernel: K(E) = [E*B - T - V - UIX]⁻¹ * (V*R)
+    # The Faddeev kernel: K(E) = [E*B - T - V]⁻¹ * (V*R + UIX)
     VRxy = V * Rxy
+
+    # Add UIX three-body force to the right-hand side if provided
+    if V_UIX !== nothing
+        VRxy = VRxy + V_UIX  # K(E) = [E*B - T - V]⁻¹ * (V*R + UIX)
+    end
     
     try
         if use_arnoldi
