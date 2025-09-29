@@ -283,26 +283,26 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy;
                                   previous_eigenvector::Union{Nothing, Vector}=nothing,
                                   V_UIX=nothing)
     
-    # Form the left-hand side operator: E0*B - H0 - V
-    # where H0 = T (kinetic energy) and V is the potential
+    # Form the left-hand side operator: E0*B - H0 - V - UIX
+    # where H0 = T (kinetic energy), V is the potential, and UIX is the three-body force
     LHS = E0 * B - T - V
-    
+
+    # Add UIX three-body force to the left-hand side if provided
+    if V_UIX !== nothing
+        LHS = LHS - V_UIX  # K(E) = [E*B - T - V - UIX]⁻¹ * (V*R)
+    end
+
     # # Check if matrix is singular
     # cond_num = cond(LHS)
     # if cond_num > 1e12
     #     if verbose
-    #         @warn "Matrix [E0*B - T - V] is near-singular at E0 = $E0, condition number = $(cond_num)"
+    #         @warn "Matrix [E0*B - T - V - UIX] is near-singular at E0 = $E0, condition number = $(cond_num)"
     #     end
     #     return NaN, nothing
     # end
-    
-    # The Faddeev kernel: K(E) = [E*B - T - V]⁻¹ * (V*R + UIX)
-    VRxy = V * Rxy
 
-    # Add UIX three-body force to the right-hand side if provided
-    if V_UIX !== nothing
-        VRxy = VRxy + V_UIX  # K(E) = [E*B - T - V]⁻¹ * (V*R + UIX)
-    end
+    # The Faddeev kernel: K(E) = [E*B - T - V - UIX]⁻¹ * (V*R)
+    VRxy = V * Rxy
     
     try
         if use_arnoldi
@@ -657,14 +657,15 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 T_expectation = 3.0*real(ψtot' * T * ψ3)
                 V_expectation = 3.0*real(ψtot' * V * ψtot)
 
-                # Include UIX expectation value if present
-                UIX_expectation = 0.0
+                # Include UIX expectation values if present (both formulations)
+                UIX_expectation_tot = 0.0
+                UIX_expectation_3 = 0.0
                 if V_UIX !== nothing
-                    UIX_expectation = 3.0*real(ψtot' * V_UIX * ψtot)
+                    UIX_expectation_tot = 3.0*real(ψtot' * V_UIX * ψ3)
                 end
 
                 # Total Hamiltonian expectation value: H = T + V + UIX
-                H_expectation = T_expectation + V_expectation + UIX_expectation 
+                H_expectation = T_expectation + V_expectation + UIX_expectation_tot 
                 
                 
                 println("-"^70)
@@ -677,7 +678,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 @printf("  <ψ|T|ψ>      = %10.6f MeV\n", T_expectation)
                 @printf("  <ψ|V|ψ>      = %10.6f MeV\n", V_expectation)
                 if V_UIX !== nothing
-                    @printf("  <ψ|UIX|ψ>    = %10.6f MeV\n", UIX_expectation)
+                    @printf("  <ψ|UIX|ψ>    = %10.6f MeV  [3⟨ψtot|UIX|ψtot⟩]\n", UIX_expectation_tot)
                 end
                 @printf("  <ψ|H|ψ>      = %10.6f MeV\n", H_expectation)
                 println()
