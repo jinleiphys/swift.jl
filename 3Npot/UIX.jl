@@ -14,7 +14,7 @@ using .Laguerre
 include("../swift/Gcoefficient.jl")
 using .Gcoefficient
 
-export Y, T, S_matrix, X12_matrix, I31_minus_matrix, X23_with_permutations, X12X31I23_plus_X12X23I31_matrix, T12_matrix
+export Y, T, S_matrix, X12_matrix, I31_minus_matrix, X23_with_permutations, X12X31I23_plus_X12X23I31_matrix, T12_matrix, T23_matrix, T2_T2_composite_matrix, full_UIX_potential
 
 # Physical constants for Urbana IX model
 const c = 2.1  # fm^-2, Gaussian cutoff parameter    
@@ -28,6 +28,10 @@ const m_π = (1/3) * m_π0 + (2/3) * m_π_charged  # MeV/c^2
 
 # Convert to fm^-1 (ħc = 197.3269718 MeV·fm)
 const m_π_inv_fm = m_π / 197.3269718  # fm^-1
+
+# UIX three-body force coupling constants
+const A_2π = -0.0293  # MeV, two-pion exchange coupling
+const U_0 = 0.0048    # MeV, contact interaction coupling
 
 """
     Y(r)
@@ -471,13 +475,13 @@ Compute the T12 matrix for UIX three-body force with delta function constraints.
 
 The matrix elements are:
 ⟨f_{k_x} f_{k_y} α | T₁₂ | f_{k_x'} f_{k_y'} α'⟩ =
-δ_{α,α'} δ_{k_x,k_x'} δ_{k_y,k_y'} T(x_{k_x})
+δ_{α,α'} δ_{k_x,k_x'} δ_{k_y,k_y'} T²(x_{k_x})
 
 Where:
 - δ_{α,α'}: Channel delta function (all quantum numbers must match)
 - δ_{k_x,k_x'}: x-coordinate grid point delta function
 - δ_{k_y,k_y'}: y-coordinate grid point delta function
-- T(x_{k_x}): UIX T function evaluated at x coordinate
+- T²(x_{k_x}): UIX T function squared evaluated at x coordinate
 
 Returns the T12 matrix with the same indexing as other matrices:
 i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
@@ -494,13 +498,137 @@ function T12_matrix(α, grid)
                 i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
                 # Get x coordinate for T function evaluation
                 x_kx = grid.xi[ix]
-                # Apply T function: T12[i, i] = T(x_{k_x}) (diagonal element)
-                T12[i, i] = T(x_kx)
+                # Apply T² function: T12[i, i] = T²(x_{k_x}) (diagonal element)
+                T12[i, i] = T(x_kx)^2
             end
         end
     end
 
     return T12
+end
+
+"""
+    T23_matrix(α, grid, Rxy)
+
+Compute T23 matrix with permutations: T23(1 + P⁺ + P⁻).
+
+Since T23 = T12 (same functional form), this function computes:
+T23_with_permutations = T23 × (I + Rxy)
+
+where:
+- T23 has the same structure as T12 (diagonal matrix with T(x) function)
+- I is the identity matrix
+- Rxy = Rxy_31 + Rxy_32 (rearrangement matrices from permutation operators P⁺ + P⁻)
+
+The result represents the full T23 contribution with particle permutations:
+T23(1 + P⁺ + P⁻) = T23 × (I + Rxy)
+
+Parameters:
+- α: channel structure containing quantum numbers
+- grid: coordinate grid for spatial integration
+- Rxy: rearrangement matrix (Rxy_31 + Rxy_32) representing permutation operators
+
+Returns:
+- T23_with_permutations: Matrix representing T23 × (I + Rxy)
+"""
+function T23_matrix(α, grid, Rxy)
+    # T23 has the same structure as T12 (diagonal matrix with T function)
+    T23 = T12_matrix(α, grid)
+
+    # Create identity matrix of same size
+    matrix_size = α.nchmax * grid.nx * grid.ny
+    I_matrix = Matrix{Float64}(I, matrix_size, matrix_size)
+
+    # Compute (I + Rxy) representing (1 + P⁺ + P⁻)
+    I_plus_Rxy = I_matrix + Rxy
+
+    # Compute T23 × (I + Rxy)
+    T23_with_permutations = T23 * I_plus_Rxy
+
+    return T23_with_permutations
+end
+
+"""
+    T2_T2_composite_matrix(α, grid, Rxy_31)
+
+Compute the composite matrix for T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂).
+
+Based on the mathematical formula:
+⟨f_{k_x}f_{k_y} α₃ | T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂) | Ψ⟩ =
+(1+ε_{α₃'}ε_{α₁}) ∑_{k_x'k_y'α₃'} ∑_{i_x i_y α₁}
+⟨f_{k_x}f_{k_y} α₃ | T²(r₁₂) | f_{k'_x}f_{k_y'}α₃'⟩ ×
+⟨f_{k'_x}f_{k_y'}α₃' | f_{i_x}f_{i_y}α₁⟩ ⟨f_{i_x}f_{i_y}α₁ | T²(r₂₃) | Ψ⟩
+
+Where:
+- ⟨f_{k'_x}f_{k_y'}α₃' | f_{i_x}f_{i_y}α₁⟩ is Rxy_31
+- (1+ε_{α₃'}ε_{α₁}) = 2 (symmetry factor)
+
+This computes: 2 × T²(r₁₂) × Rxy_31 × T²(r₂₃)
+
+Parameters:
+- α: channel structure containing quantum numbers
+- grid: coordinate grid for spatial integration
+- Rxy_31: rearrangement matrix for coordinate transformation
+- Rxy: rearrangement matrix (Rxy_31 + Rxy_32) for T23 permutations
+
+Returns:
+- Composite matrix representing 2 × T²(r₁₂) × Rxy_31 × T²(r₂₃)
+"""
+function T2_T2_composite_matrix(α, grid, Rxy_31, Rxy)
+    # Use existing T12_matrix function (now returns T²(r₁₂))
+    T2_12 = T12_matrix(α, grid)
+
+    # Use existing T23_matrix function (returns T²(r₂₃) with permutations)
+    T2_23 = T23_matrix(α, grid, Rxy)
+
+    # Compute the composite matrix: T²(r₁₂) × Rxy_31 × T²(r₂₃)
+    composite_matrix = T2_12 * Rxy_31 * T2_23
+
+    # Apply symmetry factor: (1+ε_{α₃'}ε_{α₁}) = 2
+    final_matrix = 2 * composite_matrix
+
+    return final_matrix
+end
+
+"""
+    full_UIX_potential(α, grid, Rxy_31, Rxy)
+
+Compute the full UIX three-body potential V₁₂⁽³⁾(1+P⁺+P⁻).
+
+Based on the mathematical formula:
+⟨x₃ y₃ α₃ | V₁₂⁽³⁾(1+P⁺+P⁻) | ψ₃⟩ = ⟨x₃ y₃ α₃ | V₁₂⁽³⁾ | Ψ⟩ =
+A₂π ⟨x₃ y₃ α₃| X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻ |Ψ⟩ +
+½U₀ ⟨x₃ y₃ α₃| T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂) |Ψ⟩
+
+Where:
+- A₂π = -0.0293 MeV (two-pion exchange coupling constant)
+- U₀ = 0.0048 MeV (contact interaction coupling constant)
+
+The potential consists of two terms:
+1. Two-pion exchange: A₂π × (X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻)
+2. Contact interaction: ½U₀ × (T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂))
+
+Parameters:
+- α: channel structure containing quantum numbers
+- grid: coordinate grid for spatial integration
+- Rxy_31: rearrangement matrix for coordinate transformation
+- Rxy: rearrangement matrix (Rxy_31 + Rxy_32) for permutations
+
+Returns:
+- V_UIX: Full UIX three-body potential matrix (MeV units)
+"""
+function full_UIX_potential(α, grid, Rxy_31, Rxy)
+    # Compute the two-pion exchange term: X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻
+    X_term = X12X31I23_plus_X12X23I31_matrix(α, grid, Rxy)
+
+    # Compute the contact interaction term: T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂)
+    T_term = T2_T2_composite_matrix(α, grid, Rxy_31, Rxy)
+
+    # Combine terms with their coupling constants:
+    # V₁₂⁽³⁾ = A₂π × X_term + ½U₀ × T_term
+    V_UIX = A_2π * X_term + 0.5 * U_0 * T_term
+
+    return V_UIX
 end
 
 end  # module UIX
