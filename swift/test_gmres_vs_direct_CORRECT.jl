@@ -11,98 +11,13 @@ using .mesh
 include("matrices.jl")
 using .matrices
 using LinearAlgebra
-using IterativeSolvers
+include("MalflietTjon.jl")
+using .MalflietTjon: gmres_matfree
 
 println("="^70)
 println("  CORRECT TEST: Direct vs GMRES for Arnoldi Usage")
 println("  (Proper matrix-free GMRES implementation)")
 println("="^70)
-
-# Simple matrix-free GMRES implementation
-"""
-    gmres_matfree(A_op, b; tol=1e-10, maxiter=100, restart=20)
-
-Matrix-free GMRES: A_op is a FUNCTION that applies the matrix.
-Returns (x, converged, iterations)
-"""
-function gmres_matfree(A_op, b; abstol=1e-10, reltol=1e-10, maxiter=100, restart=20)
-    n = length(b)
-    x = zeros(ComplexF64, n)
-
-    β_init = norm(b)
-    if β_init < abstol
-        return x, true, 0
-    end
-
-    total_iters = 0
-
-    for restart_iter in 1:div(maxiter, restart) + 1
-        # Arnoldi iteration
-        m = min(restart, maxiter - total_iters)
-
-        # Krylov subspace basis
-        V = zeros(ComplexF64, n, m+1)
-        H = zeros(ComplexF64, m+1, m)
-
-        # Initial residual
-        r = b - A_op(x)
-        β = norm(r)
-
-        if β < abstol || β/β_init < reltol
-            return x, true, total_iters
-        end
-
-        V[:, 1] = r / β
-
-        # Build Krylov subspace
-        for j in 1:m
-            w = A_op(V[:, j])
-
-            # Modified Gram-Schmidt
-            for i in 1:j
-                H[i, j] = dot(V[:, i], w)
-                w = w - H[i, j] * V[:, i]
-            end
-
-            H[j+1, j] = norm(w)
-
-            if real(H[j+1, j]) > 1e-14 && j < m
-                V[:, j+1] = w / H[j+1, j]
-            else
-                # Happy breakdown
-                m = j
-                break
-            end
-
-            total_iters += 1
-        end
-
-        # Solve least squares problem: min ||β*e1 - H*y||
-        e1 = zeros(ComplexF64, m+1)
-        e1[1] = β
-
-        # QR factorization of H to solve least squares
-        H_reduced = H[1:m+1, 1:m]
-        y = H_reduced \ e1
-
-        # Update solution
-        x = x + V[:, 1:m] * y
-
-        # Check convergence
-        r = b - A_op(x)
-        residual = norm(r)
-
-        if residual < abstol || residual/β_init < reltol
-            return x, true, total_iters
-        end
-
-        if total_iters >= maxiter
-            return x, false, total_iters
-        end
-    end
-
-    return x, false, total_iters
-end
 
 # Setup parameters (production size)
 fermion = true
@@ -185,13 +100,11 @@ time_M_inv = @elapsed M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, 
 println("\n  M^{-1} construction time: $(round(time_M_inv, digits=4))s")
 println("  Memory for M^{-1}_op: ~10 MB (function operator)")
 
-# Define preconditioned operator: (M^{-1} * LHS) * v
-precond_LHS_op(v) = M_inv_op(LHS * v)
-
 println("\n  Applying K(v) $n_arnoldi_iters times with matrix-free GMRES...")
 
 gmres_iterations = Int[]
 gmres_converged_list = Bool[]
+gmres_residuals = Float64[]
 
 time_gmres_apply = @elapsed begin
     results_gmres = Vector{Vector{ComplexF64}}(undef, n_arnoldi_iters)
@@ -200,32 +113,35 @@ time_gmres_apply = @elapsed begin
         # Right-hand side for this vector
         rhs = VRxy * v
 
-        # Precondition the RHS
-        precond_rhs = M_inv_op(rhs)
-
-        # Solve: (M^{-1} * LHS) * y = M^{-1} * rhs using matrix-free GMRES
-        y, converged, iters = gmres_matfree(precond_LHS_op, precond_rhs;
-                                            abstol=1e-10, reltol=1e-10,
-                                            maxiter=100, restart=20)
+        # Solve LHS * y = rhs using shared GMRES implementation
+        y, info = gmres_matfree(LHS, rhs;
+                                M=M_inv_op,
+                                abstol=1e-10,
+                                reltol=1e-10,
+                                maxiter=100,
+                                restart=20)
 
         results_gmres[i] = y
-        push!(gmres_iterations, iters)
-        push!(gmres_converged_list, converged)
+        push!(gmres_iterations, info.iterations)
+        push!(gmres_converged_list, info.converged)
+        push!(gmres_residuals, info.rel_residual)
 
         if i == 1
-            println("  First K(v): converged=$converged, iterations=$iters")
+            println("  First K(v): converged=$(info.converged), iterations=$(info.iterations), rel_residual=$(info.rel_residual)")
         elseif i == n_arnoldi_iters
-            println("  Last K(v):  converged=$converged, iterations=$iters")
+            println("  Last K(v):  converged=$(info.converged), iterations=$(info.iterations), rel_residual=$(info.rel_residual)")
         end
     end
 end
 
 avg_iters = sum(gmres_iterations) / length(gmres_iterations)
 all_converged = all(gmres_converged_list)
+max_rel_residual = maximum(gmres_residuals)
 
 println("  Time for $n_arnoldi_iters K(v) applications: $(round(time_gmres_apply, digits=4))s")
 println("  Average GMRES iterations per K(v): $(round(avg_iters, digits=1))")
 println("  All converged: $all_converged")
+println("  Worst relative residual: $(round(max_rel_residual, digits=2))")
 total_gmres = time_M_inv + time_gmres_apply
 println("  Total time: $(round(total_gmres, digits=4))s")
 

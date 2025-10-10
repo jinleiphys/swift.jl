@@ -6,9 +6,8 @@ using LinearAlgebra
 using Printf
 using Random
 using Statistics
-using IterativeSolvers
 
-export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry, compute_channel_probabilities, compute_uix_potential
+export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry, compute_channel_probabilities, compute_uix_potential, gmres_matfree, GMRESResult
 
 """
     compute_uix_potential(α, grid, Rxy_31, Rxy)
@@ -46,6 +45,167 @@ struct MalflietTjonResult
     iterations::Int
     convergence_history::Vector{Tuple{Float64, Float64}}
     converged::Bool
+end
+
+"""
+    GMRESResult
+
+Summary of a GMRES solve.
+
+# Fields
+- `converged::Bool`: Whether the residual tolerance was met
+- `iterations::Int`: Total Krylov iterations performed
+- `residual_norm::Float64`: Final residual ‖A*x - b‖
+- `rel_residual::Float64`: Relative residual ‖A*x - b‖ / ‖b‖
+"""
+struct GMRESResult
+    converged::Bool
+    iterations::Int
+    residual_norm::Float64
+    rel_residual::Float64
+end
+
+"""
+    gmres_matfree(A, b; M=nothing, x0=nothing, abstol=1e-10, reltol=1e-10,
+                  maxiter=200, restart=50, verbose=false)
+
+Restarted GMRES for matrix-free operators with optional left preconditioning.
+
+# Arguments
+- `A`: Linear operator. Can be a matrix or a function `v -> A*v`.
+- `b`: Right-hand side vector.
+- `M`: Optional left preconditioner (matrix or function). The solver
+        works with the transformed system `M*(A*x) = M*b`.
+- `x0`: Optional initial guess. Defaults to the zero vector.
+
+# Keyword arguments
+- `abstol`: Absolute residual tolerance.
+- `reltol`: Relative residual tolerance (based on ‖b‖).
+- `maxiter`: Maximum GMRES iterations (across all restarts).
+- `restart`: Krylov subspace dimension for restarts.
+- `verbose`: Print basic convergence information when `true`.
+
+# Returns
+- `x`: Approximate solution to `A*x = b`.
+- `info::GMRESResult`: Convergence summary.
+"""
+function gmres_matfree(A, b;
+                       M=nothing,
+                       x0=nothing,
+                       abstol::Float64=1e-10,
+                       reltol::Float64=1e-10,
+                       maxiter::Int=200,
+                       restart::Int=50,
+                       verbose::Bool=false)
+    maxiter <= 0 && throw(ArgumentError("maxiter must be positive"))
+    restart <= 0 && throw(ArgumentError("restart must be positive"))
+
+    A_op = A isa AbstractMatrix ? (v -> A * v) : A
+    M_op = M === nothing ? nothing : (M isa AbstractMatrix ? (v -> M * v) : M)
+
+    rhs_orig = M_op === nothing ? copy(b) : M_op(b)
+    T = promote_type(eltype(rhs_orig), eltype(b))
+    rhs = Vector{T}(rhs_orig)
+    b_vec = Vector{T}(b)
+    n = length(rhs)
+    rhs_norm = norm(b)
+
+    x = if x0 === nothing
+        zeros(T, n)
+    else
+        length(x0) == n || throw(DimensionMismatch("x0 has incorrect length"))
+        convert(Vector{T}, copy(x0))
+    end
+
+    apply_operator = M_op === nothing ? (v -> Vector{T}(A_op(v))) : (v -> Vector{T}(M_op(A_op(v))))
+    residual = rhs - apply_operator(x)
+    raw_residual = b_vec - Vector{T}(A_op(x))
+    β = norm(residual)
+    β0 = β
+
+    if β == 0.0
+        residual_norm = norm(raw_residual)
+        rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
+        return x, GMRESResult(true, 0, residual_norm, rel_residual)
+    end
+
+    total_iters = 0
+    restart = min(restart, maxiter)
+    max_restarts = ceil(Int, maxiter / restart)
+
+    for restart_idx in 1:max_restarts
+        m = min(restart, maxiter - total_iters)
+        m <= 0 && break
+
+        V = zeros(T, n, m + 1)
+        H = zeros(T, m + 1, m)
+
+        β = norm(residual)
+        if β < abstol || β / β0 < reltol
+            raw_residual = b_vec - Vector{T}(A_op(x))
+            residual_norm = norm(raw_residual)
+            rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
+            return x, GMRESResult(true, total_iters, residual_norm, rel_residual)
+        end
+
+        V[:, 1] .= residual / β
+        e1 = zeros(T, m + 1)
+        e1[1] = β
+
+        actual_m = m
+
+        for j in 1:m
+            vj = view(V, :, j)
+            w = apply_operator(vj)
+
+            for i in 1:j
+                vi = view(V, :, i)
+                H[i, j] = dot(vi, w)
+                w .-= H[i, j] .* vi
+            end
+
+            H[j + 1, j] = norm(w)
+
+            total_iters += 1
+
+            if abs(H[j + 1, j]) ≤ 1e-14
+                actual_m = j
+                break
+            elseif j < m
+                V[:, j + 1] .= w / H[j + 1, j]
+            end
+        end
+
+        H_reduced = view(H, 1:actual_m + 1, 1:actual_m)
+        V_reduced = view(V, :, 1:actual_m)
+        e1_reduced = view(e1, 1:actual_m + 1)
+
+        y = H_reduced \ e1_reduced
+        x .+= V_reduced * y
+
+        residual = rhs - apply_operator(x)
+        β = norm(residual)
+
+        if verbose
+            println("    GMRES restart $restart_idx: residual=$(β)")
+        end
+
+        if β < abstol || β / β0 < reltol
+            raw_residual = b_vec - Vector{T}(A_op(x))
+            residual_norm = norm(raw_residual)
+            rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
+            return x, GMRESResult(true, total_iters, residual_norm, rel_residual)
+        end
+
+        if total_iters >= maxiter
+            break
+        end
+    end
+
+    raw_residual = b_vec - Vector{T}(A_op(x))
+    residual_norm = norm(raw_residual)
+    rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
+    return x, GMRESResult(false, total_iters, residual_norm, rel_residual)
 end
 
 """
@@ -322,27 +482,23 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, T
                     M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
                 end
 
-                # Define K(E) as a function that solves LHS * y = VRxy * x on-the-fly
-                # Uses GMRES with M^{-1} as right preconditioner
+                gmres_restart = max(1, min(krylov_dim, 50))
+                gmres_maxiter = max(4 * gmres_restart, 100)
+
+                # Define K(E) using matrix-free GMRES with left preconditioning
                 K = function(x)
-                    # Right-hand side for this specific x vector
                     rhs = VRxy * x
+                    y, info = gmres_matfree(LHS, rhs;
+                                            M=M_inv_op,
+                                            abstol=1e-10,
+                                            reltol=1e-10,
+                                            restart=gmres_restart,
+                                            maxiter=gmres_maxiter,
+                                            verbose=false)
 
-                    # Solve: LHS * y = rhs
-                    # Using right preconditioning: LHS * M^{-1} * z = rhs, then y = M^{-1} * z
-                    # This avoids forming M^{-1} * LHS explicitly!
-
-                    # Create a preconditioner object for gmres
-                    # We solve with M^{-1} as right preconditioner
-                    using IterativeSolvers: Identity
-
-                    # gmres with right preconditioner Pr solves: A * Pr * z = b, then x = Pr * z
-                    # We want: LHS * M^{-1} * z = rhs
-                    # So Pr should apply M^{-1}
-
-                    # For now, use simpler approach: just solve LHS*y = rhs directly
-                    # M^{-1} helps with conditioning already built into eigendecomposition
-                    y = LHS \ rhs
+                    if verbose && !info.converged
+                        @warn "GMRES did not converge" iterations=info.iterations residual=info.residual_norm rel_residual=info.rel_residual
+                    end
 
                     return y
                 end
