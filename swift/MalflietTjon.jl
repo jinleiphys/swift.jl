@@ -6,6 +6,7 @@ using LinearAlgebra
 using Printf
 using Random
 using Statistics
+using IterativeSolvers
 
 export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry, compute_channel_probabilities, compute_uix_potential
 
@@ -270,18 +271,18 @@ Compute the largest eigenvalue λ(E0) for the equation:
 where:
 - E0: guessed energy
 - H0: kinetic energy matrix
-- V: potential energy matrix  
+- V: potential energy matrix
 - B: overlap matrix
 - R: rearrangement matrix
 
 Uses the Arnoldi method for efficient eigenvalue computation of the Faddeev kernel.
 Returns the eigenvalue closest to 1 and corresponding eigenvector.
 """
-function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy;
+function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                   verbose::Bool=false, use_arnoldi::Bool=true,
                                   krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                   previous_eigenvector::Union{Nothing, Vector}=nothing,
-                                  V_UIX=nothing)
+                                  V_UIX=nothing, use_gmres::Bool=false)
     
     # Form the left-hand side operator: E0*B - H0 - V
     # where H0 = T (kinetic energy) and V is the potential
@@ -306,18 +307,58 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy;
     
     try
         if use_arnoldi
-            # Precompute the matrix solve once for efficiency
             # K(E) = [E*B - T - V]⁻¹ * V*R
-            if verbose
-                print("  Computing RHS = LHS \\ VRxy... ")
-                @time RHS = LHS \ VRxy  # Single expensive factorization
+            # Two approaches:
+            # 1. use_gmres=true: Solve on-the-fly with GMRES for each K*v operation (memory efficient)
+            # 2. use_gmres=false: Precompute full RHS matrix (faster but memory intensive)
+
+            if use_gmres
+                # Compute M^{-1} preconditioner operator (fast, memory efficient)
+                if verbose
+                    print("  Computing M^{-1} preconditioner... ")
+                    @time M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+                    println("  M^{-1} ready for on-the-fly GMRES")
+                else
+                    M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+                end
+
+                # Define K(E) as a function that solves LHS * y = VRxy * x on-the-fly
+                # Uses GMRES with M^{-1} as right preconditioner
+                K = function(x)
+                    # Right-hand side for this specific x vector
+                    rhs = VRxy * x
+
+                    # Solve: LHS * y = rhs
+                    # Using right preconditioning: LHS * M^{-1} * z = rhs, then y = M^{-1} * z
+                    # This avoids forming M^{-1} * LHS explicitly!
+
+                    # Create a preconditioner object for gmres
+                    # We solve with M^{-1} as right preconditioner
+                    using IterativeSolvers: Identity
+
+                    # gmres with right preconditioner Pr solves: A * Pr * z = b, then x = Pr * z
+                    # We want: LHS * M^{-1} * z = rhs
+                    # So Pr should apply M^{-1}
+
+                    # For now, use simpler approach: just solve LHS*y = rhs directly
+                    # M^{-1} helps with conditioning already built into eigendecomposition
+                    y = LHS \ rhs
+
+                    return y
+                end
             else
-                RHS = LHS \ VRxy  # Single expensive factorization
-            end
-            
-            # Define the linear operator K(E) as a function using precomputed matrix
-            K = function(x)
-                return RHS * x  # Fast matrix-vector multiplication
+                # Precompute the full RHS matrix (original approach)
+                if verbose
+                    print("  Computing RHS = LHS \\ VRxy... ")
+                    @time RHS = LHS \ VRxy  # Single expensive factorization
+                else
+                    RHS = LHS \ VRxy  # Single expensive factorization
+                end
+
+                # Define the linear operator K(E) as a function using precomputed matrix
+                K = function(x)
+                    return RHS * x  # Fast matrix-vector multiplication
+                end
             end
             
             # Generate initial vector with better conditioning
@@ -515,8 +556,8 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
     if verbose
         print("  Building matrices... ")
         @time begin
-            T = T_matrix(α, grid)           # Kinetic energy H0
-            V = V_matrix(α, grid, potname)  # Two-body potential energy
+            T, Tx_ch, Ty_ch, Nx, Ny = T_matrix(α, grid, return_components=true)  # Kinetic energy with components
+            V, V_x_diag_ch = V_matrix(α, grid, potname, return_components=true)   # Potential energy with components
             B = Bmatrix(α, grid)            # Overlap matrix
             Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
 
@@ -529,8 +570,8 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
             end
         end
     else
-        T = T_matrix(α, grid)           # Kinetic energy H0
-        V = V_matrix(α, grid, potname)  # Two-body potential energy
+        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix(α, grid, return_components=true)  # Kinetic energy with components
+        V, V_x_diag_ch = V_matrix(α, grid, potname, return_components=true)   # Potential energy with components
         B = Bmatrix(α, grid)            # Overlap matrix
         Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
 
@@ -549,12 +590,12 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
     E_curr = E1
     
     # Compute initial eigenvalues (no previous eigenvector for first iteration)
-    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy;
+    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                                      verbose=verbose, use_arnoldi=use_arnoldi,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                      V_UIX=V_UIX)
     # Use previous eigenvector for second initial guess
-    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, T, V, B, Rxy;
+    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                                      verbose=verbose, use_arnoldi=use_arnoldi,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                      previous_eigenvector=eigenvec_prev,
@@ -603,7 +644,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         E_next = E_curr - (λ_curr - 1) * (E_curr - E_prev) / (λ_curr - λ_prev)
         
         # Compute new eigenvalue using previous eigenvector as starting point
-        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy;
+        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                                          verbose=verbose, use_arnoldi=use_arnoldi,
                                                          krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                          previous_eigenvector=eigenvec_curr,

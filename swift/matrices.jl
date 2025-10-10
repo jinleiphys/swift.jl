@@ -13,7 +13,7 @@ const amu= 931.49432 # MeV
 const m=1.0079713395678829 # amu
 const ħ=197.3269718 # MeV. fm
 
-export Rxy_matrix, T_matrix, V_matrix, Bmatrix, M_inverse
+export Rxy_matrix, T_matrix, V_matrix, Bmatrix, M_inverse, M_inverse_operator
 
 # 1.008665 amu for neutron  amu=931.49432 MeV
 
@@ -523,6 +523,71 @@ Vmat, V_x_diag_ch = V_matrix(α, grid, potname, return_components=true)
 M_inv = M_inverse(α, grid, E, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
 ```
 """
+function M_inverse_operator(α, grid, E, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
+    nα = α.nchmax
+    nx = grid.nx
+    ny = grid.ny
+
+    # Compute inverses of overlap matrices
+    Nx_inv = inv(Nx)
+    Ny_inv = inv(Ny)
+    N_inv_block = kron(Nx_inv, Ny_inv)
+
+    # Store eigenvectors and eigenvalues for each channel
+    Ux_arrays = Vector{Matrix{Float64}}(undef, nα)
+    Uy_arrays = Vector{Matrix{Float64}}(undef, nα)
+    Ux_inv_arrays = Vector{Matrix{Float64}}(undef, nα)
+    Uy_inv_arrays = Vector{Matrix{Float64}}(undef, nα)
+    dx_arrays = Vector{Vector{Float64}}(undef, nα)
+    dy_arrays = Vector{Vector{Float64}}(undef, nα)
+
+    # Compute eigendecompositions for each channel
+    for iα in 1:nα
+        Hx_alpha = Tx_channels[iα] + V_x_diag_channels[iα]
+        eigen_x = eigen(Nx_inv * Hx_alpha)
+        Ux_arrays[iα] = real(eigen_x.vectors)
+        dx_arrays[iα] = real(eigen_x.values)
+        Ux_inv_arrays[iα] = inv(Ux_arrays[iα])
+
+        eigen_y = eigen(Ny_inv * Ty_channels[iα])
+        Uy_arrays[iα] = real(eigen_y.vectors)
+        dy_arrays[iα] = real(eigen_y.values)
+        Uy_inv_arrays[iα] = inv(Uy_arrays[iα])
+    end
+
+    # Precompute transformation blocks
+    U_blocks = [kron(Ux_arrays[iα], Uy_arrays[iα]) for iα in 1:nα]
+    U_inv_N_inv_blocks = [kron(Ux_inv_arrays[iα], Uy_inv_arrays[iα]) * N_inv_block for iα in 1:nα]
+
+    # Precompute diagonal inverse elements
+    D_inv_blocks = Vector{Vector{Float64}}(undef, nα)
+    for iα in 1:nα
+        D_inv_blocks[iα] = zeros(nx * ny)
+        for ix in 1:nx, iy in 1:ny
+            idx = (ix-1) * ny + iy
+            D_inv_blocks[iα][idx] = 1.0 / (E - dx_arrays[iα][ix] - dy_arrays[iα][iy])
+        end
+    end
+
+    # Return a function that applies M^{-1} efficiently
+    return function(v::AbstractVector)
+        result = similar(v)
+        for iα in 1:nα
+            idx_start = (iα-1) * nx * ny + 1
+            idx_end = iα * nx * ny
+
+            # Extract block
+            v_block = v[idx_start:idx_end]
+
+            # Apply: M^{-1} * v = U * D^{-1} * U^{-1} * N^{-1} * v
+            temp1 = U_inv_N_inv_blocks[iα] * v_block
+            temp2 = D_inv_blocks[iα] .* temp1  # Element-wise multiplication (diagonal!)
+            result[idx_start:idx_end] = U_blocks[iα] * temp2
+        end
+        return result
+    end
+end
+
 function M_inverse(α, grid, E, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
     nα = α.nchmax
     nx = grid.nx
@@ -560,54 +625,41 @@ function M_inverse(α, grid, E, Tx_channels, Ty_channels, V_x_diag_channels, Nx,
         Uy_inv_arrays[iα] = inv(Uy_arrays[iα])
     end
 
-    # Construct the transformation matrix U = ∑_α [I_α ⊗ U_x^α ⊗ U_y^α]
-    # We build this block by block
-    U_full = zeros(nα * nx * ny, nα * nx * ny)
-    U_inv_full = zeros(nα * nx * ny, nα * nx * ny)
+    # KEY INSIGHT: The matrix in the eigenvalue basis is DIAGONAL!
+    # M^{-1} = U * D^{-1} * U^{-1} * [I_α ⊗ N_x^{-1} ⊗ N_y^{-1}]
+    # where D^{-1} is diagonal with elements: 1/(E - d_x^α[ix] - d_y^α[iy])
+
+    # Pre-compute N_inv_block = N_x^{-1} ⊗ N_y^{-1} (same for all channels)
+    N_inv_block = kron(Nx_inv, Ny_inv)  # Only nx*ny × nx*ny
+
+    # Build the full M_inv matrix using block-diagonal structure
+    # This is still needed because we need to multiply M_inv * LHS and M_inv * VRxy
+    M_inv = zeros(nα * nx * ny, nα * nx * ny)
 
     for iα in 1:nα
-        # Create channel selector
-        row_start = (iα-1) * nx * ny + 1
-        row_end = iα * nx * ny
+        idx_start = (iα-1) * nx * ny + 1
+        idx_end = iα * nx * ny
 
-        col_start = (iα-1) * nx * ny + 1
-        col_end = iα * nx * ny
-
-        # U block for this channel
+        # U_α and U_inv_α blocks
         U_block = kron(Ux_arrays[iα], Uy_arrays[iα])
-        U_full[row_start:row_end, col_start:col_end] = U_block
-
-        # U_inv block for this channel
         U_inv_block = kron(Ux_inv_arrays[iα], Uy_inv_arrays[iα])
-        U_inv_full[row_start:row_end, col_start:col_end] = U_inv_block
-    end
 
-    # Construct the diagonal matrix D = E*I - ∑_α [δ_αα ⊗ d_x^α ⊗ I_y] - ∑_α [δ_αα ⊗ I_x ⊗ d_y^α]
-    D_diag = zeros(nα * nx * ny)
-
-    for iα in 1:nα
+        # Diagonal elements: D^{-1}[ix, iy] = 1/(E - d_x^α[ix] - d_y^α[iy])
+        D_inv_block_diag = zeros(nx * ny)
         for ix in 1:nx
             for iy in 1:ny
-                idx = (iα-1) * nx * ny + (ix-1) * ny + iy
-                D_diag[idx] = E - dx_arrays[iα][ix] - dy_arrays[iα][iy]
+                idx_local = (ix-1) * ny + iy
+                D_inv_block_diag[idx_local] = 1.0 / (E - dx_arrays[iα][ix] - dy_arrays[iα][iy])
             end
         end
+
+        # M_inv block = U_α * D_inv_α * U_inv_α * N_inv_block
+        temp1 = U_inv_block * N_inv_block
+        temp2 = Diagonal(D_inv_block_diag) * temp1
+        M_inv_block = U_block * temp2
+
+        M_inv[idx_start:idx_end, idx_start:idx_end] = M_inv_block
     end
-
-    # Invert the diagonal matrix
-    D_inv_diag = 1.0 ./ D_diag
-
-    # Construct M^{-1} = U * D^{-1} * U^† * [I_α ⊗ N_x^{-1} ⊗ N_y^{-1}]
-    # We do this efficiently using matrix-vector products
-
-    # First construct [I_α ⊗ N_x^{-1} ⊗ N_y^{-1}]
-    N_inv = kron(Matrix{Float64}(I, nα, nα), kron(Nx_inv, Ny_inv))
-
-    # M^{-1} = U * Diagonal(D_inv_diag) * U_inv_full * N_inv
-    # For efficiency, we compute this in steps
-    temp1 = U_inv_full * N_inv
-    temp2 = Diagonal(D_inv_diag) * temp1
-    M_inv = U_full * temp2
 
     return M_inv
 end
