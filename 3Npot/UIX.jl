@@ -264,7 +264,7 @@ function tau2_dot_tau3_cross_tau1(T12::Float64, T12_prime::Float64, T::Float64, 
     T12_hat = 2 * T12 + 1
     T12_prime_hat = 2 * T12_prime + 1
 
-    # Sum over ξ ∈ {1/2, 3/2}
+    # Sum over ξ ∈ {1/2, 3/2} as specified in UIX reference
     result = 0.0
     for xi in [0.5, 1.5]
         # Phase factor: (-1)^{2T-ξ+1/2}
@@ -461,7 +461,7 @@ function X12X31I23_plus_X12X23I31_matrix(α, grid, Rxy)
     composite_matrix = X12 * I31_minus * X23
 
     # Apply permutation symmetry factor (1+ε_{α₃'}ε_{α₁}) = 2
-    # Set the symmetry factor directly to 2 as requested
+    # This factor of 2 accounts for both X₁₂X₃₁I₂₃⁺ and X₁₂X₂₃I₃₁⁻ terms
     final_matrix = 2 * composite_matrix
 
     return final_matrix
@@ -584,6 +584,7 @@ function T2_T2_composite_matrix(α, grid, Rxy_31, Rxy)
     composite_matrix = T2_12 * Rxy_31 * T2_23
 
     # Apply symmetry factor: (1+ε_{α₃'}ε_{α₁}) = 2
+    # This factor of 2 accounts for both T²(r₁₂)T²(r₂₃) and T²(r₃₁)T²(r₁₂) terms
     final_matrix = 2 * composite_matrix
 
     return final_matrix
