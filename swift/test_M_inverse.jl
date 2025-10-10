@@ -2,41 +2,51 @@
 # This demonstrates how to use the new M_inverse function with pre-computed components
 
 include("../general_modules/channels.jl")
-using .channels
 include("../general_modules/mesh.jl")
-using .Mesh
+using .channels
+using .mesh
 include("matrices.jl")
 using .matrices
+using LinearAlgebra
 
 println("Testing M_inverse implementation...")
 
-# Example parameters (small for testing)
-J = 1/2
-T = 1/2
-P = 1
-s1 = 1/2
-s2 = 1/2
-s3 = 1/2
-t3 = 1/2
-MT = 1/2
+# Example parameters (small for testing) - similar to swift_3H.ipynb but smaller
+fermion = true
+Jtot = 0.5
+T = 0.5
+Parity = 1
+lmax = 2      # Reduced from 4 for faster testing
+lmin = 0
+λmax = 4      # Reduced from 20 for faster testing
+λmin = 0
+s1 = 0.5
+s2 = 0.5
+s3 = 0.5
+t1 = 0.5
+t2 = 0.5
+t3 = 0.5
+MT = -0.5     # For ³H (one proton, two neutrons)
+j2bmax = 2.0  # Reduced from 3.0 for faster testing
 
 # Create small grid for testing
-nx = 5
-ny = 5
-xmax = 10.0
-ymax = 10.0
-α_param = 0.5
+nθ = 12
+nx = 5        # Reduced from 30 for faster testing
+ny = 5        # Reduced from 30 for faster testing
+xmax = 10.0   # Reduced from 20 for faster testing
+ymax = 10.0   # Reduced from 20 for faster testing
+alpha = 0.5
 
 println("\nGenerating channels...")
-α = α3b(J, T, P, s1, s2, s3, t3, MT)
+α = α3b(fermion, Jtot, T, Parity, lmax, lmin, λmax, λmin, s1, s2, s3, t1, t2, t3, MT, j2bmax)
 println("Number of channels: ", α.nchmax)
 
 println("\nInitializing mesh...")
-grid = initialmesh(nx, ny, xmax, ymax, α_param)
+grid = initialmesh(nθ, nx, ny, Float64(xmax), Float64(ymax), Float64(alpha))
 println("Grid size: $nx × $ny")
 
 # Choose potential
-potname = "av18"
+potname = "AV18"
 
 # Energy value for testing
 E = -8.0  # MeV (typical binding energy)
