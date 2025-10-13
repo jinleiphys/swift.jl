@@ -1550,6 +1550,10 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
                                      krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                      include_uix::Bool=false)
 
+    # Timing dictionary to track performance
+    timings = Dict{String, Float64}()
+    total_time_start = time()
+
     if verbose
         println("\n" * "="^70)
         println("    MALFIET-TJON EIGENVALUE SOLVER (OPTIMIZED)")
@@ -1579,23 +1583,53 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
     # Pre-compute matrices once using OPTIMIZED functions
     V_UIX = nothing  # Initialize UIX potential
 
+    # Time matrix construction
+    matrix_time_start = time()
     if verbose
-        print("  Building matrices (optimized)... ")
-        @time begin
-            # Use optimized matrix functions for T, V, and Rxy
-            T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
-            V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
-            B = Bmatrix(α, grid)
-            Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+        println("  Building matrices (optimized)...")
 
-            # Compute UIX three-body force if requested (separate from V)
-            if include_uix
-                V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
-                if verbose
-                    println("    ✓ UIX three-body force computed")
-                end
-            end
+        print("    - T matrix: ")
+        t_start = time()
+        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
+        t_time = time() - t_start
+        timings["T_matrix"] = t_time
+        @printf("%.3f s\n", t_time)
+
+        print("    - V matrix: ")
+        v_start = time()
+        V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
+        v_time = time() - v_start
+        timings["V_matrix"] = v_time
+        @printf("%.3f s\n", v_time)
+
+        print("    - B matrix: ")
+        b_start = time()
+        B = Bmatrix(α, grid)
+        b_time = time() - b_start
+        timings["B_matrix"] = b_time
+        @printf("%.3f s\n", b_time)
+
+        print("    - Rxy matrix: ")
+        r_start = time()
+        Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+        r_time = time() - r_start
+        timings["Rxy_matrix"] = r_time
+        @printf("%.3f s\n", r_time)
+
+        # Compute UIX three-body force if requested (separate from V)
+        if include_uix
+            print("    - UIX potential: ")
+            uix_start = time()
+            V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
+            uix_time = time() - uix_start
+            timings["UIX_potential"] = uix_time
+            @printf("%.3f s\n", uix_time)
         end
+
+        matrix_time = time() - matrix_time_start
+        timings["total_matrix_construction"] = matrix_time
+        @printf("  Total matrix construction: %.3f s\n", matrix_time)
+        println()
     else
         # Use optimized matrix functions for T, V, and Rxy
         T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
@@ -1607,6 +1641,8 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         if include_uix
             V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
         end
+
+        timings["total_matrix_construction"] = time() - matrix_time_start
     end
 
 
@@ -1614,17 +1650,38 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
     E_prev = E0
     E_curr = E1
 
+    # Time initial eigenvalue computations
+    if verbose
+        println("  Computing initial eigenvalues...")
+    end
+
+    eigenval_times = Float64[]
+
     # Compute initial eigenvalues (no previous eigenvector for first iteration)
-    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                                     verbose=verbose, use_arnoldi=use_arnoldi,
+    eigen_start = time()
+    λ_prev, eigenvec_prev = compute_lambda_eigenvalue_optimized(E_prev, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+                                                     verbose=false, use_arnoldi=use_arnoldi,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                      V_UIX=V_UIX)
+    eigen1_time = time() - eigen_start
+    push!(eigenval_times, eigen1_time)
+    if verbose
+        @printf("    E = %.4f MeV: %.3f s\n", E_prev, eigen1_time)
+    end
+
     # Use previous eigenvector for second initial guess
-    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                                     verbose=verbose, use_arnoldi=use_arnoldi,
+    eigen_start = time()
+    λ_curr, eigenvec_curr = compute_lambda_eigenvalue_optimized(E_curr, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+                                                     verbose=false, use_arnoldi=use_arnoldi,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                      previous_eigenvector=eigenvec_prev,
                                                      V_UIX=V_UIX)
+    eigen2_time = time() - eigen_start
+    push!(eigenval_times, eigen2_time)
+    if verbose
+        @printf("    E = %.4f MeV: %.3f s\n", E_curr, eigen2_time)
+        println()
+    end
 
     if isnan(λ_prev) || isnan(λ_curr)
         error("Failed to compute initial eigenvalues. Check energy guesses and matrix conditions.")
@@ -1651,6 +1708,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
     # Secant method iteration
     converged = false
     final_eigenvec = eigenvec_curr
+    iteration_time_start = time()
 
     for iteration in 1:max_iterations
         # Secant method update
@@ -1668,12 +1726,15 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         # Secant formula: E_{n+1} = E_n - (λ_n - 1) * (E_n - E_{n-1}) / (λ_n - λ_{n-1})
         E_next = E_curr - (λ_curr - 1) * (E_curr - E_prev) / (λ_curr - λ_prev)
 
-        # Compute new eigenvalue using previous eigenvector as starting point
+        # Time eigenvalue computation for this iteration
+        iter_eigen_start = time()
         λ_next, eigenvec_next = compute_lambda_eigenvalue_optimized(E_next, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                                         verbose=verbose, use_arnoldi=use_arnoldi,
+                                                         verbose=false, use_arnoldi=use_arnoldi,
                                                          krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                          previous_eigenvector=eigenvec_curr,
                                                          V_UIX=V_UIX)
+        iter_eigen_time = time() - iter_eigen_start
+        push!(eigenval_times, iter_eigen_time)
 
         if isnan(λ_next)
             @warn "Eigenvalue calculation failed at E = $E_next, stopping iteration"
@@ -1685,8 +1746,8 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         push!(convergence_history, (E_next, λ_next))
 
         if verbose
-            @printf("Iter %2d: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n",
-                   iteration, E_next, λ_next, residual)
+            @printf("Iter %2d: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e  (%.3f s)\n",
+                   iteration, E_next, λ_next, residual, iter_eigen_time)
         end
 
         if residual < tolerance
@@ -1743,6 +1804,44 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
                 else
                     println("⚠ Energy consistency check: FAILED")
                 end
+
+                # Add timing summary
+                iteration_time = time() - iteration_time_start
+                total_time = time() - total_time_start
+                timings["secant_iterations"] = iteration_time
+                timings["total_eigenvalue_time"] = sum(eigenval_times)
+                timings["total_runtime"] = total_time
+
+                println()
+                println("="^70)
+                println("                    TIMING SUMMARY")
+                println("="^70)
+                @printf("Matrix construction:     %8.3f s  (%5.1f%%)\n",
+                       timings["total_matrix_construction"],
+                       100*timings["total_matrix_construction"]/total_time)
+                @printf("  - T matrix:            %8.3f s\n", timings["T_matrix"])
+                @printf("  - V matrix:            %8.3f s\n", timings["V_matrix"])
+                @printf("  - B matrix:            %8.3f s\n", timings["B_matrix"])
+                @printf("  - Rxy matrix:          %8.3f s\n", timings["Rxy_matrix"])
+                if haskey(timings, "UIX_potential")
+                    @printf("  - UIX potential:       %8.3f s\n", timings["UIX_potential"])
+                end
+                println()
+                @printf("Eigenvalue computations: %8.3f s  (%5.1f%%)\n",
+                       timings["total_eigenvalue_time"],
+                       100*timings["total_eigenvalue_time"]/total_time)
+                @printf("  - Initial (2):         %8.3f s\n", eigenval_times[1] + eigenval_times[2])
+                if length(eigenval_times) > 2
+                    @printf("  - Iterations (%d):      %8.3f s  (avg: %.3f s)\n",
+                           length(eigenval_times) - 2,
+                           sum(eigenval_times[3:end]),
+                           mean(eigenval_times[3:end]))
+                    @printf("    Min/Max iteration:   %.3f s / %.3f s\n",
+                           minimum(eigenval_times[3:end]),
+                           maximum(eigenval_times[3:end]))
+                end
+                println()
+                @printf("Total runtime:           %8.3f s\n", total_time)
                 println("="^70)
             end
             return MalflietTjonResult(E_next, λ_next, eigenvec_next, iteration,
