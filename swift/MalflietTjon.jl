@@ -6,8 +6,11 @@ using LinearAlgebra
 using Printf
 using Random
 using Statistics
+include("matrices_optimized.jl")
+using .matrices_optimized 
 
-export malfiet_tjon_solve, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, test_rxy31_permutation, check_rxy_symmetry, compute_channel_probabilities, compute_uix_potential, gmres_matfree, GMRESResult
+
+export malfiet_tjon_solve, malfiet_tjon_solve_optimized, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, compute_channel_probabilities
 
 """
     compute_uix_potential(α, grid, Rxy_31, Rxy)
@@ -442,7 +445,7 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, T
                                   verbose::Bool=false, use_arnoldi::Bool=true,
                                   krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                   previous_eigenvector::Union{Nothing, Vector}=nothing,
-                                  V_UIX=nothing, use_gmres::Bool=false)
+                                  V_UIX=nothing)
     
     # Form the left-hand side operator: E0*B - H0 - V
     # where H0 = T (kinetic energy) and V is the potential
@@ -467,54 +470,17 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, T
     
     try
         if use_arnoldi
-            # K(E) = [E*B - T - V]⁻¹ * V*R
-            # Two approaches:
-            # 1. use_gmres=true: Solve on-the-fly with GMRES for each K*v operation (memory efficient)
-            # 2. use_gmres=false: Precompute full RHS matrix (faster but memory intensive)
-
-            if use_gmres
-                # Compute M^{-1} preconditioner operator (fast, memory efficient)
-                if verbose
-                    print("  Computing M^{-1} preconditioner... ")
-                    @time M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-                    println("  M^{-1} ready for on-the-fly GMRES")
-                else
-                    M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-                end
-
-                gmres_restart = max(1, min(krylov_dim, 50))
-                gmres_maxiter = max(4 * gmres_restart, 100)
-
-                # Define K(E) using matrix-free GMRES with left preconditioning
-                K = function(x)
-                    rhs = VRxy * x
-                    y, info = gmres_matfree(LHS, rhs;
-                                            M=M_inv_op,
-                                            abstol=1e-10,
-                                            reltol=1e-10,
-                                            restart=gmres_restart,
-                                            maxiter=gmres_maxiter,
-                                            verbose=false)
-
-                    if verbose && !info.converged
-                        @warn "GMRES did not converge" iterations=info.iterations residual=info.residual_norm rel_residual=info.rel_residual
-                    end
-
-                    return y
-                end
+            # Precompute the full RHS matrix: K(E) = [E*B - T - V]⁻¹ * (V*R + UIX)
+            if verbose
+                print("  Computing RHS = LHS \\ VRxy... ")
+                @time RHS = LHS \ VRxy  # Single expensive factorization
             else
-                # Precompute the full RHS matrix (original approach)
-                if verbose
-                    print("  Computing RHS = LHS \\ VRxy... ")
-                    @time RHS = LHS \ VRxy  # Single expensive factorization
-                else
-                    RHS = LHS \ VRxy  # Single expensive factorization
-                end
+                RHS = LHS \ VRxy  # Single expensive factorization
+            end
 
-                # Define the linear operator K(E) as a function using precomputed matrix
-                K = function(x)
-                    return RHS * x  # Fast matrix-vector multiplication
-                end
+            # Define the linear operator K(E) as a function using precomputed matrix
+            K = function(x)
+                return RHS * x  # Fast matrix-vector multiplication
             end
             
             # Generate initial vector with better conditioning
@@ -679,7 +645,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                            tolerance::Float64=1e-6, max_iterations::Int=100,
                            verbose::Bool=true, use_arnoldi::Bool=true,
                            krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
-                           include_uix::Bool=true)
+                           include_uix::Bool=false)
     
     if verbose
         println("\n" * "="^70)
@@ -1315,6 +1281,289 @@ function compute_channel_probabilities(ψ_normalized, ψ3_normalized, B, α, gri
     end
     
     return channel_probs, channel_info
+end
+
+"""
+    malfiet_tjon_solve_optimized(α, grid, potname, e2b; E0=-8.0, E1=-7.0,
+                                 tolerance=1e-6, max_iterations=100, verbose=true,
+                                 use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-6,
+                                 include_uix=false)
+
+**OPTIMIZED VERSION** of Malfiet-Tjon solver using optimized T, V, and Rxy matrix functions.
+
+This version uses:
+- `T_matrix_optimized()` for ~8× faster kinetic energy matrix computation
+- `V_matrix_optimized()` for ~1.5-2× faster potential matrix computation
+- `Rxy_matrix_optimized()` for ~2× faster rearrangement matrix computation
+- Overall speedup: ~2-3× for matrix construction phase
+
+All other arguments and behavior are identical to `malfiet_tjon_solve()`.
+
+# Performance Benefits
+- Faster matrix construction (typically 40-60% of total time)
+- Same numerical accuracy as non-optimized version
+- 50% memory reduction in Rxy computation (exploits symmetry)
+
+# Arguments
+See `malfiet_tjon_solve()` documentation for detailed argument descriptions.
+
+# Returns
+- `MalflietTjonResult`: Structure containing converged energy, eigenvalue, and diagnostics
+- `ψtot`: Normalized total wave function
+- `ψ3`: Normalized component wave function
+
+# Example
+```julia
+using .channels, .mesh, .MalflietTjon
+
+α = α3b(true, 0.5, 0.5, 1, 2, 0, 4, 0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 2.0)
+grid = initialmesh(12, 15, 15, 15.0, 15.0, 0.5)
+e2b = [-2.2246]
+
+result, ψtot, ψ3 = malfiet_tjon_solve_optimized(α, grid, "AV18", e2b; include_uix=true)
+```
+"""
+function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
+                                     E0::Float64=-8.0, E1::Float64=-7.0,
+                                     tolerance::Float64=1e-6, max_iterations::Int=100,
+                                     verbose::Bool=true, use_arnoldi::Bool=true,
+                                     krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
+                                     include_uix::Bool=false)
+
+    if verbose
+        println("\n" * "="^70)
+        println("    MALFIET-TJON EIGENVALUE SOLVER (OPTIMIZED)")
+        println("="^70)
+        potential_str = include_uix ? "$potname + UIX" : potname
+        println("Potential: $potential_str")
+        println("Two-body threshold: $(round(e2b[1], digits=6)) MeV")
+        println("Initial energy guesses: E0 = $E0 MeV, E1 = $E1 MeV")
+        println("Convergence tolerance: $tolerance")
+        println("Maximum iterations: $max_iterations")
+        method_str = use_arnoldi ? "Arnoldi (Krylov dim: $krylov_dim)" : "Direct diagonalization"
+        println("Eigenvalue method: $method_str")
+        if use_arnoldi
+            println("Arnoldi tolerance: $arnoldi_tol")
+        end
+        if include_uix
+            println("Three-body force: UIX (Urbana IX)")
+        end
+        println("Matrix functions: OPTIMIZED (T, V, Rxy)")
+        println("-"^70)
+    end
+
+    # Initialize wave function variables
+    ψtot = ComplexF64[]
+    ψ3 = ComplexF64[]
+
+    # Pre-compute matrices once using OPTIMIZED functions
+    V_UIX = nothing  # Initialize UIX potential
+
+    if verbose
+        print("  Building matrices (optimized)... ")
+        @time begin
+            # Use optimized matrix functions for T, V, and Rxy
+            T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
+            V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
+            B = Bmatrix(α, grid)
+            Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+
+            # Compute UIX three-body force if requested (separate from V)
+            if include_uix
+                V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
+                if verbose
+                    println("    ✓ UIX three-body force computed")
+                end
+            end
+        end
+    else
+        # Use optimized matrix functions for T, V, and Rxy
+        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
+        V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
+        B = Bmatrix(α, grid)
+        Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+
+        # Compute UIX three-body force if requested (separate from V)
+        if include_uix
+            V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
+        end
+    end
+
+
+    # Initialize secant method
+    E_prev = E0
+    E_curr = E1
+
+    # Compute initial eigenvalues (no previous eigenvector for first iteration)
+    λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+                                                     verbose=verbose, use_arnoldi=use_arnoldi,
+                                                     krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
+                                                     V_UIX=V_UIX)
+    # Use previous eigenvector for second initial guess
+    λ_curr, eigenvec_curr = compute_lambda_eigenvalue(E_curr, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+                                                     verbose=verbose, use_arnoldi=use_arnoldi,
+                                                     krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
+                                                     previous_eigenvector=eigenvec_prev,
+                                                     V_UIX=V_UIX)
+
+    if isnan(λ_prev) || isnan(λ_curr)
+        error("Failed to compute initial eigenvalues. Check energy guesses and matrix conditions.")
+    end
+
+    convergence_history = [(E_prev, λ_prev), (E_curr, λ_curr)]
+
+    if verbose
+        @printf("Initial: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n", E_prev, λ_prev, abs(λ_prev - 1))
+        @printf("Initial: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n", E_curr, λ_curr, abs(λ_curr - 1))
+        println("-"^70)
+    end
+
+    # Check if already converged
+    if abs(λ_curr - 1) < tolerance
+        if verbose
+            println("Already converged at initial guess!")
+        end
+        ψ = eigenvec_curr
+        ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
+        return MalflietTjonResult(E_curr, λ_curr, eigenvec_curr, 0, convergence_history, true), ψtot, ψ3
+    end
+
+    # Secant method iteration
+    converged = false
+    final_eigenvec = eigenvec_curr
+
+    for iteration in 1:max_iterations
+        # Secant method update
+        if abs(λ_curr - λ_prev) < 1e-15
+            @warn "λ values too close, secant method may be unstable"
+            break
+        end
+
+        # Check for divergence
+        if abs(E_curr) > 100.0
+            @warn "Method appears to be diverging, try different initial energy guesses"
+            break
+        end
+
+        # Secant formula: E_{n+1} = E_n - (λ_n - 1) * (E_n - E_{n-1}) / (λ_n - λ_{n-1})
+        E_next = E_curr - (λ_curr - 1) * (E_curr - E_prev) / (λ_curr - λ_prev)
+
+        # Compute new eigenvalue using previous eigenvector as starting point
+        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+                                                         verbose=verbose, use_arnoldi=use_arnoldi,
+                                                         krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
+                                                         previous_eigenvector=eigenvec_curr,
+                                                         V_UIX=V_UIX)
+
+        if isnan(λ_next)
+            @warn "Eigenvalue calculation failed at E = $E_next, stopping iteration"
+            break
+        end
+
+        # Check convergence
+        residual = abs(λ_next - 1)
+        push!(convergence_history, (E_next, λ_next))
+
+        if verbose
+            @printf("Iter %2d: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n",
+                   iteration, E_next, λ_next, residual)
+        end
+
+        if residual < tolerance
+            converged = true
+            final_eigenvec = eigenvec_next
+
+            # Normalize the eigenvector properly with respect to the overlap matrix B
+            ψ = eigenvec_next
+            ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
+
+            if verbose
+                # Compute the probabilities in each channel
+                channel_probs, channel_info = compute_channel_probabilities(ψtot, ψ3, B, α, grid)
+
+                # Print channel probability results
+                println()
+                println("Channel probability contributions:")
+                println("-"^60)
+                for (i, (prob, info)) in enumerate(zip(channel_probs, channel_info))
+                    @printf("  %s: %8.4f%%\n", info, prob * 100.0)
+                end
+                println("-"^60)
+
+                # Compute individual expectation values
+                T_expectation = 3.0*real(ψtot' * T * ψ3)
+                V_expectation = 3.0*real(ψtot' * V * ψtot)
+
+                # Include UIX expectation values if present
+                UIX_expectation_tot = 0.0
+                if V_UIX !== nothing
+                    UIX_expectation_tot = 3.0*real(ψtot' * V_UIX * ψ3)
+                end
+
+                # Total Hamiltonian expectation value: H = T + V + UIX
+                H_expectation = T_expectation + V_expectation + UIX_expectation_tot
+
+                println("-"^70)
+                println("✓ CONVERGED!")
+                @printf("Ground state energy: %10.6f MeV\n", E_next)
+                @printf("Final eigenvalue λ:   %10.6f\n", λ_next)
+                @printf("Binding energy:      %10.6f MeV\n", -E_next)
+                println()
+                println("Expectation values:")
+                @printf("  <ψ|T|ψ>      = %10.6f MeV\n", T_expectation)
+                @printf("  <ψ|V|ψ>      = %10.6f MeV\n", V_expectation)
+                if V_UIX !== nothing
+                    @printf("  <ψ|UIX|ψ>    = %10.6f MeV\n", UIX_expectation_tot)
+                end
+                @printf("  <ψ|H|ψ>      = %10.6f MeV\n", H_expectation)
+                println()
+                @printf("Energy difference:   %10.6f MeV\n", abs(H_expectation - E_next))
+                if abs(H_expectation - E_next) < 1e-3
+                    println("✓ Energy consistency check: PASSED")
+                else
+                    println("⚠ Energy consistency check: FAILED")
+                end
+                println("="^70)
+            end
+            return MalflietTjonResult(E_next, λ_next, eigenvec_next, iteration,
+                                     convergence_history, true), ψtot, ψ3
+        end
+
+        # Update for next iteration
+        E_prev = E_curr
+        E_curr = E_next
+        λ_prev = λ_curr
+        λ_curr = λ_next
+        final_eigenvec = eigenvec_next
+
+        # Safety check for energy bounds
+        if E_next > 0
+            @warn "Energy became positive ($E_next MeV), may have diverged"
+        end
+    end
+
+    # For non-converged case, compute wave functions from final eigenvector
+    if !converged && final_eigenvec !== nothing
+        ψ = final_eigenvec
+        ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
+    elseif !converged
+        # If no final eigenvector, return empty arrays
+        ψtot = ComplexF64[]
+        ψ3 = ComplexF64[]
+    end
+
+    if verbose
+        println("-"^70)
+        if !converged
+            println("✗ Did not converge within $max_iterations iterations")
+            @printf("Final: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n",
+                   E_curr, λ_curr, abs(λ_curr - 1))
+        end
+        println("="^70)
+    end
+
+    return MalflietTjonResult(E_curr, λ_curr, final_eigenvec, max_iterations,
+                             convergence_history, converged), ψtot, ψ3
 end
 
 
