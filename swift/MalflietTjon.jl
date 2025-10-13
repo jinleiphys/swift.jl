@@ -10,7 +10,7 @@ include("matrices_optimized.jl")
 using .matrices_optimized 
 
 
-export malfiet_tjon_solve, malfiet_tjon_solve_optimized, compute_lambda_eigenvalue, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, compute_channel_probabilities
+export malfiet_tjon_solve, malfiet_tjon_solve_optimized, compute_lambda_eigenvalue, compute_lambda_eigenvalue_optimized, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, compute_channel_probabilities
 
 """
     compute_uix_potential(α, grid, Rxy_31, Rxy)
@@ -596,6 +596,226 @@ function compute_lambda_eigenvalue(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, T
         
     catch e
         @warn "Failed to solve eigenvalue problem at E0 = $E0: $e"
+        return NaN, nothing
+    end
+end
+
+"""
+    compute_lambda_eigenvalue_optimized(E0, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+                                       verbose=false, use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-6,
+                                       previous_eigenvector=nothing, V_UIX=nothing)
+
+**OPTIMIZED VERSION** using M⁻¹ preconditioner for faster eigenvalue computation.
+
+This function computes the eigenvalue λ(E0) for the reformulated Faddeev equation:
+    λ(E0) [c] = M⁻¹(E0) * (V - V_αα + V*R + UIX) [c]
+
+where:
+- M⁻¹ = [E0*B - T - V_αα]⁻¹ is the preconditioner (diagonal potential only)
+- V_αα is the diagonal part of the potential (within channels)
+- V - V_αα is the off-diagonal part (channel coupling)
+
+# Key Differences from Original
+1. **Preconditioner**: Uses M⁻¹ = [E*B - T - V_αα]⁻¹ instead of [E*B - T - V]⁻¹
+2. **RHS formulation**: K(E) = M⁻¹ * (V - V_αα + V*R + UIX)
+3. **Better conditioning**: M⁻¹ is cheaper to compute (diagonal potential only)
+4. **Physical interpretation**: Separates diagonal from off-diagonal channel coupling
+
+# Physics
+The reformulation separates the potential into diagonal and off-diagonal parts:
+- V_αα: Within-channel interaction (included in preconditioner)
+- V - V_αα: Channel-channel coupling (treated as perturbation)
+
+This is similar to the M⁻¹ preconditioner used in GMRES, but applied to eigenvalue problem.
+
+# Arguments
+Same as `compute_lambda_eigenvalue()`, see that function for detailed documentation.
+
+# Returns
+- `λ`: Dominant eigenvalue
+- `eigenvec`: Corresponding eigenvector
+
+# Performance Benefits
+- Faster LHS inversion (M⁻¹ has diagonal potential only, not full V)
+- Better numerical conditioning
+- More efficient when V has strong off-diagonal coupling
+"""
+function compute_lambda_eigenvalue_optimized(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+                                            verbose::Bool=false, use_arnoldi::Bool=true,
+                                            krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
+                                            previous_eigenvector::Union{Nothing, Vector}=nothing,
+                                            V_UIX=nothing)
+
+    # Compute M⁻¹ = [E0*B - T - V_αα]⁻¹ using the efficient implementation
+    # Note: V_x_diag_ch contains the diagonal potential components V_αα
+    if verbose
+        print("  Computing M⁻¹ preconditioner... ")
+        @time M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+    else
+        M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+    end
+
+    # Compute V_αα (diagonal potential matrix) from components
+    # V_αα is block-diagonal with V_x_diag_ch on the diagonal blocks
+    nα = α.nchmax
+    nx = grid.nx
+    ny = grid.ny
+    n_total = nα * nx * ny
+
+    # Build V_αα as block-diagonal matrix
+    V_diag = zeros(n_total, n_total)
+    for iα in 1:nα
+        idx_start = (iα-1) * nx * ny + 1
+        idx_end = iα * nx * ny
+
+        # V_αα for this channel is V_x_diag_ch[iα] ⊗ I_y
+        # Since V_x_diag_ch is nx×nx and we need nx*ny × nx*ny, we use kronecker product with identity
+        V_diag_block = kron(V_x_diag_ch[iα], Matrix{Float64}(I, ny, ny))
+        V_diag[idx_start:idx_end, idx_start:idx_end] = V_diag_block
+    end
+
+    # Compute the RHS: V - V_αα + V*R + UIX
+    V_off_diag = V - V_diag  # Off-diagonal channel coupling
+    VRxy = V * Rxy
+
+    # Build the full RHS: (V - V_αα) + V*R + UIX
+    RHS_matrix = V_off_diag + VRxy
+
+    # Add UIX three-body force if provided
+    if V_UIX !== nothing
+        RHS_matrix = RHS_matrix + V_UIX
+    end
+
+    try
+        if use_arnoldi
+            # MATRIX-FREE APPROACH: Don't precompute M⁻¹ * RHS matrix
+            # Instead, define K as a composition of operators for memory efficiency
+            # K(x) = M⁻¹ * RHS_matrix * x (apply operations sequentially)
+
+            # Define the linear operator K(E) as a matrix-free function
+            K = function(x)
+                # Step 1: Apply RHS matrix to vector
+                temp = RHS_matrix * x
+                # Step 2: Apply M⁻¹ to the result
+                return M_inv_op(temp)
+            end
+
+            if verbose
+                println("  Using matrix-free operator K(E) = M⁻¹ * (V - V_αα + V*R + UIX)")
+            end
+
+            # Generate initial vector
+            n = n_total
+
+            # Use multiple strategies for initial vector
+            v0_strategies = []
+
+            # Strategy 1: Use previous eigenvector if available
+            if previous_eigenvector !== nothing && length(previous_eigenvector) == n
+                push!(v0_strategies, () -> begin
+                    v = ComplexF64.(previous_eigenvector)
+                    v / norm(v)
+                end)
+            end
+
+            # Strategy 2: Random Gaussian vector
+            push!(v0_strategies, () -> begin
+                Random.seed!(42)
+                v = randn(ComplexF64, n)
+                v / norm(v)
+            end)
+
+            λ, eigenvec, converged, iterations = NaN, nothing, false, 0
+
+            # Try different initial vectors if first attempt fails
+            for (i, strategy) in enumerate(v0_strategies)
+                v0 = strategy()
+                strategy_name = if i == 1 && previous_eigenvector !== nothing
+                    "previous eigenvector"
+                else
+                    "random Gaussian"
+                end
+
+                # Adaptive Krylov dimension
+                adaptive_krylov_dim = if i == 1 && previous_eigenvector !== nothing
+                    min(15, krylov_dim)
+                else
+                    krylov_dim
+                end
+
+                try
+                    # Use Arnoldi method
+                    λ, eigenvec, converged, iterations = arnoldi_eigenvalue(K, v0, adaptive_krylov_dim;
+                                                                           tol=arnoldi_tol, maxiter=10,
+                                                                           verbose_arnoldi=false)
+
+                    # Check if result is reasonable
+                    if !isnan(λ) && isfinite(λ)
+                        if verbose
+                            if iterations == 0
+                                println("  Arnoldi (optimized): instant convergence")
+                            elseif iterations <= 5
+                                println("  Arnoldi (optimized): $iterations iterations (very fast)")
+                            elseif iterations <= 15
+                                println("  Arnoldi (optimized): $iterations iterations (fast)")
+                            else
+                                println("  Arnoldi (optimized): $iterations iterations")
+                            end
+                        end
+                        break
+                    end
+                catch e
+                    if verbose && i == length(v0_strategies)
+                        @warn "Arnoldi method failed with all strategies: $e"
+                    end
+                    continue
+                end
+            end
+
+            if !converged && verbose
+                @warn "Arnoldi method (optimized) did not converge"
+            end
+
+            # Fallback to direct method if Arnoldi fails
+            if isnan(λ) || !isfinite(λ)
+                if verbose
+                    @warn "Arnoldi failed, falling back to direct method"
+                end
+                use_arnoldi = false
+            else
+                return λ, eigenvec
+            end
+        end
+
+        # Fallback: Direct eigenvalue computation
+        if !use_arnoldi
+            # Compute M⁻¹ * RHS directly
+            RHS_preconditioned = zeros(ComplexF64, n_total, n_total)
+            for j in 1:n_total
+                RHS_preconditioned[:, j] = M_inv_op(RHS_matrix[:, j])
+            end
+
+            # Find eigenvalues
+            eigenvals, eigenvecs = eigen(RHS_preconditioned)
+
+            # Get largest eigenvalue
+            eigenvals_real = real.(eigenvals)
+            largest_idx = argmax(eigenvals_real)
+            λ_largest = eigenvals[largest_idx]
+            eigenvec = eigenvecs[:, largest_idx]
+
+            if verbose
+                println("  Direct method (optimized) used")
+                eigenvals_sorted = sort(eigenvals_real, rev=true)
+                println("  Top 5 eigenvalues: ", eigenvals_sorted[1:min(5, length(eigenvals_sorted))])
+                println("  Largest eigenvalue: ", real(λ_largest))
+            end
+
+            return real(λ_largest), eigenvec
+        end
+
+    catch e
+        @warn "Failed to solve optimized eigenvalue problem at E0 = $E0: $e"
         return NaN, nothing
     end
 end
@@ -1449,7 +1669,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         E_next = E_curr - (λ_curr - 1) * (E_curr - E_prev) / (λ_curr - λ_prev)
 
         # Compute new eigenvalue using previous eigenvector as starting point
-        λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
+        λ_next, eigenvec_next = compute_lambda_eigenvalue_optimized(E_next, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                                          verbose=verbose, use_arnoldi=use_arnoldi,
                                                          krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                          previous_eigenvector=eigenvec_curr,
