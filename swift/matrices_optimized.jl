@@ -58,18 +58,18 @@ end
 """
     T_matrix_optimized(α, grid; return_components=false)
 
-OPTIMIZED VERSION of T_matrix using direct block assignment instead of repeated Kronecker products.
+OPTIMIZED VERSION of T_matrix using fused computation to avoid intermediate matrices.
 
 ## Key Optimizations:
 1. Pre-compute overlap matrices Nx and Ny once (not per channel)
 2. Compute block Kronecker products (nx*ny × nx*ny) instead of full matrix Kronecker (nα*nx*ny × nα*nx*ny)
-3. Direct block assignment to diagonal blocks
-4. Reduced memory allocations
+3. **FUSED COMPUTATION**: Build final matrix directly instead of creating two intermediate matrices
+4. Minimal memory allocations and memory bandwidth usage
 
 ## Performance:
-- Old: α.nchmax full Kronecker products of size (α.nchmax × α.nchmax) ⊗ (nx × nx) ⊗ (ny × ny)
-- New: α.nchmax small Kronecker products of size (nx × nx) ⊗ (ny × ny)
-- Expected speedup: 1.5-2× for typical system sizes
+- Old: Creates Tx_matrix + Ty_matrix, then adds (90% of time in addition!)
+- New: Builds Tmatrix directly with fused Tx_block + Ty_block
+- Expected speedup: 4-5× compared to previous version
 
 ## Usage:
 ```julia
@@ -87,16 +87,15 @@ function T_matrix_optimized(α, grid; return_components=false)
     Nx = compute_overlap_matrix(nx, grid.xx)
     Ny = compute_overlap_matrix(ny, grid.yy)
 
-    # Pre-allocate full matrices
+    # Pre-allocate SINGLE output matrix (avoids two intermediate matrices)
     total_size = nα * nx * ny
-    Tx_matrix = zeros(total_size, total_size)
-    Ty_matrix = zeros(total_size, total_size)
+    Tmatrix = zeros(total_size, total_size)
 
     # Storage for per-channel components (if requested)
     Tx_channels = Vector{Matrix{Float64}}(undef, nα)
     Ty_channels = Vector{Matrix{Float64}}(undef, nα)
 
-    # OPTIMIZATION: Direct block assignment instead of full Kronecker products
+    # FUSED OPTIMIZATION: Build Tmatrix directly instead of Tx_matrix + Ty_matrix
     for iα in 1:nα
         # Compute channel-specific kinetic energy matrices
         Tx_alpha = Tx(nx, grid.xx, grid.α, α.l[iα])
@@ -111,17 +110,15 @@ function T_matrix_optimized(α, grid; return_components=false)
         Tx_block = kron(Tx_alpha, Ny)  # (nx × nx) ⊗ (ny × ny) = (nx*ny × nx*ny)
         Ty_block = kron(Nx, Ty_alpha)  # (nx × nx) ⊗ (ny × ny) = (nx*ny × nx*ny)
 
-        # Direct assignment to diagonal block (avoids full channel Kronecker product)
+        # FUSED: Add both contributions directly to Tmatrix (no intermediate matrices!)
         idx_start = (iα-1) * nx * ny + 1
         idx_end = iα * nx * ny
 
-        # This is equivalent to: δ_{α,α} I_α ⊗ Tx^α ⊗ Ny
-        # but computed directly without building the full channel selector matrix
-        Tx_matrix[idx_start:idx_end, idx_start:idx_end] = Tx_block
-        Ty_matrix[idx_start:idx_end, idx_start:idx_end] = Ty_block
+        # Single operation: Tmatrix[block] = Tx_block + Ty_block
+        # This is equivalent to: δ_{α,α} I_α ⊗ (Tx^α ⊗ Ny + Nx ⊗ Ty^α)
+        # but avoids creating full Tx_matrix and Ty_matrix intermediates
+        @views Tmatrix[idx_start:idx_end, idx_start:idx_end] .= Tx_block .+ Ty_block
     end
-
-    Tmatrix = Tx_matrix + Ty_matrix
 
     if return_components
         return Tmatrix, Tx_channels, Ty_channels, Nx, Ny

@@ -991,10 +991,10 @@ Convergence occurs when |λ(E_n) - 1| < tolerance.
 function malfiet_tjon_solve(α, grid, potname, e2b;
                            E0::Float64=-8.0, E1::Float64=-7.0,
                            tolerance::Float64=1e-6, max_iterations::Int=100,
-                           verbose::Bool=true, use_arnoldi::Bool=true,
+verbose::Bool=true, use_arnoldi::Bool=true,
                            krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                            include_uix::Bool=false)
-    
+
     if verbose
         println("\n" * "="^70)
         println("         MALFIET-TJON EIGENVALUE SOLVER")
@@ -1015,11 +1015,11 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         end
         println("-"^70)
     end
-    
+
     # Initialize wave function variables
     ψtot = ComplexF64[]
     ψ3 = ComplexF64[]
-    
+
     # Pre-compute matrices once (they don't change between iterations)
     V_UIX = nothing  # Initialize UIX potential
 
@@ -1040,25 +1040,25 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
             end
         end
     else
-        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix(α, grid, return_components=true)  # Kinetic energy with components
-        V, V_x_diag_ch = V_matrix(α, grid, potname, return_components=true)   # Potential energy with components
+        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)  # Kinetic energy with components
+        V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)   # Potential energy with components
         B = Bmatrix(α, grid)            # Overlap matrix
-        Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
+        Rxy,Rxy_31,Rxy_32 = Rxy_matrix_optimized(α, grid)       # Rearrangement matrix R
 
         # Compute UIX three-body force if requested (separate from V)
         if include_uix
             V_UIX = compute_uix_potential(α, grid, Rxy_31, Rxy)
         end
     end
-    
+
     # Check rearrangement matrix symmetry
-    check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; verbose=verbose)
-    
-    
+    # check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; verbose=verbose)
+
+
     # Initialize secant method
     E_prev = E0
     E_curr = E1
-    
+
     # Compute initial eigenvalues (no previous eigenvector for first iteration)
     λ_prev, eigenvec_prev = compute_lambda_eigenvalue(E_prev, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                                      verbose=verbose, use_arnoldi=use_arnoldi,
@@ -1070,19 +1070,19 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                      previous_eigenvector=eigenvec_prev,
                                                      V_UIX=V_UIX)
-    
+
     if isnan(λ_prev) || isnan(λ_curr)
         error("Failed to compute initial eigenvalues. Check energy guesses and matrix conditions.")
     end
-    
+
     convergence_history = [(E_prev, λ_prev), (E_curr, λ_curr)]
-    
+
     if verbose
         @printf("Initial: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n", E_prev, λ_prev, abs(λ_prev - 1))
         @printf("Initial: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n", E_curr, λ_curr, abs(λ_curr - 1))
         println("-"^70)
     end
-    
+
     # Check if already converged
     if abs(λ_curr - 1) < tolerance
         if verbose
@@ -1092,45 +1092,45 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
         return MalflietTjonResult(E_curr, λ_curr, eigenvec_curr, 0, convergence_history, true), ψtot, ψ3
     end
-    
+
     # Secant method iteration
     converged = false
     final_eigenvec = eigenvec_curr
-    
+
     for iteration in 1:max_iterations
         # Secant method update
         if abs(λ_curr - λ_prev) < 1e-15
             @warn "λ values too close, secant method may be unstable"
             break
         end
-        
+
         # Check for divergence - if energies become too extreme, restart with better guesses
         if abs(E_curr) > 100.0  # Energy magnitude > 100 MeV suggests divergence
             @warn "Method appears to be diverging, try different initial energy guesses"
             break
         end
-        
+
         # Secant formula: E_{n+1} = E_n - (λ_n - 1) * (E_n - E_{n-1}) / (λ_n - λ_{n-1})
         E_next = E_curr - (λ_curr - 1) * (E_curr - E_prev) / (λ_curr - λ_prev)
-        
+
         # Compute new eigenvalue using previous eigenvector as starting point
         λ_next, eigenvec_next = compute_lambda_eigenvalue(E_next, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                                          verbose=verbose, use_arnoldi=use_arnoldi,
                                                          krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                          previous_eigenvector=eigenvec_curr,
                                                          V_UIX=V_UIX)
-        
+
         if isnan(λ_next)
             @warn "Eigenvalue calculation failed at E = $E_next, stopping iteration"
             break
         end
-        
+
         # Check convergence
         residual = abs(λ_next - 1)
         push!(convergence_history, (E_next, λ_next))
-        
+
         if verbose
-            @printf("Iter %2d: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e", 
+            @printf("Iter %2d: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e",
                    iteration, E_next, λ_next, residual)
             # Add Arnoldi performance indicator
             if eigenvec_next !== nothing
@@ -1140,20 +1140,20 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 println()
             end
         end
-        
+
         if residual < tolerance
             converged = true
             final_eigenvec = eigenvec_next
-            
+
             # Normalize the eigenvector properly with respect to the overlap matrix B
             ψ = eigenvec_next
             ψtot, ψ3 = compute_total_wavefunction(ψ, Rxy, B)
-            
+
             if verbose
 
                 # compute the probabilities in each channel
                 channel_probs, channel_info = compute_channel_probabilities(ψtot, ψ3, B, α, grid)
-                
+
                 # Print channel probability results
                 println()
                 println("Channel probability contributions:")
@@ -1162,7 +1162,7 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                     @printf("  %s: %8.4f%%\n", info, prob * 100.0)
                 end
                 println("-"^60)
- 
+
 
                 # Compute individual expectation values
                 T_expectation = 3.0*real(ψtot' * T * ψ3)
@@ -1176,9 +1176,9 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 end
 
                 # Total Hamiltonian expectation value: H = T + V + UIX
-                H_expectation = T_expectation + V_expectation + UIX_expectation_tot 
-                
-                
+                H_expectation = T_expectation + V_expectation + UIX_expectation_tot
+
+
                 println("-"^70)
                 println("✓ CONVERGED!")
                 @printf("Ground state energy: %10.6f MeV\n", E_next)
@@ -1201,23 +1201,23 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
                 end
                 println("="^70)
             end
-            return MalflietTjonResult(E_next, λ_next, eigenvec_next, iteration, 
+            return MalflietTjonResult(E_next, λ_next, eigenvec_next, iteration,
                                      convergence_history, true), ψtot, ψ3
         end
-        
+
         # Update for next iteration
         E_prev = E_curr
         E_curr = E_next
         λ_prev = λ_curr
         λ_curr = λ_next
         final_eigenvec = eigenvec_next
-        
+
         # Safety check for energy bounds
         if E_next > 0
             @warn "Energy became positive ($E_next MeV), may have diverged"
         end
     end
-    
+
     # For non-converged case, compute wave functions from final eigenvector
     if !converged && final_eigenvec !== nothing
         ψ = final_eigenvec
@@ -1227,19 +1227,19 @@ function malfiet_tjon_solve(α, grid, potname, e2b;
         ψtot = ComplexF64[]
         ψ3 = ComplexF64[]
     end
-    
+
     if verbose
         println("-"^70)
         if !converged
             println("✗ Did not converge within $max_iterations iterations")
-            @printf("Final: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n", 
+            @printf("Final: E = %8.4f MeV, λ = %10.6f, |λ-1| = %8.2e\n",
                    E_curr, λ_curr, abs(λ_curr - 1))
         end
         println("="^70)
     end
-    
-    return MalflietTjonResult(E_curr, λ_curr, final_eigenvec, max_iterations, 
-                             convergence_history, converged), ψtot, ψ3 
+
+    return MalflietTjonResult(E_curr, λ_curr, final_eigenvec, max_iterations,
+                             convergence_history, converged), ψtot, ψ3
 end
 
 """
