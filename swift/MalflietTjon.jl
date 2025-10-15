@@ -1040,10 +1040,10 @@ verbose::Bool=true, use_arnoldi::Bool=true,
             end
         end
     else
-        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)  # Kinetic energy with components
-        V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)   # Potential energy with components
+        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix(α, grid, return_components=true)  # Kinetic energy with components
+        V, V_x_diag_ch = V_matrix(α, grid, potname, return_components=true)   # Potential energy with components
         B = Bmatrix(α, grid)            # Overlap matrix
-        Rxy,Rxy_31,Rxy_32 = Rxy_matrix_optimized(α, grid)       # Rearrangement matrix R
+        Rxy,Rxy_31,Rxy_32 = Rxy_matrix(α, grid)       # Rearrangement matrix R
 
         # Compute UIX three-body force if requested (separate from V)
         if include_uix
@@ -1739,7 +1739,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
 
         print("    - Rxy matrix: ")
         r_start = time()
-        Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+        Rxy, Rxy_31, Rxy_32 = Rxy_matrix_with_caching(α, grid)
         r_time = time() - r_start
         timings["Rxy_matrix"] = r_time
         @printf("%.3f s\n", r_time)
