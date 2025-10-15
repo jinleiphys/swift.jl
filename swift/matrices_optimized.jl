@@ -217,12 +217,13 @@ function Rxy_matrix_optimized(α, grid)
                         # Final adjustment factor
                         adj_factor = norm_factor * G_coeff
 
-                        # Optimized inner loop with @inbounds
+                        # Optimized inner loop with @inbounds and @simd
                         @inbounds for ixp in 1:grid.nx
                             fπb_ixp = fπb[ixp]
                             ip_base = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny
 
-                            for iyp in 1:grid.ny
+                            # Vectorized operation for inner loop
+                            @simd for iyp in 1:grid.ny
                                 ip = ip_base + iyp
                                 Rxy_31[i, ip] += adj_factor * fπb_ixp * fξb[iyp]
                             end
@@ -598,13 +599,14 @@ function Rxy_matrix_with_caching(α, grid)
     println("Pre-computing Laguerre basis cache (one permutation only)...")
     cache_start = time()
 
-    # Cache structure: Dict with key (ix, iy, iθ) → Vector{Complex{Float64}}
-    cache_fπb = Dict{Tuple{Int, Int, Int}, Vector{ComplexF64}}()
-    cache_fξb = Dict{Tuple{Int, Int, Int}, Vector{ComplexF64}}()
+    # OPTIMIZATION: Use 3D arrays instead of Dict for O(1) direct indexing
+    # This eliminates Dict hashing overhead and improves memory locality
+    cache_fπb = Array{Vector{ComplexF64}}(undef, grid.nθ, grid.ny, grid.nx)
+    cache_fξb = Array{Vector{ComplexF64}}(undef, grid.nθ, grid.ny, grid.nx)
 
-    # Pre-allocate cache (we know the size)
-    sizehint!(cache_fπb, grid.nx * grid.ny * grid.nθ)
-    sizehint!(cache_fξb, grid.nx * grid.ny * grid.nθ)
+    # Also cache the normalized coordinates to avoid recomputation
+    cache_πb_norm = Array{Float64}(undef, grid.nθ, grid.ny, grid.nx)
+    cache_ξb_norm = Array{Float64}(undef, grid.nθ, grid.ny, grid.nx)
 
     # Only compute for ONE permutation (perm_idx=1)
     perm_idx = 1
@@ -626,18 +628,22 @@ function Rxy_matrix_with_caching(α, grid)
                 πb = sqrt(πb_sq)
                 ξb = sqrt(ξb_sq)
 
-                # Compute and cache Laguerre basis functions
-                key = (ix, iy, iθ)
-                cache_fπb[key] = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
-                cache_fξb[key] = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
+                # Cache the Laguerre basis functions AND the normalization factors
+                cache_fπb[iθ, iy, ix] = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
+                cache_fξb[iθ, iy, ix] = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
+
+                # Cache 1/(πb*ξb) to avoid division in main loop
+                cache_πb_norm[iθ, iy, ix] = 1.0 / πb
+                cache_ξb_norm[iθ, iy, ix] = 1.0 / ξb
             end
         end
     end
 
     cache_time = time() - cache_start
+    total_entries = grid.nx * grid.ny * grid.nθ
     println("Cache built in $(round(cache_time, digits=3)) seconds")
-    println("  Cache entries: $(length(cache_fπb)) fπb + $(length(cache_fξb)) fξb")
-    println("  Cache memory: ~$(round(2 * length(cache_fπb) * grid.nx * 16 / 1024^2, digits=2)) MB")
+    println("  Cache entries: $(total_entries) fπb + $(total_entries) fξb")
+    println("  Cache memory: ~$(round(2 * total_entries * grid.nx * 16 / 1024^2, digits=2)) MB")
 
     # ============================================================
     # COMPUTATION PHASE: Compute ONLY Rxy_31 using cached values
@@ -659,23 +665,19 @@ function Rxy_matrix_with_caching(α, grid)
             xy_norm = xa_norm * ya_norm
 
             for iθ in 1:grid.nθ
-                cosθ = grid.cosθi[iθ]
                 dcosθ = grid.dcosθi[iθ]
 
-                # Compute transformed coordinates (for normalization only)
-                πb_sq = a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ
-                ξb_sq = c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ
-                πb = sqrt(πb_sq)
-                ξb = sqrt(ξb_sq)
+                # OPTIMIZED CACHE LOOKUP: Direct array indexing (no Dict overhead)
+                fπb = cache_fπb[iθ, iy, ix]
+                fξb = cache_fξb[iθ, iy, ix]
 
-                # CACHE LOOKUP: O(1) operation!
-                key = (ix, iy, iθ)
-                fπb = cache_fπb[key]
-                fξb = cache_fξb[key]
+                # Use pre-cached normalization factors (no sqrt or division needed)
+                πb_inv = cache_πb_norm[iθ, iy, ix]
+                ξb_inv = cache_ξb_norm[iθ, iy, ix]
 
-                # Pre-compute normalization factor
+                # Pre-compute normalization factor using cached values
                 base_angular_factor = dcosθ * xa * ya
-                norm_factor = base_angular_factor / (πb * ξb) * xy_norm
+                norm_factor = base_angular_factor * πb_inv * ξb_inv * xy_norm
 
                 # Channel coupling loop
                 for iα in 1:α.nchmax
@@ -692,12 +694,13 @@ function Rxy_matrix_with_caching(α, grid)
 
                         adj_factor = norm_factor * G_coeff
 
-                        # Optimized inner loop with @inbounds
+                        # Optimized inner loop with @inbounds and @simd
                         @inbounds for ixp in 1:grid.nx
                             fπb_ixp = fπb[ixp]
                             ip_base = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny
 
-                            for iyp in 1:grid.ny
+                            # Vectorized operation for inner loop
+                            @simd for iyp in 1:grid.ny
                                 ip = ip_base + iyp
                                 Rxy_31[i, ip] += adj_factor * fπb_ixp * fξb[iyp]
                             end
