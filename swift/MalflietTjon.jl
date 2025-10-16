@@ -1728,7 +1728,7 @@ See `malfiet_tjon_solve()` documentation for detailed argument descriptions.
 
 # Example
 ```julia
-using .channels, .mesh, .MalflietTjon
+# using .channels, .mesh, .MalflietTjon
 
 α = α3b(true, 0.5, 0.5, 1, 2, 0, 4, 0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 2.0)
 grid = initialmesh(12, 15, 15, 15.0, 15.0, 0.5)
@@ -1817,8 +1817,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
             g_start = time()
             # Need G-coefficients for optimized UIX
             include("Gcoefficient.jl")
-            using .Gcoefficient
-            Gαα = computeGcoefficient(α, grid)
+            Gαα = eval(:(Gcoefficient.computeGcoefficient($α, $grid)))
             g_time = time() - g_start
             timings["G_coefficients"] = g_time
             @printf("%.3f s\n", g_time)
@@ -1846,8 +1845,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         if include_uix
             # Need G-coefficients for optimized UIX
             include("Gcoefficient.jl")
-            using .Gcoefficient
-            Gαα = computeGcoefficient(α, grid)
+            Gαα = eval(:(Gcoefficient.computeGcoefficient($α, $grid)))
             V_UIX = compute_uix_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
         end
 
