@@ -3,6 +3,7 @@ module MalflietTjon
 include("matrices.jl")
 using .matrices
 using LinearAlgebra
+using SparseArrays
 using Printf
 using Random
 using Statistics
@@ -107,27 +108,50 @@ function precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing)
     ny = grid.ny
     n_total = nα * nx * ny
 
-    # Build V_αα (diagonal potential matrix) from components
-    V_diag = zeros(n_total, n_total)
-    for iα in 1:nα
-        idx_start = (iα-1) * nx * ny + 1
-        idx_end = iα * nx * ny
+    # SPARSE OPTIMIZATION: V is 99.7% sparse! Convert to sparse format for massive speedup
+    # Check sparsity and convert if beneficial
+    n_elements = n_total * n_total
+    n_nonzero = count(!iszero, V)
+    sparsity = 100 * (1 - n_nonzero / n_elements)
 
-        # V_αα for this channel is V_x_diag_ch[iα] ⊗ I_y
-        V_diag_block = kron(V_x_diag_ch[iα], Matrix{Float64}(I, ny, ny))
-        V_diag[idx_start:idx_end, idx_start:idx_end] = V_diag_block
+    if sparsity > 90.0
+        # Convert to sparse matrix (V is 99.7% sparse → huge speedup!)
+        V_sparse = sparse(V)
+        println("  V matrix converted to sparse ($(round(sparsity, digits=1))% zeros, $(n_nonzero) nonzeros)")
+        V_compute = V_sparse
+    else
+        V_compute = V
     end
 
-    # Compute the RHS: (V - V_αα) + V*R
-    V_off_diag = V - V_diag  # Off-diagonal channel coupling
-    VRxy = V * Rxy           # This is the expensive operation! (~1 second)
+    # Step 1: Compute V*Rxy using sparse matrix multiplication
+    # Sparse-Dense multiplication is MUCH faster than Dense-Dense!
+    VRxy = V_compute * Rxy
 
-    # Build the full RHS: (V - V_αα) + V*R
-    RHS_matrix = V_off_diag + VRxy
+    # Step 2: Start with RHS = V + V*Rxy (single allocation + in-place addition)
+    RHS_matrix = V + VRxy  # Allocate once and compute sum
 
-    # Add UIX three-body force if provided
+    # Step 3: Add UIX if provided (in-place)
     if V_UIX !== nothing
-        RHS_matrix = RHS_matrix + V_UIX
+        RHS_matrix .+= V_UIX
+    end
+
+    # Step 4: Subtract V_αα WITHOUT kron (avoid massive temporary allocations!)
+    # V_αα[iα, iα] = V_x_diag_ch[iα] ⊗ I_y means:
+    # Element (i,j) in channel block iα = V_x[ix, jx] * δ_{iy, jy}
+    for iα in 1:nα
+        block_start = (iα-1) * nx * ny
+
+        # Subtract V_αα elements directly without building the full block
+        for ix in 1:nx, jx in 1:nx
+            V_x_val = V_x_diag_ch[iα][ix, jx]
+            i_base = block_start + (ix-1)*ny
+            j_base = block_start + (jx-1)*ny
+
+            # Kronecker product with I_y: only subtract on y-diagonal
+            @simd for iy in 1:ny
+                @inbounds RHS_matrix[i_base + iy, j_base + iy] -= V_x_val
+            end
+        end
     end
 
     return RHSCache(RHS_matrix, n_total)
