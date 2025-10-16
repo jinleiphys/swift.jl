@@ -2,19 +2,18 @@
 #
 # This module contains performance-optimized versions of the UIX three-body force
 # calculations, featuring:
-# - Cached radial functions Y(x) and T(x)
+# - Cached radial functions Y(r) and T(r)
 # - Cached S-matrix elements
 # - Cached Wigner symbols (6j and 9j)
-# - Sparse matrix representations
-# - Optimized loop structures
+# - Cached isospin operator matrix elements
+# - Dense matrix format for optimal BLAS performance
 #
-# Expected performance improvement: 15-50x faster than UIX.jl
+# Expected performance improvement: 2-3x faster than UIX.jl through caching
 
 module UIX_optimized
 
 using WignerSymbols
 using LinearAlgebra
-using SparseArrays
 include("../swift/laguerre.jl")
 using .Laguerre
 include("../swift/Gcoefficient.jl")
@@ -238,23 +237,23 @@ function tau2_dot_tau3_cross_tau1_cached(T12::Float64, T12_prime::Float64, T::Fl
 end
 
 # ============================================================================
-# X12 Matrix (Optimized with Caching and Sparse Output)
+# X12 Matrix (Optimized with Caching, Dense Output)
 # ============================================================================
 
 """
     X12_matrix_optimized(α, grid)
 
-Optimized version of X12 matrix computation using caching and sparse representation.
+Optimized version of X12 matrix computation using cached radial functions.
+Uses dense matrix format for optimal performance.
 """
 function X12_matrix_optimized(α, grid)
     # Pre-compute all unique Y and T values
     Y_values = [Y_cached(grid.xi[ix]) for ix in 1:grid.nx]
     T_values = [T_cached(grid.xi[ix]) for ix in 1:grid.nx]
 
-    # Use sparse matrix representation
-    I_indices = Int[]
-    J_indices = Int[]
-    values = Float64[]
+    # Initialize dense matrix
+    N = α.nchmax * grid.nx * grid.ny
+    X12 = zeros(Float64, N, N)
 
     for iα in 1:α.nchmax
         s12 = round(Int, α.s12[iα])
@@ -294,13 +293,7 @@ function X12_matrix_optimized(α, grid)
                             i_prime = (iα_prime - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
 
                             # Use pre-computed radial functions
-                            value = first_term_coeff * Y_values[ix] + second_term_coeff * T_values[ix]
-
-                            if abs(value) > 1e-14
-                                push!(I_indices, i)
-                                push!(J_indices, i_prime)
-                                push!(values, value)
-                            end
+                            X12[i, i_prime] = first_term_coeff * Y_values[ix] + second_term_coeff * T_values[ix]
                         end
                     end
                 end
@@ -308,37 +301,37 @@ function X12_matrix_optimized(α, grid)
         end
     end
 
-    N = α.nchmax * grid.nx * grid.ny
-    return sparse(I_indices, J_indices, values, N, N)
+    return X12
 end
 
 # ============================================================================
-# T12 Matrix (Diagonal, optimized sparse representation)
+# T12 Matrix (Diagonal, Dense)
 # ============================================================================
 
 """
     T12_matrix_optimized(α, grid)
 
-Optimized version of T12 matrix using cached T² values and diagonal sparse format.
+Optimized version of T12 matrix using cached T² values.
+Returns dense diagonal matrix.
 """
 function T12_matrix_optimized(α, grid)
     # Pre-compute T² values for all grid points
     T2_values = [T_cached(grid.xi[ix])^2 for ix in 1:grid.nx]
 
-    # Diagonal matrix - use sparse diagonal format
+    # Diagonal matrix - use dense format
     N = α.nchmax * grid.nx * grid.ny
-    diag_values = zeros(N)
+    T12 = zeros(Float64, N, N)
 
     for iα in 1:α.nchmax
         for ix in 1:grid.nx
             for iy in 1:grid.ny
                 i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
-                diag_values[i] = T2_values[ix]
+                T12[i, i] = T2_values[ix]
             end
         end
     end
 
-    return spdiagm(0 => diag_values)
+    return T12
 end
 
 # ============================================================================
@@ -348,69 +341,20 @@ end
 """
     I31_minus_matrix_optimized(α, grid, Gαα)
 
-Optimized version of I31⁻ matrix computation.
+Optimized version of I31⁻ matrix computation using cached Wigner symbols.
 
 This version accepts pre-computed G-coefficients to avoid redundant calculation.
+Uses dense matrix format for optimal BLAS performance.
 """
 function I31_minus_matrix_optimized(α, grid, Gαα)
-    # Pre-compute coordinate transformation parameters
+    # Initialize I31⁻ matrix (dense)
+    N = α.nchmax * grid.nx * grid.ny
+    I31_minus = zeros(Complex{Float64}, N, N)
+
+    # Coordinate transformation parameters (same as Rxy_31)
     a = -0.5; b = 1.0; c = -0.75; d = -0.5
 
-    # Pre-compute isospin factors for all channel pairs
-    println("  Pre-computing isospin factors...")
-    isospin_factors = zeros(Float64, α.nchmax, α.nchmax)
-    regular_isospin_factors = zeros(Float64, α.nchmax, α.nchmax)
-
-    for iα in 1:α.nchmax
-        T12 = α.T12[iα]
-        T = α.T[iα]
-        hat_T12_in = sqrt(2 * T12 + 1)
-        isospin_phase = (-1)^round(Int, 2*T12 + 2*α.t1 + α.t2 + α.t3)
-
-        for iαp in 1:α.nchmax
-            T12_prime = α.T12[iαp]
-            T_prime = α.T[iαp]
-            hat_T12_out = sqrt(2 * T12_prime + 1)
-
-            # Regular isospin factor from G-coefficient
-            regular_isospin_factors[iα, iαp] = isospin_phase * hat_T12_in * hat_T12_out *
-                                                wigner6j_cached(α.t1, α.t2, T12_prime, α.t3, T, T12)
-
-            # New isospin factors using cached functions
-            tau3_tau1 = tau3_dot_tau1_cached(T12, T12_prime, T, T_prime)
-            tau2_tau3_tau1 = tau2_dot_tau3_cross_tau1_cached(T12, T12_prime, T, T_prime)
-            isospin_factors[iα, iαp] = 2 * (tau3_tau1 + tau2_tau3_tau1)
-        end
-    end
-
-    println("  Computing I31⁻ matrix (sparse)...")
-
-    # Use sparse matrix representation - build with COO format
-    I_indices = Int[]
-    J_indices = Int[]
-    values = Complex{Float64}[]
-
-    # Pre-compute which (iα, iαp) pairs have non-zero G-coefficients
-    active_pairs = Tuple{Int,Int}[]
-    for iα in 1:α.nchmax
-        for iαp in 1:α.nchmax
-            # Check if any G-coefficient is non-zero for this pair
-            has_nonzero = false
-            for iθ in 1:grid.nθ
-                if maximum(abs.(Gαα[iθ, :, :, iα, iαp, 1])) > 1e-14
-                    has_nonzero = true
-                    break
-                end
-            end
-            if has_nonzero
-                push!(active_pairs, (iα, iαp))
-            end
-        end
-    end
-
-    println("    Active channel pairs: $(length(active_pairs)) / $(α.nchmax^2)")
-
-    # Main computation loop (only over active pairs)
+    # Loop over coordinate grids
     for ix in 1:grid.nx
         xa = grid.xi[ix]
         for iy in 1:grid.ny
@@ -423,45 +367,57 @@ function I31_minus_matrix_optimized(α, grid, Gαα)
                 πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
 
-                if πb < 1e-10 || ξb < 1e-10
-                    continue
-                end
-
-                # Compute basis functions
+                # Compute basis functions at transformed coordinates
                 fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
                 fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
 
-                # Precompute common factor
-                common_factor = dcosθ * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy])
-
-                # Only loop over active channel pairs
-                for (iα, iαp) in active_pairs
+                # Loop over channel combinations
+                for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
 
-                    regular_G = Gαα[iθ, iy, ix, iα, iαp, 1]
+                    for iαp in 1:α.nchmax
+                        # Get the regular G-coefficient (contains spatial + spin + isospin)
+                        regular_G = Gαα[iθ, iy, ix, iα, iαp, 1]  # permutation index 1 for α1→α3
 
-                    if abs(regular_G) < 1e-14
-                        continue
-                    end
+                        # Skip if regular G-coefficient is zero
+                        if abs(regular_G) < 1e-14
+                            continue
+                        end
 
-                    # Get pre-computed isospin factors
-                    regular_iso = regular_isospin_factors[iα, iαp]
-                    new_iso = isospin_factors[iα, iαp]
+                        # Extract isospin quantum numbers for channels
+                        T12 = α.T12[iα]
+                        T12_prime = α.T12[iαp]
+                        T = α.T[iα]
+                        T_prime = α.T[iαp]
 
-                    if abs(regular_iso) > 1e-14
-                        modified_G = regular_G * (new_iso / regular_iso)
-                        adj_factor = common_factor * modified_G
+                        # Compute the regular isospin part using cached Wigner symbols
+                        hat_T12_in = sqrt(2 * T12 + 1)
+                        hat_T12_out = sqrt(2 * T12_prime + 1)
+                        isospin_phase = (-1)^round(Int, 2*T12 + 2*α.t1 + α.t2 + α.t3)
+                        regular_isospin = isospin_phase * hat_T12_in * hat_T12_out *
+                                        wigner6j_cached(α.t1, α.t2, T12_prime, α.t3, T, T12)
+
+                        # Compute new isospin matrix elements using cached functions
+                        tau3_tau1_element = tau3_dot_tau1_cached(T12, T12_prime, T, T_prime)
+                        tau2_tau3_tau1_element = tau2_dot_tau3_cross_tau1_cached(T12, T12_prime, T, T_prime)
+
+                        # Combined new isospin factor: 2(τ₃·τ₁ + τ₂·τ₃×τ₁)
+                        new_isospin_factor = 2 * (tau3_tau1_element + tau2_tau3_tau1_element)
+
+                        # Replace isospin part: G_new = G_regular * (new_isospin / old_isospin)
+                        if abs(regular_isospin) > 1e-14
+                            modified_G = regular_G * (new_isospin_factor / regular_isospin)
+                        else
+                            modified_G = 0.0
+                        end
+
+                        # Apply the same transformation as Rxy_31
+                        adj_factor = dcosθ * modified_G * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy])
 
                         for ixp in 1:grid.nx
                             for iyp in 1:grid.ny
                                 ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
-                                value = adj_factor * fπb[ixp] * fξb[iyp]
-
-                                if abs(value) > 1e-14
-                                    push!(I_indices, i)
-                                    push!(J_indices, ip)
-                                    push!(values, value)
-                                end
+                                I31_minus[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
                             end
                         end
                     end
@@ -470,35 +426,25 @@ function I31_minus_matrix_optimized(α, grid, Gαα)
         end
     end
 
-    # Build sparse matrix
-    N = α.nchmax * grid.nx * grid.ny
-    println("    Building sparse matrix with $(length(values)) nonzeros...")
-
-    # Accumulate duplicate entries by summing
-    I31_minus = sparse(I_indices, J_indices, values, N, N)
-
     return I31_minus
 end
 
 # ============================================================================
-# Composite Matrix Functions (Optimized)
+# Composite Matrix Functions (Optimized Dense)
 # ============================================================================
 
 """
     X23_with_permutations_optimized(α, grid, Rxy)
 
-Optimized version using sparse X23 matrix.
+Optimized version using dense X23 matrix and cached radial functions.
 """
 function X23_with_permutations_optimized(α, grid, Rxy)
     X23 = X12_matrix_optimized(α, grid)  # X23 has same structure as X12
     matrix_size = α.nchmax * grid.nx * grid.ny
 
-    # Convert Rxy to sparse if it isn't already
-    Rxy_sparse = issparse(Rxy) ? Rxy : sparse(Rxy)
-
-    # Create sparse identity
-    I_matrix = spdiagm(0 => ones(matrix_size))
-    I_plus_Rxy = I_matrix + Rxy_sparse
+    # Create identity matrix (dense)
+    I_matrix = Matrix{Float64}(I, matrix_size, matrix_size)
+    I_plus_Rxy = I_matrix + Rxy
 
     return X23 * I_plus_Rxy
 end
@@ -506,18 +452,15 @@ end
 """
     T23_matrix_optimized(α, grid, Rxy)
 
-Optimized version using sparse diagonal T23.
+Optimized version using dense diagonal T23 and cached T² values.
 """
 function T23_matrix_optimized(α, grid, Rxy)
     T23 = T12_matrix_optimized(α, grid)
     matrix_size = α.nchmax * grid.nx * grid.ny
 
-    # Convert Rxy to sparse if it isn't already
-    Rxy_sparse = issparse(Rxy) ? Rxy : sparse(Rxy)
-
-    # Create sparse identity
-    I_matrix = spdiagm(0 => ones(matrix_size))
-    I_plus_Rxy = I_matrix + Rxy_sparse
+    # Create identity matrix (dense)
+    I_matrix = Matrix{Float64}(I, matrix_size, matrix_size)
+    I_plus_Rxy = I_matrix + Rxy
 
     return T23 * I_plus_Rxy
 end
@@ -526,81 +469,36 @@ end
     X12X31I23_plus_X12X23I31_matrix_optimized(α, grid, Rxy, Gαα)
 
 Optimized version of X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻ computation.
+Uses dense matrices with cached radial functions and Wigner symbols for speed.
 """
 function X12X31I23_plus_X12X23I31_matrix_optimized(α, grid, Rxy, Gαα)
-    println("Computing X12 (sparse)...")
-    @time X12 = X12_matrix_optimized(α, grid)
-    X12_density = nnz(X12) / length(X12)
-    println("  X12 sparsity: $(nnz(X12)) / $(length(X12)) ($(round(100*X12_density, digits=2))% dense)")
+    # Compute individual matrix components (all dense)
+    X12 = X12_matrix_optimized(α, grid)
+    I31_minus = I31_minus_matrix_optimized(α, grid, Gαα)
+    X23 = X23_with_permutations_optimized(α, grid, Rxy)
 
-    println("Computing I31⁻ (sparse)...")
-    @time I31_minus = I31_minus_matrix_optimized(α, grid, Gαα)
-    I31_density = nnz(I31_minus) / length(I31_minus)
-    println("  I31⁻ sparsity: $(nnz(I31_minus)) / $(length(I31_minus)) ($(round(100*I31_density, digits=2))% dense)")
+    # Compute the composite matrix using optimized dense BLAS operations
+    composite_matrix = X12 * I31_minus * X23
 
-    println("Computing X23 with permutations...")
-    @time X23 = X23_with_permutations_optimized(α, grid, Rxy)
-    X23_density = nnz(X23) / length(X23)
-    println("  X23 sparsity: $(nnz(X23)) / $(length(X23)) ($(round(100*X23_density, digits=2))% dense)")
-
-    # Hybrid approach: convert to dense if >50% dense for faster BLAS
-    println("Matrix multiplications (hybrid sparse/dense)...")
-
-    # Convert high-density matrices to dense for faster multiplication
-    if I31_density > 0.5
-        println("  Converting I31⁻ to dense ($(round(100*I31_density, digits=1))% > 50%)")
-        I31_minus = Matrix(I31_minus)
-    end
-
-    if X23_density > 0.5
-        println("  Converting X23 to dense ($(round(100*X23_density, digits=1))% > 50%)")
-        X23 = Matrix(X23)
-    end
-
-    # X12 is very sparse, keep as sparse
-    # Multiply: sparse × dense/sparse × dense/sparse
-    @time composite_matrix = X12 * I31_minus * X23
-
+    # Apply permutation symmetry factor
     return 2 * composite_matrix
 end
 
 """
-    T2_T2_composite_matrix_optimized(α, grid, Rxy_31, Rxy, Gαα)
+    T2_T2_composite_matrix_optimized(α, grid, Rxy_31, Rxy)
 
 Optimized version of T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂) computation.
+Uses dense matrices with cached T² values for speed.
 """
 function T2_T2_composite_matrix_optimized(α, grid, Rxy_31, Rxy)
-    println("Computing T²(r₁₂) (diagonal sparse)...")
-    @time T2_12 = T12_matrix_optimized(α, grid)
-    println("  T²(r₁₂) sparsity: $(nnz(T2_12)) / $(length(T2_12)) (diagonal)")
+    # Compute individual matrix components (all dense)
+    T2_12 = T12_matrix_optimized(α, grid)
+    T2_23 = T23_matrix_optimized(α, grid, Rxy)
 
-    println("Computing T²(r₂₃) with permutations...")
-    @time T2_23 = T23_matrix_optimized(α, grid, Rxy)
-    T23_density = nnz(T2_23) / length(T2_23)
-    println("  T²(r₂₃) sparsity: $(nnz(T2_23)) / $(length(T2_23)) ($(round(100*T23_density, digits=2))% dense)")
+    # Compute the composite matrix using optimized dense BLAS operations
+    composite_matrix = T2_12 * Rxy_31 * T2_23
 
-    # Hybrid approach: convert high-density matrices to dense
-    println("Matrix multiplications (hybrid sparse/dense)...")
-
-    # Rxy_31 is typically very dense
-    Rxy_31_work = Rxy_31
-    if issparse(Rxy_31)
-        Rxy_31_density = nnz(Rxy_31) / length(Rxy_31)
-        if Rxy_31_density > 0.5
-            println("  Converting Rxy_31 to dense ($(round(100*Rxy_31_density, digits=1))% > 50%)")
-            Rxy_31_work = Matrix(Rxy_31)
-        end
-    end
-
-    # T2_23 is typically very dense
-    if T23_density > 0.5
-        println("  Converting T²(r₂₃) to dense ($(round(100*T23_density, digits=1))% > 50%)")
-        T2_23 = Matrix(T2_23)
-    end
-
-    # T2_12 is diagonal (very sparse), keep as sparse
-    @time composite_matrix = T2_12 * Rxy_31_work * T2_23
-
+    # Apply permutation symmetry factor
     return 2 * composite_matrix
 end
 
@@ -623,28 +521,18 @@ Parameters:
 Returns:
 - V_UIX: Full UIX three-body potential matrix (MeV units)
 
-Performance: Expected 15-50x faster than non-optimized version.
+Performance: Expected 2-3x faster than non-optimized version through caching of
+radial functions, Wigner symbols, and isospin operators.
 """
 function full_UIX_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
-    println("\n" * "="^70)
-    println("    COMPUTING UIX POTENTIAL (OPTIMIZED)")
-    println("="^70)
-
     # Compute two-pion exchange term
-    println("\n1. Two-pion exchange term:")
     X_term = X12X31I23_plus_X12X23I31_matrix_optimized(α, grid, Rxy, Gαα)
 
     # Compute contact interaction term
-    println("\n2. Contact interaction term:")
     T_term = T2_T2_composite_matrix_optimized(α, grid, Rxy_31, Rxy)
 
     # Combine with coupling constants
-    println("\n3. Combining terms with coupling constants...")
     V_UIX = A_2π * X_term + 0.5 * U_0 * T_term
-
-    println("\n" * "="^70)
-    println("    UIX POTENTIAL COMPUTATION COMPLETE")
-    println("="^70)
 
     return V_UIX
 end
