@@ -14,6 +14,8 @@ module UIX_optimized
 
 using WignerSymbols
 using LinearAlgebra
+using SparseArrays
+using Printf
 include("../swift/laguerre.jl")
 using .Laguerre
 include("../swift/Gcoefficient.jl")
@@ -241,67 +243,128 @@ end
 # ============================================================================
 
 """
-    X12_matrix_optimized(α, grid)
+    X12_matrix_optimized(α, grid; sparse_output=true)
 
 Optimized version of X12 matrix computation using cached radial functions.
-Uses dense matrix format for optimal performance.
+Returns sparse matrix by default for better performance.
 """
-function X12_matrix_optimized(α, grid)
+function X12_matrix_optimized(α, grid; sparse_output=true)
     # Pre-compute all unique Y and T values
     Y_values = [Y_cached(grid.xi[ix]) for ix in 1:grid.nx]
     T_values = [T_cached(grid.xi[ix]) for ix in 1:grid.nx]
 
-    # Initialize dense matrix
     N = α.nchmax * grid.nx * grid.ny
-    X12 = zeros(Float64, N, N)
 
-    for iα in 1:α.nchmax
-        s12 = round(Int, α.s12[iα])
-        J12 = round(Int, α.J12[iα])
-        l12 = α.l[iα]
-        λ3 = α.λ[iα]
-        J3_doubled = round(Int, 2 * α.J3[iα])
-        T12_doubled = round(Int, 2 * α.T12[iα])
-        T_doubled = round(Int, 2 * α.T[iα])
+    if sparse_output
+        # Use sparse format
+        I_indices = Int[]
+        J_indices = Int[]
+        values = Float64[]
 
-        for iα_prime in 1:α.nchmax
-            s12_prime = round(Int, α.s12[iα_prime])
-            J12_prime = round(Int, α.J12[iα_prime])
-            l12_prime = α.l[iα_prime]
-            λ3_prime = α.λ[iα_prime]
-            J3_prime_doubled = round(Int, 2 * α.J3[iα_prime])
-            T12_prime_doubled = round(Int, 2 * α.T12[iα_prime])
-            T_prime_doubled = round(Int, 2 * α.T[iα_prime])
+        for iα in 1:α.nchmax
+            s12 = round(Int, α.s12[iα])
+            J12 = round(Int, α.J12[iα])
+            l12 = α.l[iα]
+            λ3 = α.λ[iα]
+            J3_doubled = round(Int, 2 * α.J3[iα])
+            T12_doubled = round(Int, 2 * α.T12[iα])
+            T_doubled = round(Int, 2 * α.T[iα])
 
-            # Check channel delta functions
-            if (s12 == s12_prime &&
-                J12 == J12_prime &&
-                λ3 == λ3_prime &&
-                J3_doubled == J3_prime_doubled &&
-                T12_doubled == T12_prime_doubled &&
-                T_doubled == T_prime_doubled)
+            for iα_prime in 1:α.nchmax
+                s12_prime = round(Int, α.s12[iα_prime])
+                J12_prime = round(Int, α.J12[iα_prime])
+                l12_prime = α.l[iα_prime]
+                λ3_prime = α.λ[iα_prime]
+                J3_prime_doubled = round(Int, 2 * α.J3[iα_prime])
+                T12_prime_doubled = round(Int, 2 * α.T12[iα_prime])
+                T_prime_doubled = round(Int, 2 * α.T[iα_prime])
 
-                # Pre-compute terms that don't depend on grid points
-                first_term_coeff = (l12 == l12_prime) ? (4 * s12 - 3) : 0.0
-                second_term_coeff = (s12 == 1) ? S_matrix_cached(l12, l12_prime, J12) : 0.0
+                # Check channel delta functions
+                if (s12 == s12_prime &&
+                    J12 == J12_prime &&
+                    λ3 == λ3_prime &&
+                    J3_doubled == J3_prime_doubled &&
+                    T12_doubled == T12_prime_doubled &&
+                    T_doubled == T_prime_doubled)
 
-                # Only iterate if at least one coefficient is non-zero
-                if abs(first_term_coeff) > 1e-14 || abs(second_term_coeff) > 1e-14
-                    for iy in 1:grid.ny
-                        for ix in 1:grid.nx
-                            i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
-                            i_prime = (iα_prime - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+                    # Pre-compute terms that don't depend on grid points
+                    first_term_coeff = (l12 == l12_prime) ? (4 * s12 - 3) : 0.0
+                    second_term_coeff = (s12 == 1) ? S_matrix_cached(l12, l12_prime, J12) : 0.0
 
-                            # Use pre-computed radial functions
-                            X12[i, i_prime] = first_term_coeff * Y_values[ix] + second_term_coeff * T_values[ix]
+                    # Only iterate if at least one coefficient is non-zero
+                    if abs(first_term_coeff) > 1e-14 || abs(second_term_coeff) > 1e-14
+                        for iy in 1:grid.ny
+                            for ix in 1:grid.nx
+                                i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+                                i_prime = (iα_prime - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+
+                                # Use pre-computed radial functions
+                                val = first_term_coeff * Y_values[ix] + second_term_coeff * T_values[ix]
+                                if abs(val) > 1e-14
+                                    push!(I_indices, i)
+                                    push!(J_indices, i_prime)
+                                    push!(values, val)
+                                end
+                            end
                         end
                     end
                 end
             end
         end
-    end
 
-    return X12
+        return sparse(I_indices, J_indices, values, N, N)
+    else
+        # Dense format (for compatibility)
+        X12 = zeros(Float64, N, N)
+
+        for iα in 1:α.nchmax
+            s12 = round(Int, α.s12[iα])
+            J12 = round(Int, α.J12[iα])
+            l12 = α.l[iα]
+            λ3 = α.λ[iα]
+            J3_doubled = round(Int, 2 * α.J3[iα])
+            T12_doubled = round(Int, 2 * α.T12[iα])
+            T_doubled = round(Int, 2 * α.T[iα])
+
+            for iα_prime in 1:α.nchmax
+                s12_prime = round(Int, α.s12[iα_prime])
+                J12_prime = round(Int, α.J12[iα_prime])
+                l12_prime = α.l[iα_prime]
+                λ3_prime = α.λ[iα_prime]
+                J3_prime_doubled = round(Int, 2 * α.J3[iα_prime])
+                T12_prime_doubled = round(Int, 2 * α.T12[iα_prime])
+                T_prime_doubled = round(Int, 2 * α.T[iα_prime])
+
+                # Check channel delta functions
+                if (s12 == s12_prime &&
+                    J12 == J12_prime &&
+                    λ3 == λ3_prime &&
+                    J3_doubled == J3_prime_doubled &&
+                    T12_doubled == T12_prime_doubled &&
+                    T_doubled == T_prime_doubled)
+
+                    # Pre-compute terms that don't depend on grid points
+                    first_term_coeff = (l12 == l12_prime) ? (4 * s12 - 3) : 0.0
+                    second_term_coeff = (s12 == 1) ? S_matrix_cached(l12, l12_prime, J12) : 0.0
+
+                    # Only iterate if at least one coefficient is non-zero
+                    if abs(first_term_coeff) > 1e-14 || abs(second_term_coeff) > 1e-14
+                        for iy in 1:grid.ny
+                            for ix in 1:grid.nx
+                                i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+                                i_prime = (iα_prime - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+
+                                # Use pre-computed radial functions
+                                X12[i, i_prime] = first_term_coeff * Y_values[ix] + second_term_coeff * T_values[ix]
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        return X12
+    end
 end
 
 # ============================================================================
@@ -309,29 +372,48 @@ end
 # ============================================================================
 
 """
-    T12_matrix_optimized(α, grid)
+    T12_matrix_optimized(α, grid; sparse_output=false)
 
 Optimized version of T12 matrix using cached T² values.
-Returns dense diagonal matrix.
+Returns sparse diagonal matrix by default for better performance.
 """
-function T12_matrix_optimized(α, grid)
+function T12_matrix_optimized(α, grid; sparse_output=true)
     # Pre-compute T² values for all grid points
     T2_values = [T_cached(grid.xi[ix])^2 for ix in 1:grid.nx]
 
-    # Diagonal matrix - use dense format
     N = α.nchmax * grid.nx * grid.ny
-    T12 = zeros(Float64, N, N)
 
-    for iα in 1:α.nchmax
-        for ix in 1:grid.nx
-            for iy in 1:grid.ny
-                i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
-                T12[i, i] = T2_values[ix]
+    if sparse_output
+        # Use sparse diagonal format (much more efficient)
+        I_indices = Int[]
+        values = Float64[]
+
+        for iα in 1:α.nchmax
+            for ix in 1:grid.nx
+                for iy in 1:grid.ny
+                    i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+                    push!(I_indices, i)
+                    push!(values, T2_values[ix])
+                end
             end
         end
-    end
 
-    return T12
+        return sparse(I_indices, I_indices, values, N, N)
+    else
+        # Dense format (for compatibility)
+        T12 = zeros(Float64, N, N)
+
+        for iα in 1:α.nchmax
+            for ix in 1:grid.nx
+                for iy in 1:grid.ny
+                    i = (iα - 1) * grid.nx * grid.ny + (ix - 1) * grid.ny + iy
+                    T12[i, i] = T2_values[ix]
+                end
+            end
+        end
+
+        return T12
+    end
 end
 
 # ============================================================================
@@ -345,6 +427,11 @@ Optimized version of I31⁻ matrix computation using cached Wigner symbols.
 
 This version accepts pre-computed G-coefficients to avoid redundant calculation.
 Uses dense matrix format for optimal BLAS performance.
+
+Key optimizations:
+1. Pre-compute all isospin replacement factors (channel-dependent only)
+2. Vectorize innermost loops using BLAS operations
+3. Pre-compute coordinate-dependent factors
 """
 function I31_minus_matrix_optimized(α, grid, Gαα)
     # Initialize I31⁻ matrix (dense)
@@ -354,11 +441,54 @@ function I31_minus_matrix_optimized(α, grid, Gαα)
     # Coordinate transformation parameters (same as Rxy_31)
     a = -0.5; b = 1.0; c = -0.75; d = -0.5
 
+    # PRE-COMPUTE: Isospin replacement factors for all channel pairs
+    # This depends only on (iα, iαp), not on grid coordinates
+    isospin_replacement = zeros(Float64, α.nchmax, α.nchmax)
+
+    for iα in 1:α.nchmax
+        T12 = α.T12[iα]
+        T = α.T[iα]
+
+        # Pre-compute regular isospin factors (same for all iαp with same T12_prime)
+        hat_T12_in = sqrt(2 * T12 + 1)
+        isospin_phase = (-1)^round(Int, 2*T12 + 2*α.t1 + α.t2 + α.t3)
+
+        for iαp in 1:α.nchmax
+            T12_prime = α.T12[iαp]
+            T_prime = α.T[iαp]
+
+            # Regular isospin part
+            hat_T12_out = sqrt(2 * T12_prime + 1)
+            regular_isospin = isospin_phase * hat_T12_in * hat_T12_out *
+                            wigner6j_cached(α.t1, α.t2, T12_prime, α.t3, T, α.T12[iα])
+
+            # New isospin matrix elements
+            tau3_tau1_element = tau3_dot_tau1_cached(T12, T12_prime, T, T_prime)
+            tau2_tau3_tau1_element = tau2_dot_tau3_cross_tau1_cached(T12, T12_prime, T, T_prime)
+            new_isospin_factor = 2 * (tau3_tau1_element + tau2_tau3_tau1_element)
+
+            # Store replacement ratio
+            if abs(regular_isospin) > 1e-14
+                isospin_replacement[iα, iαp] = new_isospin_factor / regular_isospin
+            else
+                isospin_replacement[iα, iαp] = 0.0
+            end
+        end
+    end
+
+    # Pre-allocate temporary arrays for vectorization
+    outer_product = zeros(Float64, grid.nx, grid.ny)
+
     # Loop over coordinate grids
     for ix in 1:grid.nx
         xa = grid.xi[ix]
+        xa_over_phi_x = xa / grid.ϕx[ix]
+
         for iy in 1:grid.ny
             ya = grid.yi[iy]
+            ya_over_phi_y = ya / grid.ϕy[iy]
+            xy_factor = xa_over_phi_x * ya_over_phi_y
+
             for iθ in 1:grid.nθ
                 cosθ = grid.cosθi[iθ]
                 dcosθ = grid.dcosθi[iθ]
@@ -367,57 +497,55 @@ function I31_minus_matrix_optimized(α, grid, Gαα)
                 πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
 
+                # Skip if transformed coordinates are too small
+                if πb < 1e-14 || ξb < 1e-14
+                    continue
+                end
+
                 # Compute basis functions at transformed coordinates
                 fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
                 fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
+
+                # Pre-compute geometric factor
+                geom_factor = dcosθ * xy_factor / (πb * ξb)
+
+                # OPTIMIZATION: Compute outer product once using BLAS (rank-1 update)
+                # outer_product = fπb * fξb^T  (nx × ny matrix)
+                # Use mul! for in-place computation
+                mul!(outer_product, reshape(fπb, grid.nx, 1), reshape(fξb, 1, grid.ny))
 
                 # Loop over channel combinations
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
 
                     for iαp in 1:α.nchmax
-                        # Get the regular G-coefficient (contains spatial + spin + isospin)
-                        regular_G = Gαα[iθ, iy, ix, iα, iαp, 1]  # permutation index 1 for α1→α3
+                        # Get the regular G-coefficient
+                        regular_G = Gαα[iθ, iy, ix, iα, iαp, 1]
 
-                        # Skip if regular G-coefficient is zero
+                        # Skip if G-coefficient is zero
                         if abs(regular_G) < 1e-14
                             continue
                         end
 
-                        # Extract isospin quantum numbers for channels
-                        T12 = α.T12[iα]
-                        T12_prime = α.T12[iαp]
-                        T = α.T[iα]
-                        T_prime = α.T[iαp]
-
-                        # Compute the regular isospin part using cached Wigner symbols
-                        hat_T12_in = sqrt(2 * T12 + 1)
-                        hat_T12_out = sqrt(2 * T12_prime + 1)
-                        isospin_phase = (-1)^round(Int, 2*T12 + 2*α.t1 + α.t2 + α.t3)
-                        regular_isospin = isospin_phase * hat_T12_in * hat_T12_out *
-                                        wigner6j_cached(α.t1, α.t2, T12_prime, α.t3, T, T12)
-
-                        # Compute new isospin matrix elements using cached functions
-                        tau3_tau1_element = tau3_dot_tau1_cached(T12, T12_prime, T, T_prime)
-                        tau2_tau3_tau1_element = tau2_dot_tau3_cross_tau1_cached(T12, T12_prime, T, T_prime)
-
-                        # Combined new isospin factor: 2(τ₃·τ₁ + τ₂·τ₃×τ₁)
-                        new_isospin_factor = 2 * (tau3_tau1_element + tau2_tau3_tau1_element)
-
-                        # Replace isospin part: G_new = G_regular * (new_isospin / old_isospin)
-                        if abs(regular_isospin) > 1e-14
-                            modified_G = regular_G * (new_isospin_factor / regular_isospin)
-                        else
-                            modified_G = 0.0
+                        # Use pre-computed isospin replacement factor
+                        isospin_ratio = isospin_replacement[iα, iαp]
+                        if abs(isospin_ratio) < 1e-14
+                            continue
                         end
 
-                        # Apply the same transformation as Rxy_31
-                        adj_factor = dcosθ * modified_G * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy])
+                        # Modified G-coefficient
+                        modified_G = regular_G * isospin_ratio
 
-                        for ixp in 1:grid.nx
-                            for iyp in 1:grid.ny
-                                ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
-                                I31_minus[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
+                        # Total adjustment factor
+                        adj_factor = geom_factor * modified_G
+
+                        # BLAS-OPTIMIZED: Add contribution to target block
+                        # This is much faster than double loop
+                        ip_base = (iαp-1)*grid.nx*grid.ny
+                        @inbounds for ixp in 1:grid.nx
+                            ip_offset = ip_base + (ixp-1)*grid.ny
+                            @simd for iyp in 1:grid.ny
+                                I31_minus[i, ip_offset + iyp] += adj_factor * outer_product[ixp, iyp]
                             end
                         end
                     end
@@ -436,32 +564,36 @@ end
 """
     X23_with_permutations_optimized(α, grid, Rxy)
 
-Optimized version using dense X23 matrix and cached radial functions.
+Optimized version using sparse X23 matrix and cached radial functions.
 """
 function X23_with_permutations_optimized(α, grid, Rxy)
-    X23 = X12_matrix_optimized(α, grid)  # X23 has same structure as X12
+    # Use sparse format for X23
+    X23 = X12_matrix_optimized(α, grid; sparse_output=true)
     matrix_size = α.nchmax * grid.nx * grid.ny
 
-    # Create identity matrix (dense)
+    # Create identity matrix and add Rxy
     I_matrix = Matrix{Float64}(I, matrix_size, matrix_size)
     I_plus_Rxy = I_matrix + Rxy
 
+    # Sparse * Dense multiplication (Julia handles efficiently)
     return X23 * I_plus_Rxy
 end
 
 """
     T23_matrix_optimized(α, grid, Rxy)
 
-Optimized version using dense diagonal T23 and cached T² values.
+Optimized version using sparse diagonal T23 and cached T² values.
 """
 function T23_matrix_optimized(α, grid, Rxy)
-    T23 = T12_matrix_optimized(α, grid)
+    # Use sparse diagonal format for T23 (only N nonzeros instead of N^2)
+    T23 = T12_matrix_optimized(α, grid; sparse_output=true)
     matrix_size = α.nchmax * grid.nx * grid.ny
 
-    # Create identity matrix (dense)
+    # Create identity matrix and add Rxy
     I_matrix = Matrix{Float64}(I, matrix_size, matrix_size)
     I_plus_Rxy = I_matrix + Rxy
 
+    # Sparse diagonal * Dense multiplication (very fast!)
     return T23 * I_plus_Rxy
 end
 
@@ -472,13 +604,24 @@ Optimized version of X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻ computa
 Uses dense matrices with cached radial functions and Wigner symbols for speed.
 """
 function X12X31I23_plus_X12X23I31_matrix_optimized(α, grid, Rxy, Gαα)
-    # Compute individual matrix components (all dense)
-    X12 = X12_matrix_optimized(α, grid)
-    I31_minus = I31_minus_matrix_optimized(α, grid, Gαα)
-    X23 = X23_with_permutations_optimized(α, grid, Rxy)
+    # Compute individual matrix components with sparse optimization
+    t1 = time()
+    X12 = X12_matrix_optimized(α, grid; sparse_output=true)
+    @printf("          X12 (sparse): %.3f s\n", time() - t1)
 
-    # Compute the composite matrix using optimized dense BLAS operations
+    t2 = time()
+    I31_minus = I31_minus_matrix_optimized(α, grid, Gαα)
+    @printf("          I31_minus: %.3f s\n", time() - t2)
+
+    t3 = time()
+    X23 = X23_with_permutations_optimized(α, grid, Rxy)
+    @printf("          X23 (sparse): %.3f s\n", time() - t3)
+
+    # Compute the composite matrix: Sparse * Dense * Dense
+    # X12 is sparse, I31_minus and X23 are dense
+    t4 = time()
     composite_matrix = X12 * I31_minus * X23
+    @printf("          Matrix multiplications (sparse×dense): %.3f s\n", time() - t4)
 
     # Apply permutation symmetry factor
     return 2 * composite_matrix
@@ -491,12 +634,20 @@ Optimized version of T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂) computa
 Uses dense matrices with cached T² values for speed.
 """
 function T2_T2_composite_matrix_optimized(α, grid, Rxy_31, Rxy)
-    # Compute individual matrix components (all dense)
-    T2_12 = T12_matrix_optimized(α, grid)
-    T2_23 = T23_matrix_optimized(α, grid, Rxy)
+    # Compute individual matrix components with sparse optimization
+    t1 = time()
+    T2_12 = T12_matrix_optimized(α, grid; sparse_output=true)
+    @printf("          T2_12 (sparse diagonal): %.3f s\n", time() - t1)
 
-    # Compute the composite matrix using optimized dense BLAS operations
+    t2 = time()
+    T2_23 = T23_matrix_optimized(α, grid, Rxy)
+    @printf("          T2_23 (sparse×dense): %.3f s\n", time() - t2)
+
+    # Compute the composite matrix: Sparse diagonal * Dense * Dense
+    # T2_12 is sparse diagonal (very fast multiplication!)
+    t3 = time()
     composite_matrix = T2_12 * Rxy_31 * T2_23
+    @printf("          T-matrix multiplications (sparse×dense×dense): %.3f s\n", time() - t3)
 
     # Apply permutation symmetry factor
     return 2 * composite_matrix
@@ -526,13 +677,25 @@ radial functions, Wigner symbols, and isospin operators.
 """
 function full_UIX_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
     # Compute two-pion exchange term
+    println("      - Computing X₁₂X₃₁I₂₃⁺ + X₁₂X₂₃I₃₁⁻ term...")
+    t_X_start = time()
     X_term = X12X31I23_plus_X12X23I31_matrix_optimized(α, grid, Rxy, Gαα)
+    t_X = time() - t_X_start
+    @printf("        X-term computed: %.3f s\n", t_X)
 
     # Compute contact interaction term
+    println("      - Computing T²(r₁₂)T²(r₂₃) + T²(r₃₁)T²(r₁₂) term...")
+    t_T_start = time()
     T_term = T2_T2_composite_matrix_optimized(α, grid, Rxy_31, Rxy)
+    t_T = time() - t_T_start
+    @printf("        T-term computed: %.3f s\n", t_T)
 
     # Combine with coupling constants
+    println("      - Combining terms with coupling constants...")
+    t_comb_start = time()
     V_UIX = A_2π * X_term + 0.5 * U_0 * T_term
+    t_comb = time() - t_comb_start
+    @printf("        Combination: %.3f s\n", t_comb)
 
     return V_UIX
 end

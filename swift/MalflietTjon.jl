@@ -8,8 +8,11 @@ using Printf
 using Random
 using Statistics
 include("matrices_optimized.jl")
-using .matrices_optimized 
+using .matrices_optimized
 
+# Load UIX modules once at module initialization
+include("../3Npot/UIX.jl")
+include("../3Npot/UIX_optimized.jl")
 
 export malfiet_tjon_solve, malfiet_tjon_solve_optimized, compute_lambda_eigenvalue, compute_lambda_eigenvalue_optimized, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, compute_channel_probabilities, RHSCache, precompute_RHS_cache, compute_uix_potential, compute_uix_potential_optimized
 
@@ -20,13 +23,8 @@ Helper function to compute UIX three-body potential.
 This function handles loading the UIX module and computing the potential.
 """
 function compute_uix_potential(α, grid, Rxy_31, Rxy)
-    # Load UIX module dynamically
-    uix_path = joinpath(dirname(@__FILE__), "..", "3Npot", "UIX.jl")
-    include(uix_path)
-
-    # Access the UIX module functions
-    # Note: We use eval to access the UIX module that was just included
-    return eval(:(UIX.full_UIX_potential($α, $grid, $Rxy_31, $Rxy)))
+    # UIX module already loaded at module initialization
+    return UIX.full_UIX_potential(α, grid, Rxy_31, Rxy)
 end
 
 """
@@ -62,13 +60,8 @@ V_UIX = compute_uix_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
 ```
 """
 function compute_uix_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
-    # Load UIX_optimized module dynamically
-    uix_opt_path = joinpath(dirname(@__FILE__), "..", "3Npot", "UIX_optimized.jl")
-    include(uix_opt_path)
-
-    # Access the UIX_optimized module functions
-    # Note: We use eval to access the UIX_optimized module that was just included
-    return eval(:(UIX_optimized.full_UIX_potential_optimized($α, $grid, $Rxy_31, $Rxy, $Gαα)))
+    # UIX_optimized module already loaded at module initialization
+    return UIX_optimized.full_UIX_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
 end
 
 """
