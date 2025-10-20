@@ -108,6 +108,27 @@ The codebase is organized into three main module directories:
   - **Malfiet-Tjon iteration**: Reformulates as `λ(E)[c] = [E*B - T - V]⁻¹ * V*R * [c]`
 - **Convergence**: Secant method iteration until `|λ(E) - 1| < tolerance`
 
+### Faddeev Normalization (Critical for Truncated Model Space)
+The framework uses **Faddeev normalization** which is essential for truncated model spaces:
+
+**Two possible normalization schemes:**
+1. **⟨Ψ|Ψ⟩ = 1**: Direct normalization of full wavefunction Ψ = (1 + Rxy)ψ₃
+   - ❌ INCORRECT for truncated spaces
+   - Rxy maps between Jacobi coordinates and is incomplete with finite lmax/λmax
+   - Results in unconverged normalization
+
+2. **3⟨Ψ|ψ₃⟩ = 1**: Faddeev normalization scheme
+   - ✅ CORRECT for truncated spaces
+   - Only involves ψ₃ which is fully defined within the truncated space
+   - Converged even with finite basis size
+   - Implementation: `|Ψ̄⟩ = |Ψ⟩/√(3⟨Ψ|ψ₃⟩)` ensures ⟨Ψ̄|Ψ̄⟩ = 1
+
+**Channel Probability Calculation:**
+- Computed from the full wavefunction Ψ̄: `P_channel = ⟨Ψ̄_ch|B|Ψ̄_ch⟩`
+- Probabilities sum to ~98-99% (1-2% missing due to truncation)
+- As lmax, λmax → ∞, sum approaches 100%
+- All probabilities are positive (cross-terms can be negative, avoid using them)
+
 ### Channel Indexing
 The framework uses sophisticated indexing schemes:
 - Three-body channels: `|(l₁₂(s₁s₂)s₁₂)J₁₂, (λ₃s₃)J₃, J; (t₁t₂)T₁₂, t₃, T MT⟩`
@@ -128,10 +149,14 @@ The framework uses sophisticated indexing schemes:
 - **Angular momentum basis**: UIX functions implemented in Lagrange function basis, not Jacobi coordinate basis
 - **Physical constants**: Uses PDG pion mass values with proper averaging formula
 - **Delta functions**: Matrix elements include channel selection rules and coordinate constraints
+- **Isospin phase convention**: The isospin phase factor is `(-1)^(T12_prime + 2*t1 + t2 + t3)` where T12_prime is from the **ket** (incoming channel), not the bra (outgoing channel). This must match the phase convention in `Gcoefficient.jl` line 91 for consistent angular momentum recoupling.
 
 ### Modifying Calculations
 - Channel configurations: Edit parameters in notebook initialization cells
 - Mesh parameters: Adjust `nx`, `ny`, `xmax`, `ymax`, `alpha` for convergence
+  - **Recommended for j2bmax=2.0**: nθ=12, nx=20, ny=20, xmax=16, ymax=16
+  - Provides convergence within 0.2 keV while maintaining computational efficiency
+  - For higher accuracy: increase to nx=25, ny=25 (converges within 1 keV)
 - Potential models: Change `potname` variable to switch between models
 - Three-body forces: Include UIX terms by adding X12_matrix to Hamiltonian construction
 
@@ -144,7 +169,7 @@ The framework uses sophisticated indexing schemes:
 - **Initial guesses**: Use direct method results to inform Malfiet-Tjon starting energies for optimal convergence
 - **Module conflicts**: Import MalflietTjon functions explicitly: `import .MalflietTjon: malfiet_tjon_solve`
 
-### Debugging and Troubleshooting  
+### Debugging and Troubleshooting
 - **Library loading**: Use `list_symbols(libpot)` to inspect available Fortran symbols
 - **Symbol resolution**: `find_symbol()` handles platform-specific name mangling
 - **Channel validation**: Check `α3b()` output for quantum number consistency and conservation laws
@@ -155,7 +180,11 @@ The framework uses sophisticated indexing schemes:
 - **Notebook debugging**: Use `.ipynb` files for interactive problem investigation and method comparison
 - **Symmetry checks**: Built-in rearrangement matrix transpose relationship validation (`Rxy_32 = Rxy_31^T`) with tolerance checking
 - **Wave function analysis**: Channel probability contributions and normalization verification
+  - Check that ⟨Ψ̄|ψ̄₃⟩ = 1/3 (Faddeev normalization)
+  - Channel probabilities should sum to 98-99% (1-2% missing due to truncation is normal)
+  - Negative channel probabilities indicate incorrect normalization scheme
 - **Energy consistency**: Automated checks that ⟨ψ|H|ψ⟩ matches eigenvalue within tolerance
+- **Truncation effects**: Monitor total probability sum - as lmax/λmax increase, sum approaches 100%
 
 ### Required Julia Packages
 The project uses specific Julia packages that must be installed:

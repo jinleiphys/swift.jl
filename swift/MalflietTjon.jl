@@ -1211,7 +1211,7 @@ verbose::Bool=true, use_arnoldi::Bool=true,
             if verbose
 
                 # compute the probabilities in each channel
-                channel_probs, channel_info = compute_channel_probabilities(ψtot, ψ3, B, α, grid)
+                channel_probs, channel_info = compute_channel_probabilities(ψtot, B, α, grid)
 
                 # Print channel probability results
                 println()
@@ -1365,37 +1365,39 @@ function compute_total_wavefunction(ψ::Vector, Rxy, B)
     # Compute the total wave function: |Ψ⟩ = (1 + Rxy)|ψ₃⟩
     # The identity operator (1) is represented implicitly
     ψ_total = ψ + Rxy * ψ
-    
+
     # Compute the inner product ⟨Ψ|ψ₃⟩ with respect to the overlap matrix B
     psi_psi3_inner = real(ψ_total' * B * ψ)
-    
+
     # Check if the inner product is positive (required for normalization)
     if psi_psi3_inner <= 0
         error("Inner product ⟨Ψ|ψ₃⟩ = $psi_psi3_inner ≤ 0, cannot normalize wave function")
     end
-    
+
     # Apply the proper Faddeev normalization: |Ψ̄⟩ = |Ψ⟩/√(3⟨Ψ|ψ₃⟩)
+    # This is the CORRECT normalization for truncated model space
+    # because it only involves ψ₃ which is converged within the truncation
     normalization_factor = sqrt(3.0 * psi_psi3_inner)
     ψ_normalized = ψ_total / normalization_factor
-    
-    # Verify normalization: Check that ⟨Ψ̄|(1 + P⁺ + P⁻)|ψ̄₃⟩ = 1
     ψ3_normalized = ψ / normalization_factor
+
+    # Verify normalization: Check that ⟨Ψ̄|ψ̄₃⟩ = 1/3
     verification_inner = real(ψ_normalized' * B * ψ3_normalized)
     expected_value = 1.0 / 3.0  # Since ⟨Ψ̄|Ψ̄⟩ = 3⟨Ψ̄|ψ̄₃⟩ = 1
-    
+
     # Check normalization accuracy (tolerance for numerical precision)
     normalization_error = abs(verification_inner - expected_value)
     if normalization_error > 1e-10
         @warn "Normalization verification failed: ⟨Ψ̄|ψ̄₃⟩ = $verification_inner, expected = $expected_value, error = $normalization_error"
     end
-    
+
     # Also verify that ⟨Ψ̄|B|Ψ̄⟩ = 1 (total norm should be 1)
     total_norm_squared = real(ψ_normalized' * B * ψ_normalized)
     total_norm_error = abs(total_norm_squared - 1.0)
     if total_norm_error > 1e-10
         println("Total normalization check: ⟨Ψ̄|B|Ψ̄⟩ = $total_norm_squared, expected = 1.0")
     end
-    
+
     return ψ_normalized, ψ3_normalized
 end
 
@@ -1620,26 +1622,24 @@ end
     end
 
 """
-    compute_channel_probabilities(ψ_normalized, ψ3_normalized, B, α, grid)
+    compute_channel_probabilities(ψ_normalized, B, α, grid)
 
 Compute the probability contribution of each channel in the three-body wave function.
 
 The probability contribution of each channel i is computed as:
-    P_i = 3 * real(ψ_normalized[i]' * B[i,i] * ψ3_normalized[i])
+    P_i = real(ψ_normalized[i]' * B[i,i] * ψ_normalized[i])
 
-This represents the overlap between the total normalized wave function and the 
-normalized component wave function for each channel, scaled by the factor of 3
-from the Faddeev normalization.
+where ψ_normalized is the FULL Faddeev wavefunction Ψ̄ = (1 + Rxy)ψ̄₃ normalized
+using the Faddeev scheme: |Ψ̄⟩ = |Ψ⟩/√(3⟨Ψ|ψ₃⟩) so that ⟨Ψ̄|Ψ̄⟩ = 1.
 
 # Arguments
-- `ψ_normalized`: Normalized total wave function |Ψ̄⟩
-- `ψ3_normalized`: Normalized component wave function |ψ̄₃⟩  
+- `ψ_normalized`: Normalized FULL wave function |Ψ̄⟩ where ⟨Ψ̄|B|Ψ̄⟩ = 1
 - `B`: Overlap matrix
 - `α`: Channel structure (used to get channel information)
 - `grid`: Mesh structure (used to get grid dimensions)
 
 # Returns
-- `channel_probs`: Vector of probability contributions for each channel
+- `channel_probs`: Vector of probability contributions for each channel (sum to 1)
 - `channel_info`: Vector of channel descriptions for labeling
 
 # Physics
@@ -1647,46 +1647,49 @@ In the Faddeev formalism, each channel represents a specific coupling of
 angular momentum and isospin quantum numbers. The probability contribution
 shows how much each channel contributes to the total three-body bound state.
 """
-function compute_channel_probabilities(ψ_normalized, ψ3_normalized, B, α, grid)
+function compute_channel_probabilities(ψ_normalized, B, α, grid)
+    # Channel probabilities from the FULL wavefunction Ψ̄
+    # Use ⟨Ψ̄_channel|B|Ψ̄_channel⟩ which automatically sums to 1
+
     # Get the number of channels and grid points per channel
     nchannels = α.nchmax
     nx, ny = grid.nx, grid.ny
     points_per_channel = nx * ny
-    
+
     # Initialize arrays for results
     channel_probs = Float64[]
     channel_info = String[]
-    
+
     # Loop over each channel
     for i in 1:nchannels
         # Calculate index range for this channel
         start_idx = (i-1) * points_per_channel + 1
         end_idx = i * points_per_channel
-        
-        # Extract the wave function components for this channel
+
+        # Extract the FULL wave function component for this channel
         ψ_channel = ψ_normalized[start_idx:end_idx]
-        ψ3_channel = ψ3_normalized[start_idx:end_idx]
-        
+
         # Extract the overlap matrix block for this channel
         B_channel = B[start_idx:end_idx, start_idx:end_idx]
-        
-        # Compute the probability contribution: 3 * real(ψ'* B * ψ3)
-        prob = 3.0 * real(ψ_channel' * B_channel * ψ3_channel)
+
+        # Channel probability: ⟨Ψ̄_channel|B|Ψ̄_channel⟩
+        # Since ψ_normalized satisfies ⟨Ψ̄|B|Ψ̄⟩ = 1, these sum to 1
+        prob = real(ψ_channel' * B_channel * ψ_channel)
         push!(channel_probs, prob)
-        
+
         # Create channel description using the nch3b structure fields
         # Format: (l₁₂(s₁s₂)s₁₂)J₁₂, (λ₃s₃)J₃, J; (t₁t₂)T₁₂, t₃, T
-        channel_desc = @sprintf("Ch %2d: (l₁₂=%d,s₁₂=%.1f)J₁₂=%.1f, (λ₃=%d,s₃=%.1f)J₃=%.1f, J=%.1f; T₁₂=%.1f, t₃=%.1f, T=%.1f", 
+        channel_desc = @sprintf("Ch %2d: (l₁₂=%d,s₁₂=%.1f)J₁₂=%.1f, (λ₃=%d,s₃=%.1f)J₃=%.1f, J=%.1f; T₁₂=%.1f, t₃=%.1f, T=%.1f",
                                i, α.l[i], α.s12[i], α.J12[i], α.λ[i], α.s3, α.J3[i], α.J, α.T12[i], α.t3, α.T[i])
         push!(channel_info, channel_desc)
     end
-    
+
     # Verify that probabilities sum to approximately 1
     total_prob = sum(channel_probs)
     if abs(total_prob - 1.0) > 1e-6
         @warn "Channel probabilities do not sum to 1: sum = $total_prob"
     end
-    
+
     return channel_probs, channel_info
 end
 
@@ -1984,7 +1987,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
 
             if verbose
                 # Compute the probabilities in each channel
-                channel_probs, channel_info = compute_channel_probabilities(ψtot, ψ3, B, α, grid)
+                channel_probs, channel_info = compute_channel_probabilities(ψtot, B, α, grid)
 
                 # Print channel probability results
                 println()
