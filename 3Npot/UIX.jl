@@ -348,9 +348,11 @@ function I31_minus_matrix(α, grid)
                         # Compute the regular isospin part that was used in G-coefficient
                         # For Rxy_31 (α1→α3): Cisospin = hat(T12_in) * hat(T12_out) * wigner6j(t1,t2,T12_out,t3,T,T12_in)
                         # where hat(x) = √(2x+1), and includes isospin phase factor
+                        # Phase must match Gcoefficient.jl line 91: (-1)^(T12_in + 2*t1 + t2 + t3)
+                        # T12_prime is in the ket (incoming channel), T12 is in the bra (outgoing channel)
                         hat_T12_in = sqrt(2 * T12 + 1)
                         hat_T12_out = sqrt(2 * T12_prime + 1)
-                        isospin_phase = (-1)^round(Int, 2*T12 + 2*α.t1 + α.t2 + α.t3)
+                        isospin_phase = (-1)^round(Int, T12_prime + 2*α.t1 + α.t2 + α.t3)
                         regular_isospin = isospin_phase * hat_T12_in * hat_T12_out * wigner6j(α.t1, α.t2, T12_prime, α.t3, T, T12)
 
                         # Compute new isospin matrix elements for I31⁻

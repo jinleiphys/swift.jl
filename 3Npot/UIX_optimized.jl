@@ -450,14 +450,16 @@ function I31_minus_matrix_optimized(α, grid, Gαα)
         T = α.T[iα]
 
         # Pre-compute regular isospin factors (same for all iαp with same T12_prime)
+        # Phase must match Gcoefficient.jl line 91: (-1)^(T12_in + 2*t1 + t2 + t3)
+        # NOTE: Phase depends on T12_prime (ket/incoming), not T12 (bra/outgoing)
         hat_T12_in = sqrt(2 * T12 + 1)
-        isospin_phase = (-1)^round(Int, 2*T12 + 2*α.t1 + α.t2 + α.t3)
 
         for iαp in 1:α.nchmax
             T12_prime = α.T12[iαp]
             T_prime = α.T[iαp]
 
-            # Regular isospin part
+            # Regular isospin part (phase depends on T12_prime from ket state)
+            isospin_phase = (-1)^round(Int, T12_prime + 2*α.t1 + α.t2 + α.t3)
             hat_T12_out = sqrt(2 * T12_prime + 1)
             regular_isospin = isospin_phase * hat_T12_in * hat_T12_out *
                             wigner6j_cached(α.t1, α.t2, T12_prime, α.t3, T, α.T12[iα])
