@@ -19,6 +19,26 @@ const ħ = 197.3269718 # MeV. fm
 
 export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, Rxy_matrix_with_caching
 
+# Coulomb potential function (matches matrices.jl implementation)
+function VCOUL_point(R, z12)
+    # Constants
+    e2 = 1.43997  # Coulomb constant in appropriate units
+
+    # Calculations
+    aux = e2 * z12
+    vcoul_point = 0.0
+
+    # Early return if z12 is very small
+    if (z12 < 1e-4)
+        return vcoul_point
+    end
+
+    # Compute Coulomb potential
+    vcoul_point = aux / R
+
+    return vcoul_point
+end
+
 # Helper function to compute overlap matrices
 function compute_overlap_matrix(n, xx)
     """Compute overlap matrix for non-orthogonal basis functions"""

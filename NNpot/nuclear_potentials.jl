@@ -6,6 +6,21 @@ export potential_matrix, call_av18, potential_type_to_lpot
 # Load the Fortran library with potentials
 const libpot = Libdl.dlopen(joinpath(@__DIR__, "libpotentials.dylib"))
 
+# Coulomb constant in MeV·fm (matches VCOUL_point in matrices.jl)
+const e2 = 1.43997
+
+"""
+Compute point Coulomb potential.
+This matches VCOUL_point function in matrices.jl.
+V_coulomb = e2 * z12 / R where z12 = 1.0 for pp pairs.
+"""
+function compute_coulomb(R::Float64, z12::Float64)
+    if R ≈ 0.0
+        return 0.0
+    end
+    return e2 * z12 / R
+end
+
 # Function to list all symbols in the library (useful for debugging)
 function list_symbols(lib)
     # This is a simplified version - getting all symbols from a dynamic library
@@ -112,6 +127,14 @@ end
 
 """
 Calculate the potential matrix for given parameters
+
+IMPORTANT: Coulomb Interaction Handling
+- Argonne potentials (AV18, AV14, etc.) include Coulomb interaction in the Fortran code
+- For consistency with the code design in matrices.jl, we SUBTRACT the Coulomb term here
+- matrices.jl then adds it back with VCOUL_point for pp pairs (MT > 0)
+- Net result: Physics unchanged, but Coulomb handling is explicit and centralized
+- For phenomenological potentials (MT, etc.), Coulomb is NOT included in Fortran,
+  so it's added only in matrices.jl
 """
 function potential_matrix(
     potential_type::String,
@@ -181,6 +204,11 @@ function potential_matrix(
             l = angular_momenta[1]
             vpw = call_av18(lpot, l, s, j, t, t1z, t2z, r)
             potential[1, 1] = vpw[1, 1]
+            # For Argonne potentials (lpot <= 8), remove Coulomb for pp pairs
+            # It will be added back in matrices.jl with VCOUL_point for consistency
+            if lpot <= 8 && tz == 1  # Argonne potentials and pp pair
+                potential[1, 1] -= compute_coulomb(r, 1.0)
+            end
         elseif n_channels == 2 && length(angular_momenta) == 2
             # Coupled channel case (e.g., 3S1-3D1 coupling)
             l1 = angular_momenta[1]  # Lower l value (e.g., l=0 for S)
@@ -191,17 +219,29 @@ function potential_matrix(
             if s == 1 && abs(l2 - l1) == 2 && (j == l1 + 1 || j == l2 - 1)
                 # Valid coupled channel - call Fortran with the lower l value
                 vpw = call_av18(lpot, l1, s, j, t, t1z, t2z, r)
-                
+
                 potential[1, 1] = vpw[1, 1]  # l1-l1 element
                 potential[1, 2] = vpw[1, 2]  # l1-l2 coupling
                 potential[2, 1] = vpw[2, 1]  # l2-l1 coupling (should equal [1,2])
                 potential[2, 2] = vpw[2, 2]  # l2-l2 element
+
+                # For Argonne potentials, remove Coulomb for pp pairs (diagonal elements only)
+                if lpot <= 8 && tz == 1
+                    v_coul = compute_coulomb(r, 1.0)
+                    potential[1, 1] -= v_coul
+                    potential[2, 2] -= v_coul
+                    # Off-diagonal coupling terms don't have Coulomb
+                end
             else
                 # Uncoupled channels - diagonal only
                 for ia in 1:n_channels
                     l_ia = angular_momenta[ia]
                     vpw = call_av18(lpot, l_ia, s, j, t, t1z, t2z, r)
                     potential[ia, ia] = vpw[1, 1]
+                    # Remove Coulomb for Argonne potentials with pp pairs
+                    if lpot <= 8 && tz == 1
+                        potential[ia, ia] -= compute_coulomb(r, 1.0)
+                    end
                 end
             end
         else
@@ -210,6 +250,10 @@ function potential_matrix(
                 l_ia = angular_momenta[ia]
                 vpw = call_av18(lpot, l_ia, s, j, t, t1z, t2z, r)
                 potential[ia, ia] = vpw[1, 1]
+                # Remove Coulomb for Argonne potentials with pp pairs
+                if lpot <= 8 && tz == 1
+                    potential[ia, ia] -= compute_coulomb(r, 1.0)
+                end
             end
         end
     end
