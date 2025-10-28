@@ -97,13 +97,22 @@ end
 
 
 
- function T_matrix(α,grid; return_components=false)
+ function T_matrix(α,grid; return_components=false, θ_deg=0.0)
 """
 α.nchmax is the maximum number of α channel index, α0 is the α parameter in Laguerre function
 
 If return_components=true, returns (Tmatrix, Tx_channels, Ty_channels, Nx, Ny)
 where Tx_channels[iα] and Ty_channels[iα] contain the per-channel kinetic energy matrices
+
+θ_deg: Complex scaling angle in degrees (default=0.0 for no scaling)
+       The kinetic energy matrices Tx and Ty are multiplied by exp(-2iθ)
 """
+
+ # Convert angle from degrees to radians
+ θ = θ_deg * π / 180.0
+
+ # Complex scaling factor for kinetic energy: e^(-2iθ)
+ scaling_factor = exp(-2im * θ)
 
  # Compute correct overlap matrix for y-direction (non-orthogonal basis functions)
  Ny = zeros(grid.ny, grid.ny)
@@ -117,14 +126,18 @@ where Tx_channels[iα] and Ty_channels[iα] contain the per-channel kinetic ener
      end
  end
 
+ # Determine data type based on complex scaling
+ is_complex = (θ_deg != 0.0)
+ DataType_T = is_complex ? Complex{Float64} : Float64
+
  # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Tx^α ⊗ Ny
- Tx_matrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
- Tx_channels = Vector{Matrix{Float64}}(undef, α.nchmax)
+ Tx_matrix = zeros(DataType_T, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
+ Tx_channels = Vector{Matrix{DataType_T}}(undef, α.nchmax)
 
  for i in 1:α.nchmax
      # Compute Tx^α for channel α with its specific l[α]
      Tx_alpha = Tx(grid.nx, grid.xx, grid.α, α.l[i])
-     Tx_alpha .= Tx_alpha .* ħ^2 / m / amu / grid.hsx^2
+     Tx_alpha = Tx_alpha .* ħ^2 / m / amu / grid.hsx^2 .* scaling_factor
      Tx_channels[i] = copy(Tx_alpha)
 
      # Create channel selector matrix: δ_{α,α} I_α (only α-th diagonal element is 1)
@@ -148,13 +161,13 @@ where Tx_channels[iα] and Ty_channels[iα] contain the per-channel kinetic ener
  end
 
  # Elegant Kronecker product sum structure: ∑_α δ_{α,α} I_α ⊗ Nx ⊗ Ty^α
- Ty_matrix = zeros(α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
- Ty_channels = Vector{Matrix{Float64}}(undef, α.nchmax)
+ Ty_matrix = zeros(DataType_T, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
+ Ty_channels = Vector{Matrix{DataType_T}}(undef, α.nchmax)
 
  for i in 1:α.nchmax
      # Compute Ty^α for channel α with its specific λ[α]
      Ty_alpha = Tx(grid.ny, grid.yy, grid.α, α.λ[i])
-     Ty_alpha .= Ty_alpha .* ħ^2 * 0.75 / m / amu / grid.hsy^2
+     Ty_alpha = Ty_alpha .* ħ^2 * 0.75 / m / amu / grid.hsy^2 .* scaling_factor
      Ty_channels[i] = copy(Ty_alpha)
 
      # Create channel selector matrix: δ_{α,α} I_α (only α-th diagonal element is 1)

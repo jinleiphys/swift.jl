@@ -76,7 +76,7 @@ function Tx(nx, xi, α0, l)
 end
 
 """
-    T_matrix_optimized(α, grid; return_components=false)
+    T_matrix_optimized(α, grid; return_components=false, θ_deg=0.0)
 
 OPTIMIZED VERSION of T_matrix using fused computation to avoid intermediate matrices.
 
@@ -91,17 +91,33 @@ OPTIMIZED VERSION of T_matrix using fused computation to avoid intermediate matr
 - New: Builds Tmatrix directly with fused Tx_block + Ty_block
 - Expected speedup: 4-5× compared to previous version
 
+## Complex Scaling:
+- θ_deg: Complex scaling angle in degrees (default=0.0 for no scaling)
+- The kinetic energy matrices Tx and Ty are multiplied by exp(-2iθ)
+
 ## Usage:
 ```julia
 Tmat = T_matrix_optimized(α, grid)
 # or with components for M_inverse
 Tmat, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
+# or with complex scaling
+Tmat = T_matrix_optimized(α, grid, θ_deg=10.0)
 ```
 """
-function T_matrix_optimized(α, grid; return_components=false)
+function T_matrix_optimized(α, grid; return_components=false, θ_deg=0.0)
     nα = α.nchmax
     nx = grid.nx
     ny = grid.ny
+
+    # Convert angle from degrees to radians
+    θ = θ_deg * π / 180.0
+
+    # Complex scaling factor for kinetic energy: e^(-2iθ)
+    scaling_factor = exp(-2im * θ)
+
+    # Determine data type based on complex scaling
+    is_complex = (θ_deg != 0.0)
+    DataType_T = is_complex ? Complex{Float64} : Float64
 
     # Pre-compute overlap matrices (computed once, not per channel)
     Nx = compute_overlap_matrix(nx, grid.xx)
@@ -109,21 +125,21 @@ function T_matrix_optimized(α, grid; return_components=false)
 
     # Pre-allocate SINGLE output matrix (avoids two intermediate matrices)
     total_size = nα * nx * ny
-    Tmatrix = zeros(total_size, total_size)
+    Tmatrix = zeros(DataType_T, total_size, total_size)
 
     # Storage for per-channel components (if requested)
-    Tx_channels = Vector{Matrix{Float64}}(undef, nα)
-    Ty_channels = Vector{Matrix{Float64}}(undef, nα)
+    Tx_channels = Vector{Matrix{DataType_T}}(undef, nα)
+    Ty_channels = Vector{Matrix{DataType_T}}(undef, nα)
 
     # FUSED OPTIMIZATION: Build Tmatrix directly instead of Tx_matrix + Ty_matrix
     for iα in 1:nα
         # Compute channel-specific kinetic energy matrices
         Tx_alpha = Tx(nx, grid.xx, grid.α, α.l[iα])
-        Tx_alpha .*= ħ^2 / m / amu / grid.hsx^2
+        Tx_alpha = Tx_alpha .* ħ^2 / m / amu / grid.hsx^2 .* scaling_factor
         Tx_channels[iα] = copy(Tx_alpha)
 
         Ty_alpha = Tx(ny, grid.yy, grid.α, α.λ[iα])
-        Ty_alpha .*= ħ^2 * 0.75 / m / amu / grid.hsy^2
+        Ty_alpha = Ty_alpha .* ħ^2 * 0.75 / m / amu / grid.hsy^2 .* scaling_factor
         Ty_channels[iα] = copy(Ty_alpha)
 
         # Compute block Kronecker products (only nx*ny × nx*ny, not full size!)
