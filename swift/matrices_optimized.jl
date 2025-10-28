@@ -13,7 +13,7 @@ include("Gcoefficient.jl")
 using .Gcoefficient
 using LinearAlgebra
 using FastGaussQuadrature
-using Interpolations
+using Dierckx
 
 const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
@@ -599,27 +599,31 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, re
     # Get potential values at original mesh points V(r) - real axis only
     v12_real = pot_nucl(α, grid, potname)
 
-    # Choose quadrature strategy based on θ
+    # Choose quadrature strategy
+    # Key principle: At θ=0, ALWAYS use mesh quadrature to match standard method
+    # Only use high-resolution quadrature for θ≠0 (oscillatory basis)
     if abs(θ) < 1e-12
-        # θ=0: Use exact mesh quadrature (no interpolation errors)
+        # θ=0: Must use mesh quadrature to match V_matrix_optimized exactly
+        # This is true even with force_computation=true (for validation)
         r_gauss = grid.xi
         w_gauss = grid.dxi
         use_mesh_points = true
-        println("  θ=0: Using exact mesh quadrature ($(grid.nx) points, no interpolation)")
+        n_quad = grid.nx
+        println("  θ=0: Using mesh quadrature ($(grid.nx) points, exact match with V_matrix_optimized)")
     else
-        # θ≠0: Need high-resolution quadrature for oscillatory basis
-        # Generate Gauss-Laguerre quadrature in UNSCALED coordinates
+        # θ≠0: Use high-resolution quadrature for oscillatory φᵢ(r e^(-iθ))
+        # Typically need n_gauss > nx (e.g., 2-3× larger)
         r_gauss_unscaled, w_gauss_unscaled = gausslaguerre(n_gauss, grid.α)
 
         # Transform to PHYSICAL coordinates with mesh scaling
         r_gauss = r_gauss_unscaled .* grid.hsx
         w_gauss = w_gauss_unscaled .* grid.hsx
+        n_quad = n_gauss
         use_mesh_points = false
-        println("  Quadrature: n_gauss=$(n_gauss) points (mesh has nx=$(grid.nx) points)")
-        println("  High resolution needed for oscillatory complex-scaled basis")
-    end
 
-    n_quad = length(r_gauss)
+        println("  θ=$(θ_deg)°: High-resolution quadrature (n_gauss=$(n_gauss) > mesh nx=$(grid.nx))")
+        println("  Cubic spline interpolation for V(r) between mesh points")
+    end
 
     # Pre-compute overlap matrix Ny once
     Ny = compute_overlap_matrix(grid.ny, grid.yy)
@@ -774,15 +778,12 @@ function create_potential_interpolator(V_matrix::Matrix{Float64}, xi::Vector{Flo
     # Extract diagonal values: V(xi[i])
     V_values = [V_matrix[i, i] for i in 1:length(xi)]
 
-    # Create cubic spline interpolator with natural boundary conditions
-    # BSpline(Cubic(Line(OnGrid()))) gives C² continuous cubic spline
-    itp = interpolate(V_values, BSpline(Cubic(Line(OnGrid()))))
+    # Create cubic spline interpolator using Dierckx
+    # Spline1D creates natural cubic spline for non-uniform grids
+    # k=3 is cubic, s=0 means exact interpolation (no smoothing)
+    spl = Spline1D(xi, V_values, k=3, s=0.0)
 
-    # Scale to physical coordinates
-    sitp = scale(itp, xi)
-
-    # Extrapolate with constant values at boundaries (Flat extrapolation)
-    return extrapolate(sitp, Flat())
+    return spl
 end
 
 """
