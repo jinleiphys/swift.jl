@@ -576,10 +576,15 @@ For the Laguerre-regularized basis used in this code, we evaluate:
 
 This requires complex-argument evaluation of the Laguerre basis functions.
 """
-function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, return_components=false, force_computation=false)
-    # For θ=0, fall back to standard implementation (no complex scaling) unless force_computation=true
-    if θ_deg == 0.0 && !force_computation
+function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothing, return_components=false)
+    # For θ=0, fall back to standard implementation (no complex scaling, faster and exact)
+    if θ_deg == 0.0
         return V_matrix_optimized(α, grid, potname, return_components=return_components)
+    end
+
+    # Default: use 2x mesh points for accurate quadrature
+    if n_gauss === nothing
+        n_gauss = 2 * grid.nx
     end
 
     # Convert angle from degrees to radians
@@ -599,30 +604,22 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, re
     # Get potential values at original mesh points V(r) - real axis only
     v12_real = pot_nucl(α, grid, potname)
 
-    # Choose quadrature strategy
-    # Key principle: At θ=0, ALWAYS use mesh quadrature to match standard method
-    # Only use high-resolution quadrature for θ≠0 (oscillatory basis)
-    if abs(θ) < 1e-12
-        # θ=0: Must use mesh quadrature to match V_matrix_optimized exactly
-        # This is true even with force_computation=true (for validation)
-        r_gauss = grid.xi
-        w_gauss = grid.dxi
-        use_mesh_points = true
-        n_quad = grid.nx
-        println("  θ=0: Using mesh quadrature ($(grid.nx) points, exact match with V_matrix_optimized)")
+    # Use Gauss-Laguerre quadrature for integration
+    # Different quadrature gives different matrix representation but same physics!
+    xi_unscaled, dxi_unscaled = gausslaguerre(n_gauss, grid.α)
+    r_gauss = xi_unscaled .* grid.hsx
+
+    # Remove Laguerre weight to get plain dr integration
+    w_gauss = dxi_unscaled .* grid.hsx ./ (xi_unscaled.^grid.α .* exp.(-xi_unscaled))
+    n_quad = n_gauss
+
+    use_mesh_points = (n_quad == grid.nx) && all(abs.(r_gauss .- grid.xi) .< 1e-10)
+
+    if use_mesh_points
+        println("  Quadrature matches mesh: n_gauss=$(n_gauss) = nx=$(grid.nx)")
     else
-        # θ≠0: Use high-resolution quadrature for oscillatory φᵢ(r e^(-iθ))
-        # Typically need n_gauss > nx (e.g., 2-3× larger)
-        r_gauss_unscaled, w_gauss_unscaled = gausslaguerre(n_gauss, grid.α)
-
-        # Transform to PHYSICAL coordinates with mesh scaling
-        r_gauss = r_gauss_unscaled .* grid.hsx
-        w_gauss = w_gauss_unscaled .* grid.hsx
-        n_quad = n_gauss
-        use_mesh_points = false
-
-        println("  θ=$(θ_deg)°: High-resolution quadrature (n_gauss=$(n_gauss) > mesh nx=$(grid.nx))")
-        println("  Cubic spline interpolation for V(r) between mesh points")
+        println("  Gauss quadrature: n_gauss=$(n_gauss) points (mesh has nx=$(grid.nx))")
+        println("  Using linear interpolation + exponential extrapolation for V(r)")
     end
 
     # Pre-compute overlap matrix Ny once
@@ -707,8 +704,9 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, re
                             w_k = w_gauss[k]
 
                             # Use existing laguerre.jl function with complex rotation
-                            # lagrange_laguerre_regularized_basis handles r → r e^(-iθ) internally
-                            phi_all = lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, -θ)
+                            # lagrange_laguerre_regularized_basis evaluates φᵢ(r e^(-iθ)) when passed θ
+                            # (internally: r_rotated = x / exp(iθ) = x exp(-iθ))
+                            phi_all = lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, θ)
 
                             phi_i = phi_all[ix_i]
                             phi_j = phi_all[ix_j]
@@ -778,12 +776,39 @@ function create_potential_interpolator(V_matrix::Matrix{Float64}, xi::Vector{Flo
     # Extract diagonal values: V(xi[i])
     V_values = [V_matrix[i, i] for i in 1:length(xi)]
 
-    # Create cubic spline interpolator using Dierckx
-    # Spline1D creates natural cubic spline for non-uniform grids
-    # k=3 is cubic, s=0 means exact interpolation (no smoothing)
-    spl = Spline1D(xi, V_values, k=3, s=0.0)
+    # Fit exponential decay to last few points: V(r) ≈ A*exp(-B*r)
+    # This is physically correct for nuclear potentials
+    n = length(xi)
+    n_fit = min(5, n)
+    r_fit = xi[end-n_fit+1:end]
+    V_fit = V_values[end-n_fit+1:end]
 
-    return spl
+    # Fit log(|V|) vs r
+    log_V_fit = log.(abs.(V_fit))
+    B_decay = -(log_V_fit[end] - log_V_fit[1]) / (r_fit[end] - r_fit[1])
+    A_decay = V_fit[end] * exp(B_decay * r_fit[end])
+
+    # Interpolation/extrapolation function
+    function interpolator(r::Float64)
+        if r <= xi[1]
+            # Linear extrapolation below mesh (short range, linear is ok)
+            slope = (V_values[2] - V_values[1]) / (xi[2] - xi[1])
+            return V_values[1] + slope * (r - xi[1])
+        elseif r >= xi[n]
+            # Exponential extrapolation above mesh (long range tail)
+            return A_decay * exp(-B_decay * r)
+        else
+            # Linear interpolation within mesh
+            i = 1
+            while i < n && xi[i+1] < r
+                i += 1
+            end
+            t = (r - xi[i]) / (xi[i+1] - xi[i])
+            return V_values[i] * (1 - t) + V_values[i+1] * t
+        end
+    end
+
+    return interpolator
 end
 
 """

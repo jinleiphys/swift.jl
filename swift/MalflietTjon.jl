@@ -97,10 +97,11 @@ This caches the expensive matrix operations that don't depend on energy E:
 
 # Fields
 - `RHS_matrix`: Precomputed RHS = (V - V_αα) + V*R (or + UIX if included)
+                Can be real (Float64) or complex (Complex{Float64}) for complex scaling
 - `n_total`: Total dimension (nα × nx × ny)
 """
 struct RHSCache
-    RHS_matrix::Matrix{Float64}
+    RHS_matrix::Union{Matrix{Float64}, Matrix{ComplexF64}}
     n_total::Int
 end
 
@@ -1738,11 +1739,24 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
                                      tolerance::Float64=1e-6, max_iterations::Int=100,
                                      verbose::Bool=true, use_arnoldi::Bool=true,
                                      krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
-                                     include_uix::Bool=true)
+                                     include_uix::Bool=true,
+                                     θ_deg::Float64=0.0, n_gauss=nothing)
 
     # Timing dictionary to track performance
     timings = Dict{String, Float64}()
     total_time_start = time()
+
+    # ERROR: UIX three-body force cannot be used with complex scaling
+    if θ_deg != 0.0 && include_uix
+        error("""
+        Complex scaling (θ=$(θ_deg)°) with UIX three-body force is not supported!
+
+        There is no general representation for three-body forces under complex scaling.
+        This requires special treatment which is currently not implemented.
+
+        Please set include_uix=false to proceed with two-body potential only.
+        """)
+    end
 
     if verbose
         println("\n" * "="^70)
@@ -1781,14 +1795,15 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
 
         print("    - T matrix: ")
         t_start = time()
-        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
+        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true, θ_deg=θ_deg)
         t_time = time() - t_start
         timings["T_matrix"] = t_time
         @printf("%.3f s\n", t_time)
 
         print("    - V matrix: ")
         v_start = time()
-        V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
+        # V_matrix_optimized_scaled automatically uses V_matrix_optimized when θ=0
+        V, V_x_diag_ch = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss, return_components=true)
         v_time = time() - v_start
         timings["V_matrix"] = v_time
         @printf("%.3f s\n", v_time)
@@ -1832,8 +1847,11 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         println()
     else
         # Use optimized matrix functions for T, V, and Rxy
-        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
-        V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
+        T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true, θ_deg=θ_deg)
+
+        # V_matrix_optimized_scaled automatically uses V_matrix_optimized when θ=0
+        V, V_x_diag_ch = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss, return_components=true)
+
         B = Bmatrix(α, grid)
         Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
 

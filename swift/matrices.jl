@@ -515,11 +515,11 @@ depend on energy E, so they only need to be computed once.
 - `nx`: Number of x grid points
 - `ny`: Number of y grid points
 """
-struct MInverseCache
-    U_blocks::Vector{Matrix{Float64}}
-    U_inv_N_inv_blocks::Vector{Matrix{Float64}}
-    dx_arrays::Vector{Vector{Float64}}
-    dy_arrays::Vector{Vector{Float64}}
+struct MInverseCache{T<:Union{Float64,ComplexF64}}
+    U_blocks::Vector{Matrix{T}}
+    U_inv_N_inv_blocks::Vector{Matrix{T}}
+    dx_arrays::Vector{Vector{T}}
+    dy_arrays::Vector{Vector{T}}
     nα::Int
     nx::Int
     ny::Int
@@ -572,32 +572,35 @@ function precompute_M_inverse_cache(α, grid, Tx_channels, Ty_channels, V_x_diag
     nx = grid.nx
     ny = grid.ny
 
+    # Detect data type from input matrices (Float64 or ComplexF64 for complex scaling)
+    DataType_T = eltype(Tx_channels[1])
+
     # Compute inverses of overlap matrices (energy-independent)
     Nx_inv = inv(Nx)
     Ny_inv = inv(Ny)
     N_inv_block = kron(Nx_inv, Ny_inv)
 
-    # Storage for eigendecomposition results
-    Ux_arrays = Vector{Matrix{Float64}}(undef, nα)
-    Uy_arrays = Vector{Matrix{Float64}}(undef, nα)
-    Ux_inv_arrays = Vector{Matrix{Float64}}(undef, nα)
-    Uy_inv_arrays = Vector{Matrix{Float64}}(undef, nα)
-    dx_arrays = Vector{Vector{Float64}}(undef, nα)
-    dy_arrays = Vector{Vector{Float64}}(undef, nα)
+    # Storage for eigendecomposition results (with correct type)
+    Ux_arrays = Vector{Matrix{DataType_T}}(undef, nα)
+    Uy_arrays = Vector{Matrix{DataType_T}}(undef, nα)
+    Ux_inv_arrays = Vector{Matrix{DataType_T}}(undef, nα)
+    Uy_inv_arrays = Vector{Matrix{DataType_T}}(undef, nα)
+    dx_arrays = Vector{Vector{DataType_T}}(undef, nα)
+    dy_arrays = Vector{Vector{DataType_T}}(undef, nα)
 
     # Compute eigendecompositions for each channel (energy-independent!)
     for iα in 1:nα
         # X-direction: eigendecomposition of N_x^{-1} * (T_x + V_x)
         Hx_alpha = Tx_channels[iα] + V_x_diag_channels[iα]
         eigen_x = eigen(Nx_inv * Hx_alpha)
-        Ux_arrays[iα] = real(eigen_x.vectors)
-        dx_arrays[iα] = real(eigen_x.values)
+        Ux_arrays[iα] = eigen_x.vectors
+        dx_arrays[iα] = eigen_x.values
         Ux_inv_arrays[iα] = inv(Ux_arrays[iα])
 
         # Y-direction: eigendecomposition of N_y^{-1} * T_y
         eigen_y = eigen(Ny_inv * Ty_channels[iα])
-        Uy_arrays[iα] = real(eigen_y.vectors)
-        dy_arrays[iα] = real(eigen_y.values)
+        Uy_arrays[iα] = eigen_y.vectors
+        dy_arrays[iα] = eigen_y.values
         Uy_inv_arrays[iα] = inv(Uy_arrays[iα])
     end
 
@@ -634,11 +637,12 @@ M_inv_op = M_inverse_operator_cached(-7.5, cache)
 result = M_inv_op(some_vector)
 ```
 """
-function M_inverse_operator_cached(E::Float64, cache::MInverseCache)
+function M_inverse_operator_cached(E::Float64, cache::MInverseCache{T}) where T
     # Only recompute energy-dependent diagonal inverse elements
-    D_inv_blocks = Vector{Vector{Float64}}(undef, cache.nα)
+    # Type T comes from cache (Float64 or ComplexF64)
+    D_inv_blocks = Vector{Vector{T}}(undef, cache.nα)
     for iα in 1:cache.nα
-        D_inv_blocks[iα] = zeros(cache.nx * cache.ny)
+        D_inv_blocks[iα] = zeros(T, cache.nx * cache.ny)
         for ix in 1:cache.nx, iy in 1:cache.ny
             idx = (ix-1) * cache.ny + iy
             D_inv_blocks[iα][idx] = 1.0 / (E - cache.dx_arrays[iα][ix] - cache.dy_arrays[iα][iy])
