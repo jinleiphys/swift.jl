@@ -582,9 +582,10 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
         return V_matrix_optimized(α, grid, potname, return_components=return_components)
     end
 
-    # Default: use 2x mesh points for accurate quadrature
+    # Default: use 5x mesh points for convergence with complex rotation
+    # Complex-rotated basis functions are oscillatory and need denser quadrature
     if n_gauss === nothing
-        n_gauss = 2 * grid.nx
+        n_gauss = 5 * grid.nx  # Verified: gives < 0.01% error (see test_V_matrix_elements.jl)
     end
 
     # Convert angle from degrees to radians
@@ -601,26 +602,16 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
     println("  Gauss quadrature points: $(n_gauss)")
     println("  Rotation factor: e^(-iθ) = $(round(rotation_factor, digits=4))")
 
-    # Get potential values at original mesh points V(r) - real axis only
-    v12_real = pot_nucl(α, grid, potname)
-
-    # Use Gauss-Laguerre quadrature for integration
-    # Different quadrature gives different matrix representation but same physics!
+    # Use Gauss-Laguerre quadrature with DIFFERENT points than mesh
     xi_unscaled, dxi_unscaled = gausslaguerre(n_gauss, grid.α)
-    r_gauss = xi_unscaled .* grid.hsx
+    r_quad = xi_unscaled .* grid.hsx
 
     # Remove Laguerre weight to get plain dr integration
-    w_gauss = dxi_unscaled .* grid.hsx ./ (xi_unscaled.^grid.α .* exp.(-xi_unscaled))
+    w_quad = dxi_unscaled .* grid.hsx ./ (xi_unscaled.^grid.α .* exp.(-xi_unscaled))
     n_quad = n_gauss
 
-    use_mesh_points = (n_quad == grid.nx) && all(abs.(r_gauss .- grid.xi) .< 1e-10)
-
-    if use_mesh_points
-        println("  Quadrature matches mesh: n_gauss=$(n_gauss) = nx=$(grid.nx)")
-    else
-        println("  Gauss quadrature: n_gauss=$(n_gauss) points (mesh has nx=$(grid.nx))")
-        println("  Using linear interpolation + exponential extrapolation for V(r)")
-    end
+    println("  Gauss quadrature: n_gauss=$(n_gauss) points (different from mesh)")
+    println("  Evaluating V(r) DIRECTLY at each quadrature point (not interpolation)")
 
     # Pre-compute overlap matrix Ny once
     Ny = compute_overlap_matrix(grid.ny, grid.yy)
@@ -679,16 +670,36 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
                     continue
                 end
 
-                # Get the potential component for this isospin
-                if mt12 == 0
-                    V_component = v12_real[:, :, α.α2bindex[i], α.α2bindex[j], 1]
-                else
-                    V_component = v12_real[:, :, α.α2bindex[i], α.α2bindex[j], 2]
-                end
+                # Get two-body channel quantum numbers
+                i_2b = α.α2bindex[i]
+                j_2b = α.α2bindex[j]
 
-                # Pre-compute cubic spline interpolator for this channel pair (if needed)
-                if !use_mesh_points
-                    V_interp = create_potential_interpolator(V_component, grid.xi)
+                # Determine isospin projection for potential call
+                mt_pot = (mt12 == 0) ? 0 : (α.MT > 0 ? 1 : -1)
+
+                # Determine l values and matrix element indices
+                J12_val = Int(α.α2b.J12[i_2b])
+                li = α.α2b.l[i_2b]
+                lj = α.α2b.l[j_2b]
+
+                # For coupled channels, pass both l values; for uncoupled, pass single l
+                if J12_val != 0 && J12_val != li  # Coupled channel
+                    l_array = [J12_val-1, J12_val+1]
+                    # Determine which matrix element to extract
+                    if li == (J12_val-1) && lj == (J12_val-1)
+                        v_idx_i, v_idx_j = 1, 1
+                    elseif li == (J12_val+1) && lj == (J12_val+1)
+                        v_idx_i, v_idx_j = 2, 2
+                    elseif li == (J12_val-1) && lj == (J12_val+1)
+                        v_idx_i, v_idx_j = 1, 2
+                    elseif li == (J12_val+1) && lj == (J12_val-1)
+                        v_idx_i, v_idx_j = 2, 1
+                    else
+                        error("Invalid coupled channel combination")
+                    end
+                else  # Uncoupled channel
+                    l_array = [li]
+                    v_idx_i, v_idx_j = 1, 1
                 end
 
                 # Compute matrix elements using backward rotation and Gauss quadrature
@@ -700,24 +711,28 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
                         integral = 0.0 + 0.0im
 
                         for k in 1:n_quad
-                            r_k = r_gauss[k]
-                            w_k = w_gauss[k]
+                            r_k = r_quad[k]
+                            w_k = w_quad[k]
 
-                            # Use existing laguerre.jl function with complex rotation
+                            # Evaluate basis functions at rotated coordinate
                             # lagrange_laguerre_regularized_basis evaluates φᵢ(r e^(-iθ)) when passed θ
-                            # (internally: r_rotated = x / exp(iθ) = x exp(-iθ))
                             phi_all = lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, θ)
 
                             phi_i = phi_all[ix_i]
                             phi_j = phi_all[ix_j]
 
-                            # Get potential V(r) at quadrature point
-                            if use_mesh_points
-                                # θ=0: Use exact values (no interpolation)
-                                V_r = V_component[k, k]
-                            else
-                                # θ≠0: Cubic spline interpolation from mesh points
-                                V_r = V_interp(r_k)
+                            # Get BARE potential V(r) at quadrature point r_k
+                            # Call potential_matrix directly with proper l array
+                            v_matrix = potential_matrix(potname, r_k, l_array,
+                                                       Int(α.α2b.s12[i_2b]),
+                                                       J12_val,
+                                                       Int(α.α2b.T12[i_2b]),
+                                                       mt_pot)
+                            V_r = v_matrix[v_idx_i, v_idx_j]  # Extract correct matrix element
+
+                            # Add Coulomb for proton-proton if needed (only for diagonal in l)
+                            if mt12 != 0 && α.MT > 0 && v_idx_i == v_idx_j
+                                V_r += VCOUL_point(r_k, 1.0)
                             end
 
                             # Accumulate integral: φᵢ*(r e^(-iθ)) V(r) φⱼ(r e^(-iθ))

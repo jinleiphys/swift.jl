@@ -80,7 +80,7 @@ time_optimized = @elapsed begin
                                tolerance=1e-6,
                                max_iterations=30,
                                verbose=true,
-                               include_uix=false)  # Disable UIX for fair comparison
+                               include_uix=false)  # θ_deg=0.0 by default (standard calculation)
 end
 print_convergence_summary(result_opt)
 
