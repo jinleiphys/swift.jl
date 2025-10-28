@@ -12,12 +12,13 @@ using .Laguerre
 include("Gcoefficient.jl")
 using .Gcoefficient
 using LinearAlgebra
+using FastGaussQuadrature
 
 const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
 const ħ = 197.3269718 # MeV. fm
 
-export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, Rxy_matrix_with_caching
+export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, test_V_scaled_at_zero, Rxy_matrix_with_caching
 
 # Coulomb potential function (matches matrices.jl implementation)
 function VCOUL_point(R, z12)
@@ -502,6 +503,384 @@ function V_matrix_optimized(α, grid, potname; return_components=false)
     else
         return Vmatrix
     end
+end
+
+
+"""
+    V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, return_components=false)
+
+COMPLEX SCALED VERSION of V_matrix using backward rotation of basis functions.
+
+## Theory: Backward Rotation Method
+
+When the potential V(r) is only available at discrete mesh points (e.g., from folding procedures),
+direct rotation of the potential function is not possible. Instead, we apply **backward rotation**
+to the basis functions and use Cauchy's theorem:
+
+    V_ij(θ) = e^(-iθ) ∫₀^∞ φᵢ(r e^(-iθ)) V(r) φⱼ(r e^(-iθ)) dr
+
+where:
+- V(r) is evaluated at real mesh points only (no complex arguments needed)
+- φᵢ(r e^(-iθ)) are basis functions evaluated at complex-rotated coordinates
+- e^(-iθ) is an overall scaling factor from the Jacobian
+
+## Implementation Strategy:
+
+1. **Potential evaluation**: Use existing pot_nucl() to get V(r) at mesh points
+2. **Basis rotation**: Evaluate Laguerre basis at complex arguments r → r e^(-iθ)
+3. **Gauss quadrature**: Use finer mesh (n_gauss points) for accurate integration
+4. **Oscillatory integrands**: After rotation, basis functions oscillate more strongly
+
+## Parameters:
+- `α`: Channel structure
+- `grid`: Mesh structure
+- `potname`: Nuclear potential name (e.g., "AV18")
+- `θ_deg`: Complex scaling angle in degrees (default=0.0 for no scaling)
+- `n_gauss`: Number of Gauss quadrature points (default=40, increase for larger θ)
+- `return_components`: If true, return (Vmatrix, V_x_diag_channels)
+- `force_computation`: If true, compute even at θ=0 (for validation tests, default=false)
+
+## Performance Notes:
+- For θ=0: Falls back to standard V_matrix_optimized (no extra cost)
+- For θ≠0: Requires Gauss quadrature integration (slower but more accurate)
+- Larger θ requires larger n_gauss due to oscillatory integrands
+- Recommended: n_gauss ≥ 2×nx for θ up to 20°
+
+## Usage:
+```julia
+# Standard potential (no scaling) - automatically uses V_matrix_optimized
+V = V_matrix_optimized_scaled(α, grid, "AV18")
+
+# With complex scaling at 10 degrees
+V = V_matrix_optimized_scaled(α, grid, "AV18", θ_deg=10.0)
+
+# With higher quadrature accuracy for large angle
+V = V_matrix_optimized_scaled(α, grid, "AV18", θ_deg=20.0, n_gauss=60)
+
+# Validation test: compare backward rotation at θ=0 with standard method
+passed, abs_err, rel_err = test_V_scaled_at_zero(α, grid, "AV18", n_gauss=50)
+```
+
+## Mathematical Details:
+
+The integral is computed using Gauss-Laguerre quadrature:
+
+    V_ij(θ) = e^(-iθ) Σₖ wₖ φᵢ(rₖ e^(-iθ)) V(rₖ) φⱼ(rₖ e^(-iθ))
+
+where (rₖ, wₖ) are Gauss-Laguerre quadrature points and weights.
+
+For the Laguerre-regularized basis used in this code, we evaluate:
+
+    φᵢ(r e^(-iθ)) = basis_function(r e^(-iθ); mesh_point_i, regularization_params)
+
+This requires complex-argument evaluation of the Laguerre basis functions.
+"""
+function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, return_components=false, force_computation=false)
+    # For θ=0, fall back to standard implementation (no complex scaling) unless force_computation=true
+    if θ_deg == 0.0 && !force_computation
+        return V_matrix_optimized(α, grid, potname, return_components=return_components)
+    end
+
+    # Convert angle from degrees to radians
+    θ = θ_deg * π / 180.0
+
+    # Overall scaling factor from Jacobian: e^(-iθ)
+    jacobian_factor = exp(-im * θ)
+
+    # Rotation factor for coordinate: r → r e^(-iθ)
+    rotation_factor = exp(-im * θ)
+
+    println("Computing complex-scaled potential with backward rotation:")
+    println("  θ = $(θ_deg)° = $(round(θ, digits=4)) rad")
+    println("  Gauss quadrature points: $(n_gauss)")
+    println("  Rotation factor: e^(-iθ) = $(round(rotation_factor, digits=4))")
+
+    # Get potential values at original mesh points V(r) - real axis only
+    v12_real = pot_nucl(α, grid, potname)
+
+    # Choose quadrature strategy based on θ
+    if abs(θ) < 1e-12
+        # θ=0: Use exact mesh quadrature (no interpolation errors)
+        r_gauss = grid.xi
+        w_gauss = grid.dxi
+        use_mesh_points = true
+        println("  θ=0: Using exact mesh quadrature ($(grid.nx) points, no interpolation)")
+    else
+        # θ≠0: Need high-resolution quadrature for oscillatory basis
+        # Generate Gauss-Laguerre quadrature in UNSCALED coordinates
+        r_gauss_unscaled, w_gauss_unscaled = gausslaguerre(n_gauss, grid.α)
+
+        # Transform to PHYSICAL coordinates with mesh scaling
+        r_gauss = r_gauss_unscaled .* grid.hsx
+        w_gauss = w_gauss_unscaled .* grid.hsx
+        use_mesh_points = false
+        println("  Quadrature: n_gauss=$(n_gauss) points (mesh has nx=$(grid.nx) points)")
+        println("  High resolution needed for oscillatory complex-scaled basis")
+    end
+
+    n_quad = length(r_gauss)
+
+    # Pre-compute overlap matrix Ny once
+    Ny = compute_overlap_matrix(grid.ny, grid.yy)
+
+    # Pre-allocate full matrix with complex type
+    total_size = α.nchmax * grid.nx * grid.ny
+    Vmatrix = zeros(Complex{Float64}, total_size, total_size)
+
+    # Storage for diagonal potential channels (if requested)
+    V_x_diag_channels = Vector{Matrix{Complex{Float64}}}(undef, α.nchmax)
+    for iα in 1:α.nchmax
+        V_x_diag_channels[iα] = zeros(Complex{Float64}, grid.nx, grid.nx)
+    end
+
+    println("Computing matrix elements with backward-rotated basis functions...")
+
+    # Main loop over channel pairs (same structure as V_matrix_optimized)
+    for j in 1:α.nchmax  # α₃'
+        for i in 1:α.nchmax  # α₃
+            # Check if this channel pair couples (same selection rules)
+            if α.T12[i] != α.T12[j]
+                continue
+            end
+            if α.λ[i] != α.λ[j]
+                continue
+            end
+            if α.J3[i] != α.J3[j]
+                continue
+            end
+            if α.s12[i] != α.s12[j]
+                continue
+            end
+            if α.J12[i] != α.J12[j]
+                continue
+            end
+
+            # Build potential matrix V_x_ij for this channel pair using backward rotation
+            V_x_ij = zeros(Complex{Float64}, grid.nx, grid.nx)
+
+            T12 = α.T12[i]
+            nmt12_max = Int(2 * T12)
+
+            for nmt12 in -nmt12_max:2:nmt12_max
+                mt12 = nmt12 / 2.0
+                mt3 = α.MT - mt12
+
+                if abs(mt3) > α.t3
+                    continue
+                end
+
+                cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T[i], α.MT)
+                cg2 = clebschgordan(T12, mt12, α.t3, mt3, α.T[j], α.MT)
+                cg_coefficient = cg1 * cg2
+
+                if abs(cg_coefficient) < 1e-10
+                    continue
+                end
+
+                # Get the potential component for this isospin
+                if mt12 == 0
+                    V_component = v12_real[:, :, α.α2bindex[i], α.α2bindex[j], 1]
+                else
+                    V_component = v12_real[:, :, α.α2bindex[i], α.α2bindex[j], 2]
+                end
+
+                # Compute matrix elements using backward rotation and Gauss quadrature
+                # V_ij(θ) = e^(-iθ) ∫₀^∞ φᵢ(r e^(-iθ)) V(r) φⱼ(r e^(-iθ)) dr
+
+                for ix_i in 1:grid.nx
+                    for ix_j in 1:grid.nx
+                        # Gauss quadrature integration
+                        integral = 0.0 + 0.0im
+
+                        for k in 1:n_quad
+                            r_k = r_gauss[k]
+                            w_k = w_gauss[k]
+
+                            # Use existing laguerre.jl function with complex rotation
+                            # lagrange_laguerre_regularized_basis handles r → r e^(-iθ) internally
+                            phi_all = lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, -θ)
+
+                            phi_i = phi_all[ix_i]
+                            phi_j = phi_all[ix_j]
+
+                            # Get potential V(r) at quadrature point
+                            if use_mesh_points
+                                # θ=0: Use exact values (no interpolation)
+                                V_r = V_component[k, k]
+                            else
+                                # θ≠0: Interpolate V from mesh points
+                                V_r = interpolate_potential(r_k, V_component, grid.xi)
+                            end
+
+                            # Accumulate integral: φᵢ*(r e^(-iθ)) V(r) φⱼ(r e^(-iθ))
+                            integral += w_k * conj(phi_i) * V_r * phi_j
+                        end
+
+                        # Apply Jacobian factor and CG coefficient
+                        V_x_ij[ix_i, ix_j] += jacobian_factor * integral * cg_coefficient
+                    end
+                end
+            end
+
+            # Store diagonal elements for M_inverse
+            if i == j
+                V_x_diag_channels[i] = copy(V_x_ij)
+            end
+
+            # Compute block Kronecker product
+            V_block = kron(V_x_ij, Ny)
+
+            # Direct assignment to (i,j) block
+            idx_i_start = (i-1) * grid.nx * grid.ny + 1
+            idx_i_end = i * grid.nx * grid.ny
+            idx_j_start = (j-1) * grid.nx * grid.ny + 1
+            idx_j_end = j * grid.nx * grid.ny
+
+            Vmatrix[idx_i_start:idx_i_end, idx_j_start:idx_j_end] = V_block
+        end
+    end
+
+    println("Complex-scaled potential matrix computed successfully.")
+
+    if return_components
+        return Vmatrix, V_x_diag_channels
+    else
+        return Vmatrix
+    end
+end
+
+"""
+    interpolate_potential(r, V_matrix, xi)
+
+Interpolate potential V(r) at point r from diagonal matrix elements.
+
+The potential is diagonal in coordinate space: V_matrix[ir, ir] = V(xi[ir]).
+This function performs interpolation to evaluate V(r) at arbitrary r.
+
+Uses linear interpolation for simplicity and numerical stability.
+
+Parameters:
+- r: Evaluation point
+- V_matrix: Diagonal potential matrix V[ir, ir] = V(xi[ir])
+- xi: Mesh points
+
+Returns:
+- V(r): Interpolated potential value
+"""
+function interpolate_potential(r::Float64, V_matrix::Matrix{Float64}, xi::Vector{Float64})
+    nx = length(xi)
+
+    # Boundary conditions
+    if r <= xi[1]
+        return V_matrix[1, 1]
+    end
+    if r >= xi[end]
+        return V_matrix[end, end]
+    end
+
+    # Find bracketing indices
+    for ir in 1:(nx-1)
+        if xi[ir] <= r <= xi[ir+1]
+            # Linear interpolation
+            t = (r - xi[ir]) / (xi[ir+1] - xi[ir])
+            return (1 - t) * V_matrix[ir, ir] + t * V_matrix[ir+1, ir+1]
+        end
+    end
+
+    # Should never reach here
+    return V_matrix[end, end]
+end
+
+
+"""
+    test_V_scaled_at_zero(α, grid, potname; n_gauss=40, tolerance=1e-10)
+
+Validation test to verify V_matrix_optimized_scaled implementation.
+
+This function compares the backward rotation method at θ=0 with the standard
+V_matrix_optimized result. At θ=0, both methods should give identical results.
+
+## Test Procedure:
+1. Compute V using standard method: V_standard = V_matrix_optimized(α, grid, potname)
+2. Compute V using backward rotation at θ=0 with force_computation=true
+3. Compare matrices element-by-element
+4. Report maximum absolute difference and relative error
+
+## Parameters:
+- `α`: Channel structure
+- `grid`: Mesh structure
+- `potname`: Nuclear potential name (e.g., "AV18")
+- `n_gauss`: Number of Gauss quadrature points (default=40)
+- `tolerance`: Acceptable error threshold (default=1e-10)
+
+## Returns:
+- `test_passed`: Boolean indicating if test passed
+- `max_abs_error`: Maximum absolute difference between matrices
+- `max_rel_error`: Maximum relative error
+
+## Usage:
+```julia
+passed, abs_err, rel_err = test_V_scaled_at_zero(α, grid, "AV18")
+if passed
+    println("✓ Validation test PASSED")
+else
+    println("✗ Validation test FAILED")
+end
+```
+"""
+function test_V_scaled_at_zero(α, grid, potname; n_gauss=40, tolerance=1e-10)
+    println("\n" * "="^70)
+    println("VALIDATION TEST: V_matrix_optimized_scaled at θ=0")
+    println("="^70)
+
+    # Compute using standard method
+    println("\n1. Computing V using standard method (V_matrix_optimized)...")
+    @time V_standard = V_matrix_optimized(α, grid, potname)
+
+    # Compute using backward rotation method at θ=0 (force computation)
+    println("\n2. Computing V using backward rotation at θ=0 (force_computation=true)...")
+    @time V_scaled = V_matrix_optimized_scaled(α, grid, potname, θ_deg=0.0, n_gauss=n_gauss,
+                                                return_components=false, force_computation=true)
+
+    # Compare matrices
+    println("\n3. Comparing matrices...")
+
+    # Compute differences
+    diff_matrix = V_standard - V_scaled
+    max_abs_error = maximum(abs.(diff_matrix))
+
+    # Compute relative error (avoid division by zero)
+    V_standard_nonzero = V_standard[abs.(V_standard) .> 1e-15]
+    if length(V_standard_nonzero) > 0
+        rel_errors = abs.(diff_matrix[abs.(V_standard) .> 1e-15] ./ V_standard_nonzero)
+        max_rel_error = maximum(rel_errors)
+    else
+        max_rel_error = 0.0
+    end
+
+    # Check if test passed
+    test_passed = max_abs_error < tolerance
+
+    # Print results
+    println("\n" * "="^70)
+    println("TEST RESULTS")
+    println("="^70)
+    println("Matrix size:           $(size(V_standard, 1)) × $(size(V_standard, 2))")
+    println("Gauss quadrature:      $(n_gauss) points")
+    println("Maximum absolute error: $(max_abs_error)")
+    println("Maximum relative error: $(max_rel_error)")
+    println("Tolerance:             $(tolerance)")
+    println("-"^70)
+
+    if test_passed
+        println("✓ TEST PASSED: Backward rotation matches standard method at θ=0")
+    else
+        println("✗ TEST FAILED: Errors exceed tolerance")
+        println("  Consider increasing n_gauss or checking implementation")
+    end
+    println("="^70 * "\n")
+
+    return test_passed, max_abs_error, max_rel_error
 end
 
 
