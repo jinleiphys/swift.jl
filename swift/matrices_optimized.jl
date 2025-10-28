@@ -13,6 +13,7 @@ include("Gcoefficient.jl")
 using .Gcoefficient
 using LinearAlgebra
 using FastGaussQuadrature
+using Interpolations
 
 const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
@@ -684,6 +685,11 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, re
                     V_component = v12_real[:, :, α.α2bindex[i], α.α2bindex[j], 2]
                 end
 
+                # Pre-compute cubic spline interpolator for this channel pair (if needed)
+                if !use_mesh_points
+                    V_interp = create_potential_interpolator(V_component, grid.xi)
+                end
+
                 # Compute matrix elements using backward rotation and Gauss quadrature
                 # V_ij(θ) = e^(-iθ) ∫₀^∞ φᵢ(r e^(-iθ)) V(r) φⱼ(r e^(-iθ)) dr
 
@@ -708,8 +714,8 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, re
                                 # θ=0: Use exact values (no interpolation)
                                 V_r = V_component[k, k]
                             else
-                                # θ≠0: Interpolate V from mesh points
-                                V_r = interpolate_potential(r_k, V_component, grid.xi)
+                                # θ≠0: Cubic spline interpolation from mesh points
+                                V_r = V_interp(r_k)
                             end
 
                             # Accumulate integral: φᵢ*(r e^(-iθ)) V(r) φⱼ(r e^(-iθ))
@@ -750,14 +756,43 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, re
 end
 
 """
-    interpolate_potential(r, V_matrix, xi)
+    create_potential_interpolator(V_matrix, xi)
 
-Interpolate potential V(r) at point r from diagonal matrix elements.
+Create a cubic spline interpolator for the potential V(r).
 
 The potential is diagonal in coordinate space: V_matrix[ir, ir] = V(xi[ir]).
-This function performs interpolation to evaluate V(r) at arbitrary r.
+This function creates a cubic spline interpolator for accurate evaluation at arbitrary points.
 
-Uses linear interpolation for simplicity and numerical stability.
+Parameters:
+- V_matrix: Diagonal potential matrix V[ir, ir] = V(xi[ir])
+- xi: Mesh points (must be sorted)
+
+Returns:
+- Interpolator object that can be called as V_interp(r)
+"""
+function create_potential_interpolator(V_matrix::Matrix{Float64}, xi::Vector{Float64})
+    # Extract diagonal values: V(xi[i])
+    V_values = [V_matrix[i, i] for i in 1:length(xi)]
+
+    # Create cubic spline interpolator with natural boundary conditions
+    # BSpline(Cubic(Line(OnGrid()))) gives C² continuous cubic spline
+    itp = interpolate(V_values, BSpline(Cubic(Line(OnGrid()))))
+
+    # Scale to physical coordinates
+    sitp = scale(itp, xi)
+
+    # Extrapolate with constant values at boundaries (Flat extrapolation)
+    return extrapolate(sitp, Flat())
+end
+
+"""
+    interpolate_potential(r, V_matrix, xi)
+
+Interpolate potential V(r) at point r using cubic spline interpolation.
+
+This is a convenience function that creates and evaluates the interpolator.
+For multiple evaluations, it's more efficient to create the interpolator once
+using create_potential_interpolator() and reuse it.
 
 Parameters:
 - r: Evaluation point
@@ -765,30 +800,11 @@ Parameters:
 - xi: Mesh points
 
 Returns:
-- V(r): Interpolated potential value
+- V(r): Interpolated potential value using cubic spline
 """
 function interpolate_potential(r::Float64, V_matrix::Matrix{Float64}, xi::Vector{Float64})
-    nx = length(xi)
-
-    # Boundary conditions
-    if r <= xi[1]
-        return V_matrix[1, 1]
-    end
-    if r >= xi[end]
-        return V_matrix[end, end]
-    end
-
-    # Find bracketing indices
-    for ir in 1:(nx-1)
-        if xi[ir] <= r <= xi[ir+1]
-            # Linear interpolation
-            t = (r - xi[ir]) / (xi[ir+1] - xi[ir])
-            return (1 - t) * V_matrix[ir, ir] + t * V_matrix[ir+1, ir+1]
-        end
-    end
-
-    # Should never reach here
-    return V_matrix[end, end]
+    V_interp = create_potential_interpolator(V_matrix, xi)
+    return V_interp(r)
 end
 
 
