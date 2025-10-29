@@ -1,9 +1,13 @@
-# this module use to compute the two body bound state for testing the NN force 
-module twobodybound 
+# this module use to compute the two body bound state for testing the NN force
+module twobodybound
 using LinearAlgebra
+using FastGaussQuadrature
+using Printf
 include("../NNpot/nuclear_potentials.jl")
 using .NuclearPotentials
 using Kronecker
+include("laguerre.jl")
+using .Laguerre
 
 export bound2b
 
@@ -30,18 +34,23 @@ mutable struct nch2b # channel index for the three body coupling
 end
 
 
-function bound2b(grid, potname)
+function bound2b(grid, potname; θ_deg=0.0, n_gauss=nothing, verbose=false)
     """
-    α.nchmax is the maximum number of α channel index, α0 is the α parameter in Laguerre function 
+    Solve two-body bound state problem with optional complex scaling
+
+    Parameters:
+    - grid: Mesh structure
+    - potname: Nuclear potential name (e.g., "AV18")
+    - θ_deg: Complex scaling angle in degrees (default: 0.0)
+    - n_gauss: Number of Gauss quadrature points (default: 5*grid.nx)
+    - verbose: Print detailed information
     """
     α = channelindex()
-    # Initialize matrices
-    Tαx = T_matrix(α,grid) 
-    V = V_matrix(α,grid,potname) 
-    B = Bmatrix(α,grid)
 
-
-    # V=gaussianpot(α,grid)
+    # Initialize matrices with complex scaling
+    Tαx = T_matrix_scaled(α, grid, θ_deg=θ_deg)
+    V = V_matrix_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss, verbose=verbose)
+    B = Bmatrix(α, grid)
 
     # Construct the Hamiltonian matrix
     H = Tαx + V
@@ -52,24 +61,33 @@ function bound2b(grid, potname)
     # Extract the bound state energies and wave functions
     bound_energies = []
     bound_wavefunctions = []
-    
+
     println("\n" * "="^60)
     println("           TWO-BODY BOUND STATE ANALYSIS")
+    if θ_deg != 0.0
+        println("           Complex Scaling: θ = $(θ_deg)°")
+    end
     println("="^60)
-    
+
+    # Adjust imaginary part tolerance for complex scaling
+    imag_tol = θ_deg == 0.0 ? 1e-6 : 0.1  # More lenient for complex scaling
+
     bound_count = 0
     for i in 1:grid.nx*α.nchmax
-        if eigenvalues[i] < 0.0
+        # For complex scaling, check both real part negative and small imaginary part
+        if real(eigenvalues[i]) < 0.0 && abs(imag(eigenvalues[i])) < imag_tol
             bound_count += 1
             eigenvec = eigenvectors[:, i]
             norm = sum(abs2.(eigenvec))
-            
+
             if norm ≠ 1.0
                 eigenvec = eigenvec / sqrt(norm)
             end
-            
+
             # Compute the wave function with multiple components
-            wavefunction = zeros(grid.nx, α.nchmax)
+            # Use appropriate type based on whether eigenvector is complex
+            WaveType = eltype(eigenvec)
+            wavefunction = zeros(WaveType, grid.nx, α.nchmax)
             for ich in 1:α.nchmax
                 for j in 1:grid.nx
                     idx = (ich-1)*grid.nx + j
@@ -89,7 +107,11 @@ function bound2b(grid, potname)
             
             # Print detailed bound state information
             println("\nBound State #$bound_count:")
-            println("  Binding Energy: $(round(eigenvalues[i], digits=6)) MeV")
+            if θ_deg == 0.0
+                println("  Binding Energy: $(round(real(eigenvalues[i]), digits=6)) MeV")
+            else
+                @printf("  Binding Energy: %.6f + %.6f i MeV\n", real(eigenvalues[i]), imag(eigenvalues[i]))
+            end
             println("  Total J^π = $(Int(α.J12))⁺")
             println("\n  Channel Composition:")
             
@@ -166,20 +188,125 @@ end
  end 
 
 
-function V_matrix(α,grid,potname)
-    l=[α.l[i] for i in 1:α.nchmax]
-    V = zeros(α.nchmax*grid.nx,α.nchmax*grid.nx)  # Initialize V matrix
-    
-    for ir in 1:grid.nx
-        vpot=potential_matrix(potname, grid.xi[ir], l, 1, Int(α.J12), 0, 0) # for np pair
-        # println("r=", grid.xi[ir],"vpot=",vpot)
-        for i in 1:α.nchmax
-            for j in 1:α.nchmax
-                V[(i-1)*grid.nx+ir, (j-1)*grid.nx+ir] = vpot[i,j]
-            end 
-        end 
+function V_matrix_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothing, verbose=false)
+    """
+    Compute potential matrix with complex scaling using backward rotation
+
+    For θ = 0: Use standard method (evaluate at mesh points)
+    For θ ≠ 0: Use backward rotation with Gauss quadrature
+                V_ij(θ) = exp(-iθ) ∫ φᵢ(r exp(-iθ)) V(r) φⱼ(r exp(-iθ)) dr
+
+    Parameters:
+    - α: Channel structure
+    - grid: Mesh structure
+    - potname: Nuclear potential name
+    - θ_deg: Complex scaling angle in degrees (default: 0.0)
+    - n_gauss: Number of Gauss quadrature points (default: 5*grid.nx)
+    - verbose: Print detailed information
+    """
+    # For θ=0, use standard method (diagonal in coordinate space)
+    if θ_deg == 0.0
+        l = [α.l[i] for i in 1:α.nchmax]
+        V = zeros(α.nchmax*grid.nx, α.nchmax*grid.nx)
+
+        for ir in 1:grid.nx
+            vpot = potential_matrix(potname, grid.xi[ir], l, 1, Int(α.J12), 0, 0)  # np pair
+            for i in 1:α.nchmax
+                for j in 1:α.nchmax
+                    V[(i-1)*grid.nx+ir, (j-1)*grid.nx+ir] = vpot[i,j]
+                end
+            end
+        end
+        if verbose
+            println("Standard V (θ=0): V[1,1] = $(V[1,1]), V[nx,nx] = $(V[grid.nx, grid.nx])")
+        end
+        return V
     end
-    return V 
+
+    # For θ ≠ 0, use backward rotation
+    if n_gauss === nothing
+        n_gauss = 5 * grid.nx  # Sufficient quadrature accuracy
+    end
+
+    θ = θ_deg * π / 180.0
+    jacobian_factor = exp(-im * θ)
+
+    if verbose
+        println("\nComputing complex-scaled 2-body potential:")
+        println("  θ = $(θ_deg)° = $(round(θ, digits=4)) rad")
+        println("  Gauss quadrature points: $(n_gauss)")
+        println("  Using backward rotation method")
+    end
+
+    # Gauss-Legendre quadrature on [0, rmax]
+    rmax = grid.xmax  # Use the actual mesh range
+    r_quad_std, w_quad_std = gausslegendre(n_gauss)
+    # Map from [-1, 1] to [0, rmax]
+    r_quad = Float64.((r_quad_std .+ 1.0) .* (rmax / 2.0))
+    w_quad = Float64.(w_quad_std .* (rmax / 2.0))
+
+    # Get channel l values
+    l = [α.l[i] for i in 1:α.nchmax]
+
+    # Initialize complex matrix
+    V = zeros(Complex{Float64}, α.nchmax*grid.nx, α.nchmax*grid.nx)
+
+    # Compute matrix elements via quadrature
+    # V_ij(θ) = e^(-iθ) ∫ φᵢ(r e^(-iθ)) V(r) φⱼ(r e^(-iθ)) dr
+
+    max_phi = 0.0
+    max_integrand = 0.0
+
+    for ich in 1:α.nchmax
+        for jch in 1:α.nchmax
+            for ix in 1:grid.nx
+                for jx in 1:grid.nx
+                    integral = zero(Complex{Float64})
+
+                    for iq in 1:n_gauss
+                        r_k = Float64(r_quad[iq])  # Physical coordinate (fm)
+                        w_k = Float64(w_quad[iq])
+
+                        # BACKWARD ROTATION: Evaluate basis at ROTATED coordinate
+                        phi_all = lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, θ)
+                        phi_i = phi_all[ix]
+                        phi_j = phi_all[jx]
+
+                        max_phi = max(max_phi, abs(phi_i), abs(phi_j))
+
+                        # Evaluate potential at REAL coordinate r_k (not rotated!)
+                        vpot = potential_matrix(potname, r_k, l, 1, Int(α.J12), 0, 0)
+
+                        # Integrand: φᵢ(r/e^(iθ)) V(r) φⱼ(r/e^(iθ))
+                        # IMPORTANT: NO CONJUGATE! (COLOSS line 360-361)
+                        integrand = phi_i * vpot[ich, jch] * phi_j
+                        max_integrand = max(max_integrand, abs(integrand))
+                        integral += w_k * integrand
+                    end
+
+                    # Apply Jacobian factor: exp(-iθ)
+                    i_idx = (ich-1)*grid.nx + ix
+                    j_idx = (jch-1)*grid.nx + jx
+                    V[i_idx, j_idx] = jacobian_factor * integral
+                end
+            end
+        end
+    end
+
+    if verbose
+        println("  Max |φ|: $(max_phi)")
+        println("  Max |integrand|: $(max_integrand)")
+        println("  V[1,1] = $(V[1,1])")
+        println("  V[grid.nx, grid.nx] = $(V[grid.nx, grid.nx])")
+        println("  Complex-scaled potential matrix computed successfully")
+    end
+
+    return V
+end
+
+function V_matrix(α, grid, potname)
+    """Legacy wrapper for backward compatibility"""
+    return V_matrix_scaled(α, grid, potname, θ_deg=0.0)
 end 
 
 
@@ -202,25 +329,52 @@ end
 
 
 
-function T_matrix(α,grid) 
+function T_matrix_scaled(α, grid; θ_deg=0.0)
     """
-    α.nchmax is the maximum number of α channel index, α0 is the α parameter in Laguerre function 
-    """
+    Compute kinetic energy matrix with complex scaling
 
-     Tαx = zeros(α.nchmax*grid.nx,α.nchmax*grid.nx)  # Initialize Tαx matrix
-     
-     for i in 1:α.nchmax
-        T = Tx(grid.nx,grid.xx,grid.α,α.l[i])  
-        T .= T .* ħ^2 / (2.0 * μ * amu* grid.hsx^2)  # Scale the T matrix
+    T(θ) = exp(-2iθ) T(0)
+
+    Parameters:
+    - α: Channel structure
+    - grid: Mesh structure
+    - θ_deg: Complex scaling angle in degrees (default: 0.0)
+    """
+    # Convert angle to radians
+    θ = θ_deg * π / 180.0
+
+    # Complex scaling factor for kinetic energy
+    scaling_factor = exp(-2im * θ)
+
+    # Determine data type - always use Complex when θ != 0
+    is_complex = (θ_deg != 0.0)
+    DataType_T = is_complex ? Complex{Float64} : Float64
+
+    Tαx = zeros(DataType_T, α.nchmax*grid.nx, α.nchmax*grid.nx)
+
+    for i in 1:α.nchmax
+        T = Tx(grid.nx, grid.xx, grid.α, α.l[i])
+
+        if is_complex
+            T = T .* ħ^2 / (2.0 * μ * amu * grid.hsx^2) .* scaling_factor
+        else
+            T = T .* ħ^2 / (2.0 * μ * amu * grid.hsx^2)
+        end
+
         row_start = (i-1)*grid.nx + 1
         row_end = i*grid.nx
         col_start = (i-1)*grid.nx + 1
         col_end = i*grid.nx
         Tαx[row_start:row_end, col_start:col_end] = T
-     end 
-    
-     return Tαx
- end 
+    end
+
+    return Tαx
+end
+
+function T_matrix(α, grid)
+    """Legacy wrapper for backward compatibility"""
+    return T_matrix_scaled(α, grid, θ_deg=0.0)
+end 
 
 
 function channelindex()
