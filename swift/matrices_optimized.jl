@@ -4,6 +4,7 @@
 module matrices_optimized
 
 using Kronecker
+using SparseArrays
 include("../NNpot/nuclear_potentials.jl")
 using .NuclearPotentials
 using WignerSymbols
@@ -619,8 +620,9 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
     Ny = compute_overlap_matrix(grid.ny, grid.yy)
 
     # Pre-allocate full matrix with complex type
+    # Use SPARSE matrix for complex scaling to avoid dense matrix slowdown
     total_size = α.nchmax * grid.nx * grid.ny
-    Vmatrix = zeros(Complex{Float64}, total_size, total_size)
+    Vmatrix = spzeros(Complex{Float64}, total_size, total_size)
 
     # Storage for diagonal potential channels (if requested)
     V_x_diag_channels = Vector{Matrix{Complex{Float64}}}(undef, α.nchmax)

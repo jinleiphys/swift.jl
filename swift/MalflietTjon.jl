@@ -460,8 +460,6 @@ function arnoldi_eigenvalue(A, v0, m; tol=1e-6, maxiter=300, verbose_arnoldi=fal
     end
     
     for restart in 1:max_restarts
-        # Remove restart diagnostics to clean up output
-        
         # Initialize Krylov subspace matrices
         Q = zeros(ComplexF64, n, m+1)  # Orthonormal basis
         H = zeros(ComplexF64, m+1, m)   # Upper Hessenberg matrix
@@ -544,13 +542,15 @@ function arnoldi_eigenvalue(A, v0, m; tol=1e-6, maxiter=300, verbose_arnoldi=fal
             # Silent return on breakdown
             return real(λ), v, converged, total_iterations
         end
-        
+
         # Check convergence for non-breakdown case
-        if abs(λ - λ_old) < tol
+        # IMPORTANT: For complex scaling, only check REAL part convergence
+        # The imaginary part can be non-zero and prevents convergence otherwise
+        if abs(real(λ) - λ_old) < tol  # λ_old is already real
             converged = true
             return real(λ), v, converged, total_iterations
         end
-        
+
         λ_old = real(λ)
         
         # Update starting vector for next restart (if no breakdown occurred)
