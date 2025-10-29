@@ -564,17 +564,19 @@ passed, abs_err, rel_err = test_V_scaled_at_zero(α, grid, "AV18", n_gauss=50)
 
 ## Mathematical Details:
 
-The integral is computed using Gauss-Laguerre quadrature:
+The integral is computed using Gauss-Legendre quadrature on [0, rmax]:
 
     V_ij(θ) = e^(-iθ) Σₖ wₖ φᵢ(rₖ e^(-iθ)) V(rₖ) φⱼ(rₖ e^(-iθ))
 
-where (rₖ, wₖ) are Gauss-Laguerre quadrature points and weights.
+where (rₖ, wₖ) are Gauss-Legendre quadrature points and weights on [0, grid.xmax].
 
-For the Laguerre-regularized basis used in this code, we evaluate:
+IMPORTANT: NO CONJUGATE on φᵢ! The complex-scaled Hamiltonian is non-Hermitian.
 
-    φᵢ(r e^(-iθ)) = basis_function(r e^(-iθ); mesh_point_i, regularization_params)
-
-This requires complex-argument evaluation of the Laguerre basis functions.
+For the Laguerre-regularized basis used in this code:
+- Pass physical coordinates (fm) directly: lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, θ)
+- The function handles coordinate scaling and backward rotation internally
+- Evaluates basis at rotated coordinate: φᵢ(rₖ e^(-iθ))
+- Default n_gauss = 5 * grid.nx is sufficient for convergence
 """
 function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothing, return_components=false)
     # For θ=0, fall back to standard implementation (no complex scaling, faster and exact)
@@ -582,10 +584,10 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
         return V_matrix_optimized(α, grid, potname, return_components=return_components)
     end
 
-    # Default: use 5x mesh points for convergence with complex rotation
+    # Default: use sufficient quadrature points for convergence with complex rotation
     # Complex-rotated basis functions are oscillatory and need denser quadrature
     if n_gauss === nothing
-        n_gauss = 5 * grid.nx  # Verified: gives < 0.01% error (see test_V_matrix_elements.jl)
+        n_gauss = 5 * grid.nx  # Sufficient quadrature accuracy
     end
 
     # Convert angle from degrees to radians
@@ -602,16 +604,16 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
     println("  Gauss quadrature points: $(n_gauss)")
     println("  Rotation factor: e^(-iθ) = $(round(rotation_factor, digits=4))")
 
-    # Use Gauss-Laguerre quadrature with DIFFERENT points than mesh
-    xi_unscaled, dxi_unscaled = gausslaguerre(n_gauss, grid.α)
-    r_quad = xi_unscaled .* grid.hsx
-
-    # Remove Laguerre weight to get plain dr integration
-    w_quad = dxi_unscaled .* grid.hsx ./ (xi_unscaled.^grid.α .* exp.(-xi_unscaled))
+    # Use Gauss-Legendre quadrature on [0, rmax]
+    rmax = grid.xmax  # Use the actual mesh range
+    r_quad_std, w_quad_std = gausslegendre(n_gauss)
+    # Map from [-1, 1] to [0, rmax] - keep as Float64!
+    r_quad = Float64.((r_quad_std .+ 1.0) .* (rmax / 2.0))
+    w_quad = Float64.(w_quad_std .* (rmax / 2.0))
     n_quad = n_gauss
 
-    println("  Gauss quadrature: n_gauss=$(n_gauss) points (different from mesh)")
-    println("  Evaluating V(r) DIRECTLY at each quadrature point (not interpolation)")
+    println("  Gauss-Legendre quadrature: n_gauss=$(n_gauss) points on [0, $(rmax)] fm")
+    println("  Evaluating V(r) at real coordinates, basis at rotated r/exp(iθ)")
 
     # Pre-compute overlap matrix Ny once
     Ny = compute_overlap_matrix(grid.ny, grid.yy)
@@ -711,17 +713,18 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
                         integral = 0.0 + 0.0im
 
                         for k in 1:n_quad
-                            r_k = r_quad[k]
+                            r_k = r_quad[k]  # Physical coordinate (fm)
                             w_k = w_quad[k]
 
-                            # Evaluate basis functions at rotated coordinate
-                            # lagrange_laguerre_regularized_basis evaluates φᵢ(r e^(-iθ)) when passed θ
+                            # BACKWARD ROTATION: Evaluate basis at ROTATED coordinate r/exp(iθ)
+                            # The lagrange_laguerre_regularized_basis function handles coordinate scaling correctly
+                            # Pass physical coordinates (fm) with scaled mesh and proper scaling factor
                             phi_all = lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, θ)
 
                             phi_i = phi_all[ix_i]
                             phi_j = phi_all[ix_j]
 
-                            # Get BARE potential V(r) at quadrature point r_k
+                            # Get BARE potential V(r) at quadrature point r_k (REAL coordinate, not rotated!)
                             # Call potential_matrix directly with proper l array
                             v_matrix = potential_matrix(potname, r_k, l_array,
                                                        Int(α.α2b.s12[i_2b]),
@@ -735,8 +738,10 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
                                 V_r += VCOUL_point(r_k, 1.0)
                             end
 
-                            # Accumulate integral: φᵢ*(r e^(-iθ)) V(r) φⱼ(r e^(-iθ))
-                            integral += w_k * conj(phi_i) * V_r * phi_j
+                            # Integrand: φᵢ(r/e^(iθ)) V(r) φⱼ(r/e^(iθ))
+                            # IMPORTANT: NO CONJUGATE! (COLOSS line 360-361)
+                            # For complex scaling, the operator is non-Hermitian
+                            integral += w_k * phi_i * V_r * phi_j
                         end
 
                         # Apply Jacobian factor and CG coefficient
