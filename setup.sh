@@ -171,6 +171,37 @@ else
 fi
 
 echo ""
+
+# Step 4: Compile COULCC library
+echo "Step 4: Compiling COULCC library..."
+echo "=========================================="
+
+cd "$SCRIPT_DIR/swift"
+
+echo "Cleaning previous COULCC builds..."
+make -f Makefile_coulcc clean
+
+echo "Compiling COULCC library..."
+make -f Makefile_coulcc
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}COULCC library compiled successfully${NC}"
+
+    # List generated library
+    echo ""
+    echo "Generated COULCC library:"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        ls -lh libcoulcc.dylib 2>/dev/null || echo "No libcoulcc.dylib found"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        ls -lh libcoulcc.so 2>/dev/null || echo "No libcoulcc.so found"
+    else
+        ls -lh libcoulcc.dll 2>/dev/null || echo "No libcoulcc.dll found"
+    fi
+else
+    echo -e "${YELLOW}Warning: COULCC library compilation failed (optional)${NC}"
+fi
+
+echo ""
 echo "=========================================="
 echo -e "${GREEN}Setup completed successfully!${NC}"
 echo "=========================================="

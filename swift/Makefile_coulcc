@@ -1,0 +1,53 @@
+# Makefile for COULCC Fortran library
+# Compiles coulcc.f into a shared library for Julia interface
+
+# Compiler
+FC = gfortran
+
+# Compiler flags
+FFLAGS = -O2 -fPIC -Wall -Wextra -std=legacy
+
+# Detect platform and set library extension
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    # macOS
+    LIB_EXT = dylib
+    LIB_FLAGS = -dynamiclib -single_module -undefined dynamic_lookup
+else ifeq ($(UNAME_S),Linux)
+    # Linux
+    LIB_EXT = so
+    LIB_FLAGS = -shared
+else
+    # Windows (via MSYS2/MinGW)
+    LIB_EXT = dll
+    LIB_FLAGS = -shared -Wl,--export-all-symbols
+endif
+
+# Library name
+LIBNAME = libcoulcc.$(LIB_EXT)
+
+# Source files
+SOURCES = coulcc.f
+
+# Object files
+OBJECTS = coulcc.o
+
+# Default target
+all: $(LIBNAME)
+
+# Compile Fortran source to object file
+%.o: %.f
+	$(FC) $(FFLAGS) -c $< -o $@
+
+# Link object files to shared library
+$(LIBNAME): $(OBJECTS)
+	$(FC) $(LIB_FLAGS) $(OBJECTS) -o $(LIBNAME)
+	@echo "Successfully built $(LIBNAME)"
+
+# Clean build artifacts
+clean:
+	rm -f $(OBJECTS) *.mod $(LIBNAME)
+	@echo "Cleaned build artifacts"
+
+# Phony targets
+.PHONY: all clean
