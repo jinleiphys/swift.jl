@@ -15,12 +15,14 @@ using .Gcoefficient
 using LinearAlgebra
 using FastGaussQuadrature
 using Dierckx
+include("coulcc.jl")
+using .CoulCC
 
 const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
 const ħ = 197.3269718 # MeV. fm
 
-export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, test_V_scaled_at_zero, Rxy_matrix_with_caching
+export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, test_V_scaled_at_zero, Rxy_matrix_with_caching, compute_initial_state_vector
 
 # Coulomb potential function (matches matrices.jl implementation)
 function VCOUL_point(R, z12)
@@ -1209,6 +1211,278 @@ function Rxy_matrix_with_caching(α, grid)
     println("="^70)
 
     return Rxy, Rxy_31, Rxy_32
+end
+
+"""
+    compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2; θ=0.0)
+
+Compute the initial state vector φ for scattering calculations.
+
+# Formula
+The initial state vector is computed as:
+```
+φᵢ(θ) = [φ_d^{α}(xᵢ e^{iθ}) F_λ^{α}(k·yᵢ e^{iθ})] / [f_{ix}(xᵢ) f_{iy}(yᵢ)]
+```
+
+where:
+- φ_d^{α}(x) is the bound state wavefunction component for channel α
+- F_λ^{α}(ky) is the regular Coulomb function with angular momentum λ from channel α
+- f_{ix}(x) = grid.ϕx[ix] and f_{iy}(y) = grid.ϕy[iy] are the basis functions
+- θ is the complex scaling angle (default 0 for real calculations)
+
+# Important Physics
+The deuteron (J12=1) contains BOTH ³S₁ (~96%, l=0) and ³D₁ (~4%, l=2) components.
+The initial state populates ALL three-body channels that couple to the deuteron:
+- Channels with J12=1, s12=1, and l∈{0,2}
+- Across ALL possible λ values (orbital angular momentum of third particle)
+- Each channel uses its own λ for computing the Coulomb function F_λ(ky)
+
+This is physically correct because:
+1. The deuteron has multiple angular momentum components (³S₁ + ³D₁)
+2. The third particle can have any λ while conserving total angular momentum
+3. Each (l, λ) combination couples differently to the deuteron
+
+# Arguments
+- `grid`: Mesh structure containing grid points and basis functions
+- `α`: Three-body channel structure with quantum numbers (l, s12, J12, λ, etc.)
+- `φ_d_matrix`: Deuteron wavefunction matrix (grid.nx × n_2b_channels)
+  - Typically n_2b_channels = 2: column 1 = ³S₁ (l=0), column 2 = ³D₁ (l=2)
+  - From bound2b calculation with J12=1
+- `E`: Scattering energy (MeV) in center-of-mass frame
+- `z1z2`: Product of charges Z₁*Z₂ for Coulomb interaction
+
+# Keyword Arguments
+- `θ`: Complex scaling angle (radians, default = 0.0)
+
+# Returns
+- `φ`: Initial state vector of length (grid.nx * grid.ny * n_channels)
+  - Ordering: i = (iα - 1) * nx * ny + (ix - 1) * ny + iy
+  - Same convention as V_matrix_optimized and Rxy_matrix_optimized
+  - iα (channel): slowest varying, ix: middle, iy (fastest varying)
+  - Only channels coupling to deuteron are non-zero
+
+# Physical Interpretation
+This vector represents the incoming scattering state where:
+- The deuteron is in its bound state (with all angular momentum components)
+- The third particle scatters with Coulomb interaction
+- The division by basis functions projects onto the Laguerre basis
+- Multiple channels are populated simultaneously (not just one!)
+
+# Example
+```julia
+include("twobody.jl")
+using .TwoBody
+
+# Compute deuteron bound state (returns matrix with ³S₁ and ³D₁ components)
+bound_energies, bound_wavefunctions = bound2b(grid, potential)
+φ_d_matrix = bound_wavefunctions[1]  # Ground state, size (nx, 2)
+
+# Set up scattering
+E = 10.0  # MeV
+z1z2 = 1.0  # proton-deuteron (charge product)
+
+# Compute initial state (populates ALL channels coupling to deuteron)
+φ = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2)
+
+# For complex scaling (resonance calculations)
+θ = 0.1  # radians
+φ_scaled = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ)
+```
+"""
+function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64}, E, z1z2; θ=0.0)
+    """
+    Compute the initial state vector φ for deuteron scattering.
+
+    The deuteron bound state (J12=1) contains both ³S₁ (l=0) and ³D₁ (l=2) components.
+    ALL three-body channels that couple to these bound state components are populated,
+    across ALL possible λ values (orbital angular momentum between third particle and pair).
+
+    # Arguments
+    - `grid`: Numerical mesh containing x, y grids and basis functions ϕx, ϕy
+    - `α`: Three-body channel structure with quantum numbers (l, s12, J12, λ, etc.)
+    - `φ_d_matrix`: Deuteron wavefunction matrix (grid.nx × n_2b_channels)
+                    where n_2b_channels typically = 2 for ³S₁ and ³D₁ components
+    - `E`: Scattering energy (MeV)
+    - `z1z2`: Product of charges Z₁Z₂ for Coulomb interaction
+    - `θ`: Complex scaling angle (default=0.0 for no scaling)
+
+    # Returns
+    - `φ`: Initial state vector of length nx × ny × n_channels
+           Ordered as: i = (iα - 1)*nx*ny + (ix - 1)*ny + iy
+
+    # Physics
+    The initial state is constructed as:
+    φᵢ^(α) = [φ_d^(α)(xᵢ) × F_λ(kyᵢ)] / [ϕx(xᵢ) × ϕy(yᵢ)]
+
+    where:
+    - φ_d^(α)(x) is the deuteron wavefunction component for channel α
+    - F_λ(ky) is the regular Coulomb function with angular momentum λ
+    - ϕx, ϕy are the Laguerre basis functions
+    """
+    # Load COULCC library if not already loaded
+    if CoulCC.libcoulcc[] == C_NULL
+        CoulCC.load_library()
+    end
+
+    # Get grid dimensions
+    nx = grid.nx
+    ny = grid.ny
+    n_channels = length(α.l)
+
+    # Compute wave number k from energy E = ħ²k²/(2μ)
+    # For deuteron scattering: μ = m_d * m_p / (m_d + m_p) ≈ 2/3 m
+    μ = (2.0 * m) / 3.0  # Reduced mass in amu
+    k = sqrt(2.0 * μ * E) / ħ  # Wave number in fm⁻¹
+
+    # Compute Sommerfeld parameter η = μ Z₁Z₂ e² / (ħ² k)
+    e2 = 1.43997  # MeV·fm (Coulomb constant)
+    η = μ * z1z2 * e2 / (ħ * ħ * k)
+
+    # Complex scaling factor
+    scale_factor = exp(im * θ)
+
+    # Initialize output vector: nx * ny * n_channels
+    φ = zeros(ComplexF64, nx * ny * n_channels)
+
+    # Get number of two-body channels from φ_d_matrix
+    n_2b_channels = size(φ_d_matrix, 2)
+
+    # First pass: determine which channels couple to deuteron and find λ_max
+    coupling_channels = Vector{Int}()
+    matched_2b_channels = Vector{Int}()
+    λ_max = -1
+
+    for iα in 1:n_channels
+        # Get quantum numbers for this three-body channel
+        λ_channel = α.λ[iα]  # Orbital angular momentum for relative motion
+        i2b = α.α2bindex[iα]  # Index mapping to two-body structure
+
+        # Get two-body quantum numbers
+        l_2b = α.α2b.l[i2b]
+        s12_2b = α.α2b.s12[i2b]
+        J12_2b = α.α2b.J12[i2b]
+
+        # Check if this channel couples to the deuteron bound state
+        # Deuteron has J12=1 with both ³S₁ (l=0, s12=1) and ³D₁ (l=2, s12=1)
+        matched_2b_channel = 0
+
+        # Match to deuteron components by quantum numbers
+        for ich_2b in 1:n_2b_channels
+            # For deuteron: typically channel 1 is ³S₁ (l=0), channel 2 is ³D₁ (l=2)
+            # This matching should be done based on actual channel structure
+            if J12_2b ≈ 1.0 && abs(s12_2b - 1.0) < 1e-10
+                # Check if l matches either ³S₁ or ³D₁
+                if (l_2b == 0 && ich_2b == 1) || (l_2b == 2 && ich_2b == 2)
+                    matched_2b_channel = ich_2b
+                    break
+                end
+            end
+        end
+
+        # If this channel couples to deuteron, record it and update λ_max
+        if matched_2b_channel > 0
+            push!(coupling_channels, iα)
+            push!(matched_2b_channels, matched_2b_channel)
+            λ_max = max(λ_max, Int(round(λ_channel)))
+        end
+    end
+
+    # If no channels couple, return zero vector
+    if isempty(coupling_channels)
+        @warn "No three-body channels couple to the deuteron! Check channel structure."
+        return φ
+    end
+
+    # Compute Coulomb functions F_λ(ky) for all y-grid points and all λ values at once
+    # F_all[iy][λ+1] contains F_λ value at y-grid point iy
+    F_all = Vector{Vector{ComplexF64}}(undef, ny)
+
+    for iy in 1:ny
+        y_scaled = grid.y[iy] * scale_factor
+        x_coulomb = ComplexF64(k * y_scaled)
+
+        # Call COULCC once to get F for all λ from 0 to λ_max
+        # This is much more efficient than calling it separately for each λ!
+        fc, gc, fcp, gcp, sig, ifail = coulcc(x_coulomb, ComplexF64(η), 0, lmax=λ_max, mode=4)
+
+        if ifail != 0
+            @warn "COULCC failed at iy=$iy with ifail=$ifail, using F=0 for all λ"
+            F_all[iy] = zeros(ComplexF64, λ_max + 1)
+        else
+            F_all[iy] = fc
+        end
+    end
+
+    # Second pass: populate channels using pre-computed Coulomb functions
+    for (idx, iα) in enumerate(coupling_channels)
+        λ_channel = Int(round(α.λ[iα]))
+        matched_2b_channel = matched_2b_channels[idx]
+
+        # Populate this channel with φ = [φ_d(x) * F_λ(y)] / [ϕx(x) * ϕy(y)]
+        for ix in 1:nx
+            for iy in 1:ny
+                # Linear index: i = (iα - 1) * nx * ny + (ix - 1) * ny + iy
+                i = (iα - 1) * nx * ny + (ix - 1) * ny + iy
+
+                # Get basis functions
+                f_ix = grid.ϕx[ix]
+                f_iy = grid.ϕy[iy]
+
+                # Check for zero denominators
+                if abs(f_ix) < 1e-15 || abs(f_iy) < 1e-15
+                    φ[i] = 0.0
+                    continue
+                end
+
+                # Get deuteron wavefunction component for this channel
+                φ_d_component = φ_d_matrix[ix, matched_2b_channel]
+
+                # Get Coulomb function for this λ (note: λ=0 is at index 1)
+                F_λ = F_all[iy][λ_channel + 1]
+
+                # Compute: φᵢ = [φ_d(x) * F_λ(y)] / [f_ix * f_iy]
+                φ[i] = (φ_d_component * F_λ) / (f_ix * f_iy)
+            end
+        end
+    end
+
+    return φ
+end
+
+"""
+    compute_initial_state_vector(grid, α, φ_d::Matrix{Float64}, args...; kwargs...)
+
+Convenience wrapper for real-valued bound state wavefunctions.
+Converts to ComplexF64 internally.
+"""
+function compute_initial_state_vector(grid, α, φ_d::Matrix{Float64}, args...; kwargs...)
+    return compute_initial_state_vector(grid, α, ComplexF64.(φ_d), args...; kwargs...)
+end
+
+"""
+    compute_initial_state_vector(grid, α, φ_d::Vector{ComplexF64}, args...; kwargs...)
+
+Legacy wrapper for single-component wavefunction (converts Vector to Matrix).
+Note: This should only be used for testing. Production code should use the Matrix version
+to properly handle multi-component bound states like the deuteron.
+"""
+function compute_initial_state_vector(grid, α, φ_d::Vector{ComplexF64}, args...; kwargs...)
+    # Convert vector to matrix with single column
+    φ_d_matrix = reshape(φ_d, length(φ_d), 1)
+    return compute_initial_state_vector(grid, α, φ_d_matrix, args...; kwargs...)
+end
+
+"""
+    compute_initial_state_vector(grid, α, φ_d::Vector{Float64}, args...; kwargs...)
+
+Legacy wrapper for single-component wavefunction (converts Vector to Matrix).
+Note: This should only be used for testing. Production code should use the Matrix version
+to properly handle multi-component bound states like the deuteron.
+"""
+function compute_initial_state_vector(grid, α, φ_d::Vector{Float64}, args...; kwargs...)
+    # Convert vector to matrix with single column
+    φ_d_matrix = reshape(ComplexF64.(φ_d), length(φ_d), 1)
+    return compute_initial_state_vector(grid, α, φ_d_matrix, args...; kwargs...)
 end
 
 end # end module

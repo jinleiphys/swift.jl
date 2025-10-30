@@ -9,7 +9,7 @@ using Kronecker
 include("laguerre.jl")
 using .Laguerre
 
-export bound2b
+export bound2b, compute_deuteron_wavefunction
 
 
 const amu= 931.49432 # MeV
@@ -467,5 +467,218 @@ function Tx(nx,xi,α0,l)
     return T
 
  end # end function Tx
+
+
+"""
+    compute_deuteron_wavefunction(α3b, grid, bound_energies, bound_wavefunctions, channel_idx=1)
+
+Extract deuteron wavefunction for a specific three-body channel from bound2b results.
+
+# Problem
+The `bound2b` function computes two-body bound states (e.g., deuteron) in a small model space
+with J=1 (typically ³S₁ + ³D₁ channels). However, three-body channels may have different
+two-body quantum numbers (different J12, l, s12 values). This function remaps the bound2b
+wavefunction to match a specific three-body channel.
+
+# Mapping Strategy
+1. Get the two-body channel index from three-body channel: `i2b = α3b.α2bindex[channel_idx]`
+2. Get quantum numbers from three-body α2b structure: (l, s12, J12) from `α3b.α2b`
+3. Match these quantum numbers to the bound2b channel structure
+4. Extract the corresponding wavefunction component
+
+# Arguments
+- `α3b`: Three-body channel structure from α3b() function
+  - Contains `α3b.α2b` (two-body channels) and `α3b.α2bindex` (mapping)
+- `grid`: Mesh structure containing grid points (must match bound2b grid)
+- `bound_energies`: Binding energies from bound2b (Vector)
+- `bound_wavefunctions`: Wavefunctions from bound2b (Vector of matrices)
+  - Each wavefunction is (grid.nx, n_2b_channels) matrix
+- `channel_idx`: Index of the three-body channel (default=1)
+  - Uses this to look up corresponding two-body channel
+
+# Returns
+- `φ_d::Vector{ComplexF64}`: Deuteron wavefunction on x-grid (length grid.nx)
+  - Extracted from the appropriate two-body channel component
+  - Returns ground state (first bound state) by default
+
+# Notes
+- For J12≠1 channels: If bound2b was computed with J=1, the wavefunction will be zeros
+  - In this case, you need to compute bound2b with the appropriate J12 value
+- The function performs quantum number matching: (l, s12, J12, T12)
+- Complex scaling: Supports complex wavefunctions from bound2b with θ≠0
+
+# Example
+```julia
+# Compute bound state with bound2b
+bound_energies, bound_wavefunctions = bound2b(grid, "AV18")
+
+# Get three-body channels
+α = α3b(true, 0.5, 0.5, +1, 2, 0, 2, 0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 1.0, +1)
+
+# Extract deuteron wavefunction for channel 1
+φ_d = compute_deuteron_wavefunction(α, grid, bound_energies, bound_wavefunctions, 1)
+
+# Use in scattering calculation
+φ_in = compute_initial_state_vector(grid, α, φ_d, E, z1z2)
+```
+
+# Warning
+If the three-body channel requires J12 ≠ 1, you must recompute bound2b with that J12:
+```julia
+# For J12 = 2 channel (e.g., ⁵D₂)
+# You would need to modify channelindex() in twobody.jl to use J12 = 2
+```
+"""
+"""
+    compute_deuteron_wavefunction(grid, bound_energies, bound_wavefunctions)
+
+Extract the deuteron wavefunction matrix from bound2b results.
+
+Returns the complete deuteron wavefunction with all angular momentum components.
+For the deuteron (J=1), this includes both ³S₁ (l=0) and ³D₁ (l=2) channels.
+
+# Arguments
+- `grid`: Mesh structure (used for consistency checking)
+- `bound_energies`: Vector of bound state energies from bound2b
+- `bound_wavefunctions`: Vector of wavefunction matrices from bound2b
+
+# Returns
+- `φ_d_matrix`: Deuteron wavefunction matrix (grid.nx × n_2b_channels)
+  - Typically size (nx, 2) for deuteron with ³S₁ and ³D₁ components
+  - Column 1: ³S₁ component (l=0, s12=1, J12=1)
+  - Column 2: ³D₁ component (l=2, s12=1, J12=1)
+
+# Example
+```julia
+# Compute deuteron bound state
+bound_energies, bound_wavefunctions = bound2b(grid, potential)
+
+# Extract deuteron wavefunction (all components)
+φ_d_matrix = compute_deuteron_wavefunction(grid, bound_energies, bound_wavefunctions)
+
+# Use in scattering calculation
+φ = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2)
+```
+"""
+function compute_deuteron_wavefunction(grid, bound_energies, bound_wavefunctions)
+    # Check if we have any bound states
+    if isempty(bound_wavefunctions)
+        error("No bound states found from bound2b. Check potential or grid parameters.")
+    end
+
+    # Use the ground state (first bound state)
+    # wavefunction is a matrix of size (grid.nx, n_2b_channels)
+    φ_d_matrix = bound_wavefunctions[1]
+
+    # Get dimensions for validation
+    nx_check, n_channels = size(φ_d_matrix)
+    if nx_check != grid.nx
+        @warn "Wavefunction grid size ($nx_check) doesn't match grid.nx ($(grid.nx))"
+    end
+
+    # Print information about the deuteron
+    println("\nDeuteron wavefunction extraction:")
+    println("  Binding energy: $(round(real(bound_energies[1]), digits=6)) MeV")
+    println("  Number of channels: $n_channels")
+    println("  Grid size: $(grid.nx) points")
+
+    if n_channels == 2
+        # Calculate S and D state probabilities
+        # Note: This assumes proper normalization from bound2b
+        norm_S = sum(abs2.(φ_d_matrix[:, 1]) .* grid.wx)
+        norm_D = sum(abs2.(φ_d_matrix[:, 2]) .* grid.wx)
+        total = norm_S + norm_D
+
+        if total > 0
+            prob_S = norm_S / total * 100
+            prob_D = norm_D / total * 100
+            println("  ³S₁ probability: $(round(prob_S, digits=2))%")
+            println("  ³D₁ probability: $(round(prob_D, digits=2))%")
+        end
+    end
+
+    return ComplexF64.(φ_d_matrix)
+end
+
+# Legacy version for backward compatibility (deprecated)
+function compute_deuteron_wavefunction(α3b, grid, bound_energies, bound_wavefunctions,
+                                      channel_idx=1)
+    """
+    DEPRECATED: Legacy version that extracts a single channel.
+    Use compute_deuteron_wavefunction(grid, bound_energies, bound_wavefunctions) instead.
+
+    This version is kept for backward compatibility but should not be used in new code.
+    """
+    @warn """
+    Deprecated: compute_deuteron_wavefunction with channel_idx parameter is deprecated.
+    Use: φ_d_matrix = compute_deuteron_wavefunction(grid, bound_energies, bound_wavefunctions)
+    This returns the full matrix with all deuteron components.
+    """
+
+    # Get the corresponding two-body channel index for this three-body channel
+    i2b = α3b.α2bindex[channel_idx]
+
+    # Get quantum numbers from the three-body α2b structure
+    l_3b = α3b.α2b.l[i2b]
+    s12_3b = α3b.α2b.s12[i2b]
+    J12_3b = α3b.α2b.J12[i2b]
+    T12_3b = α3b.α2b.T12[i2b]
+
+    # Check if we have any bound states
+    if isempty(bound_wavefunctions)
+        error("No bound states found from bound2b. Check potential or grid parameters.")
+    end
+
+    # Use the ground state (first bound state)
+    # wavefunction is a matrix of size (grid.nx, n_2b_channels)
+    wavefunction = bound_wavefunctions[1]
+
+    # Get the two-body channel structure from bound2b
+    # This is typically J=1 with ³S₁ and ³D₁ channels
+    α2b_bound = channelindex()  # Recreate the same channel structure as bound2b
+
+    # Find matching channel in bound2b wavefunction
+    # Match by quantum numbers (l, s12, J12)
+    matched_channel = 0
+
+    for ich_2b in 1:α2b_bound.nchmax
+        l_2b = α2b_bound.l[ich_2b]
+        s12_2b = α2b_bound.s12[ich_2b]
+        J12_2b = α2b_bound.J12
+
+        # Match quantum numbers
+        if l_2b == l_3b && abs(s12_2b - s12_3b) < 1e-10 && abs(J12_2b - J12_3b) < 1e-10
+            matched_channel = ich_2b
+            break
+        end
+    end
+
+    # Extract wavefunction component
+    if matched_channel > 0
+        # Get the wavefunction for this channel
+        φ_d = wavefunction[:, matched_channel]
+
+        println("\nDeuteron wavefunction extraction (LEGACY):")
+        println("  Three-body channel: $channel_idx → Two-body index: $i2b")
+        println("  Quantum numbers: l=$l_3b, s12=$s12_3b, J12=$J12_3b, T12=$T12_3b")
+        println("  Matched to bound2b channel: $matched_channel")
+        println("  Binding energy: $(round(real(bound_energies[1]), digits=6)) MeV")
+
+        return ComplexF64.(φ_d)
+    else
+        # No matching channel found - might need different J12
+        @warn """
+        No matching two-body channel found for three-body channel $channel_idx!
+        Three-body requires: l=$l_3b, s12=$s12_3b, J12=$J12_3b
+        Available bound2b channels have J=$(α2b_bound.J12)
+
+        Returning zero wavefunction. You may need to:
+        1. Recompute bound2b with J12=$J12_3b
+        2. Or check if this channel should couple to the bound state
+        """
+
+        return zeros(ComplexF64, grid.nx)
+    end
+end
 
 end 
