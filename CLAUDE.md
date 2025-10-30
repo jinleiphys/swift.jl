@@ -15,7 +15,7 @@ For first-time setup or to update the environment, run the automated setup scrip
 ```
 This script will:
 1. Check Julia installation and install/update if needed (requires Julia >= 1.9.0)
-2. Install all required Julia packages via `swift/setup.jl`
+2. Install all required Julia packages via `setup.jl`
 3. Compile Fortran nuclear potential libraries in `NNpot/`
 
 ### Manual Setup (Alternative)
@@ -23,7 +23,6 @@ If you prefer manual setup or need to rebuild specific components:
 
 **Julia Environment Setup:**
 ```bash
-cd swift
 julia setup.jl
 ```
 

@@ -103,10 +103,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "Step 2: Installing Julia packages..."
 echo "=========================================="
 
-cd "$SCRIPT_DIR/swift"
+cd "$SCRIPT_DIR"
 
 if [ ! -f "setup.jl" ]; then
-    echo -e "${RED}Error: setup.jl not found in swift/ directory${NC}"
+    echo -e "${RED}Error: setup.jl not found in project root${NC}"
     exit 1
 fi
 
