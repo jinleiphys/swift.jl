@@ -8,15 +8,26 @@ This is a Julia-based nuclear physics framework implementing the Faddeev method 
 
 ## Development Commands
 
-### Julia Environment Setup
-Install required Julia packages before any development:
+### Quick Setup (Automated)
+For first-time setup or to update the environment, run the automated setup script:
+```bash
+./setup.sh
+```
+This script will:
+1. Check Julia installation and install/update if needed (requires Julia >= 1.9.0)
+2. Install all required Julia packages via `swift/setup.jl`
+3. Compile Fortran nuclear potential libraries in `NNpot/`
+
+### Manual Setup (Alternative)
+If you prefer manual setup or need to rebuild specific components:
+
+**Julia Environment Setup:**
 ```bash
 cd swift
 julia setup.jl
 ```
 
-### Building Fortran Libraries
-The nuclear potential libraries must be compiled before use. The makefile automatically detects platform and uses appropriate flags:
+**Building Fortran Libraries:**
 ```bash
 cd NNpot
 make clean && make
@@ -29,10 +40,10 @@ This creates `libpotentials.dylib` (macOS), `libpotentials.so` (Linux), or `libp
 - **F77/F90 compatibility**: Separate compilation flags for legacy and modern Fortran code
 
 ### Running Calculations
-- **Interactive development**: Use Jupyter notebooks in any subdirectory (*.ipynb files)
-- **Memory-optimized runs**: Use `swift_3H_optimized.ipynb` for reduced memory calculations (~1-2 GB instead of 27 GB)
+- **Main calculation**: `cd swift && julia swift_3H.jl` - Run 3H (tritium) bound state calculation
 - **Script execution**: Run Julia files directly with `julia filename.jl`
-- **Testing modules**: Run test files like `julia test.jl` in respective directories
+- **Interactive development**: Use Jupyter notebooks in any subdirectory (*.ipynb files) for exploration
+- **Memory-optimized runs**: Use `swift_3H_optimized.ipynb` for reduced memory calculations (~1-2 GB instead of 27 GB)
 
 ### Testing
 - **Quick module test**: `julia NNpot/test.jl` - basic nuclear potential interface validation
@@ -41,10 +52,10 @@ This creates `libpotentials.dylib` (macOS), `libpotentials.so` (Linux), or `libp
 - **Specific debugging**: Various `debug_*.jl` and `simple_*test*.jl` files for targeted testing
 
 ### Development Workflow
-1. **Library setup**: Build Fortran libraries first (`cd NNpot && make`)
-2. **Package installation**: Install Julia dependencies (`cd swift && julia setup.jl`)
-3. **Development**: Use Jupyter notebooks for interactive exploration and debugging
-4. **Testing**: Run specific tests to validate changes before committing
+1. **Initial setup**: Run `./setup.sh` for automated environment setup (Julia installation, packages, Fortran libraries)
+2. **Development**: Modify code, run calculations with `cd swift && julia swift_3H.jl`
+3. **Interactive exploration**: Use Jupyter notebooks for debugging and method comparison
+4. **Testing**: Run specific tests to validate changes (e.g., `julia NNpot/test_comprehensive.jl`)
 
 ## Core Architecture
 
