@@ -15,6 +15,7 @@ using .Gcoefficient
 using LinearAlgebra
 using FastGaussQuadrature
 using Dierckx
+using OffsetArrays
 include("coulcc.jl")
 using .CoulCC
 
@@ -1017,11 +1018,11 @@ function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64},
     # Compute wave number k from energy E = ħ²k²/(2μ)
     # For deuteron scattering: μ = m_d * m_p / (m_d + m_p) ≈ 2/3 m
     μ = (2.0 * m) / 3.0  # Reduced mass in amu
-    k = sqrt(2.0 * μ * E) / ħ  # Wave number in fm⁻¹
+    k = sqrt(2.0 * μ * amu * E) / ħ  # Wave number in fm⁻¹ (amu converts mass to MeV)
 
     # Compute Sommerfeld parameter η = μ Z₁Z₂ e² / (ħ² k)
     e2 = 1.43997  # MeV·fm (Coulomb constant)
-    η = μ * z1z2 * e2 / (ħ * ħ * k)
+    η = μ * amu * z1z2 * e2 / (ħ * ħ * k)  # amu converts mass to MeV
 
     # Complex scaling factor
     scale_factor = exp(im * θ)
@@ -1055,7 +1056,7 @@ function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64},
         for ich_2b in 1:n_2b_channels
             # For deuteron: typically channel 1 is ³S₁ (l=0), channel 2 is ³D₁ (l=2)
             # This matching should be done based on actual channel structure
-            if J12_2b ≈ 1.0 && abs(s12_2b - 1.0) < 1e-10
+            if Int(round(J12_2b)) == 1 && Int(round(s12_2b)) == 1
                 # Check if l matches either ³S₁ or ³D₁
                 if (l_2b == 0 && ich_2b == 1) || (l_2b == 2 && ich_2b == 2)
                     matched_2b_channel = ich_2b
@@ -1079,11 +1080,11 @@ function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64},
     end
 
     # Compute Coulomb functions F_λ(ky) for all y-grid points and all λ values at once
-    # F_all[iy][λ+1] contains F_λ value at y-grid point iy
-    F_all = Vector{Vector{ComplexF64}}(undef, ny)
+    # F_all[iy][λ] contains F_λ value at y-grid point iy (using OffsetArray for 0-based indexing)
+    F_all = Vector{OffsetArray{ComplexF64, 1}}(undef, ny)
 
     for iy in 1:ny
-        y_scaled = grid.y[iy] * scale_factor
+        y_scaled = grid.yi[iy] * scale_factor
         x_coulomb = ComplexF64(k * y_scaled)
 
         # Call COULCC once to get F for all λ from 0 to λ_max
@@ -1092,9 +1093,10 @@ function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64},
 
         if ifail != 0
             @warn "COULCC failed at iy=$iy with ifail=$ifail, using F=0 for all λ"
-            F_all[iy] = zeros(ComplexF64, λ_max + 1)
+            F_all[iy] = OffsetArray(zeros(ComplexF64, λ_max + 1), 0:λ_max)
         else
-            F_all[iy] = fc
+            # Convert to OffsetArray with 0-based indexing: fc[0] = F_λ=0, fc[1] = F_λ=1, ...
+            F_all[iy] = OffsetArray(fc, 0:λ_max)
         end
     end
 
@@ -1122,8 +1124,8 @@ function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64},
                 # Get deuteron wavefunction component for this channel
                 φ_d_component = φ_d_matrix[ix, matched_2b_channel]
 
-                # Get Coulomb function for this λ (note: λ=0 is at index 1)
-                F_λ = F_all[iy][λ_channel + 1]
+                # Get Coulomb function for this λ (OffsetArray allows direct indexing: F_all[iy][λ])
+                F_λ = F_all[iy][λ_channel]
 
                 # Compute: φᵢ = [φ_d(x) * F_λ(y)] / [f_ix * f_iy]
                 φ[i] = (φ_d_component * F_λ) / (f_ix * f_iy)
