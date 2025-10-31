@@ -22,7 +22,7 @@ const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
 const ħ = 197.3269718 # MeV. fm
 
-export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, test_V_scaled_at_zero, Rxy_matrix_with_caching, compute_initial_state_vector
+export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, Rxy_matrix_with_caching, compute_initial_state_vector
 
 # Coulomb potential function (matches matrices.jl implementation)
 function VCOUL_point(R, z12)
@@ -511,75 +511,25 @@ end
 
 
 """
-    V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=40, return_components=false)
+    V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothing, return_components=false)
 
-COMPLEX SCALED VERSION of V_matrix using backward rotation of basis functions.
+Complex-scaled V_matrix using backward rotation: V_ij(θ) = e^(-iθ) ∫ φᵢ(re^(-iθ)) V(r) φⱼ(re^(-iθ)) dr
 
-## Theory: Backward Rotation Method
+Evaluates potential V(r) at real mesh points, rotates basis functions to complex arguments.
+For θ=0, automatically falls back to standard V_matrix_optimized (faster).
 
-When the potential V(r) is only available at discrete mesh points (e.g., from folding procedures),
-direct rotation of the potential function is not possible. Instead, we apply **backward rotation**
-to the basis functions and use Cauchy's theorem:
-
-    V_ij(θ) = e^(-iθ) ∫₀^∞ φᵢ(r e^(-iθ)) V(r) φⱼ(r e^(-iθ)) dr
-
-where:
-- V(r) is evaluated at real mesh points only (no complex arguments needed)
-- φᵢ(r e^(-iθ)) are basis functions evaluated at complex-rotated coordinates
-- e^(-iθ) is an overall scaling factor from the Jacobian
-
-## Implementation Strategy:
-
-1. **Potential evaluation**: Use existing pot_nucl() to get V(r) at mesh points
-2. **Basis rotation**: Evaluate Laguerre basis at complex arguments r → r e^(-iθ)
-3. **Gauss quadrature**: Use finer mesh (n_gauss points) for accurate integration
-4. **Oscillatory integrands**: After rotation, basis functions oscillate more strongly
-
-## Parameters:
+# Arguments
 - `α`: Channel structure
 - `grid`: Mesh structure
-- `potname`: Nuclear potential name (e.g., "AV18")
-- `θ_deg`: Complex scaling angle in degrees (default=0.0 for no scaling)
-- `n_gauss`: Number of Gauss quadrature points (default=40, increase for larger θ)
-- `return_components`: If true, return (Vmatrix, V_x_diag_channels)
-- `force_computation`: If true, compute even at θ=0 (for validation tests, default=false)
+- `potname`: Nuclear potential (e.g., "AV18")
+- `θ_deg`: Complex scaling angle in degrees (default 0)
+- `n_gauss`: Gauss quadrature points (default 5×nx, increase for large θ)
+- `return_components`: Return (Vmatrix, V_x_diag_channels) if true
 
-## Performance Notes:
-- For θ=0: Falls back to standard V_matrix_optimized (no extra cost)
-- For θ≠0: Requires Gauss quadrature integration (slower but more accurate)
-- Larger θ requires larger n_gauss due to oscillatory integrands
-- Recommended: n_gauss ≥ 2×nx for θ up to 20°
-
-## Usage:
+# Example
 ```julia
-# Standard potential (no scaling) - automatically uses V_matrix_optimized
-V = V_matrix_optimized_scaled(α, grid, "AV18")
-
-# With complex scaling at 10 degrees
 V = V_matrix_optimized_scaled(α, grid, "AV18", θ_deg=10.0)
-
-# With higher quadrature accuracy for large angle
-V = V_matrix_optimized_scaled(α, grid, "AV18", θ_deg=20.0, n_gauss=60)
-
-# Validation test: compare backward rotation at θ=0 with standard method
-passed, abs_err, rel_err = test_V_scaled_at_zero(α, grid, "AV18", n_gauss=50)
 ```
-
-## Mathematical Details:
-
-The integral is computed using Gauss-Legendre quadrature on [0, rmax]:
-
-    V_ij(θ) = e^(-iθ) Σₖ wₖ φᵢ(rₖ e^(-iθ)) V(rₖ) φⱼ(rₖ e^(-iθ))
-
-where (rₖ, wₖ) are Gauss-Legendre quadrature points and weights on [0, grid.xmax].
-
-IMPORTANT: NO CONJUGATE on φᵢ! The complex-scaled Hamiltonian is non-Hermitian.
-
-For the Laguerre-regularized basis used in this code:
-- Pass physical coordinates (fm) directly: lagrange_laguerre_regularized_basis(r_k, grid.xi, grid.ϕx, grid.α, grid.hsx, θ)
-- The function handles coordinate scaling and backward rotation internally
-- Evaluates basis at rotated coordinate: φᵢ(rₖ e^(-iθ))
-- Default n_gauss = 5 * grid.nx is sufficient for convergence
 """
 function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothing, return_components=false)
     # For θ=0, fall back to standard implementation (no complex scaling, faster and exact)
@@ -859,207 +809,20 @@ end
 
 
 """
-    test_V_scaled_at_zero(α, grid, potname; n_gauss=40, tolerance=1e-10)
-
-Validation test to verify V_matrix_optimized_scaled implementation.
-
-This function compares the backward rotation method at θ=0 with the standard
-V_matrix_optimized result. At θ=0, both methods should give identical results.
-
-## Test Procedure:
-1. Compute V using standard method: V_standard = V_matrix_optimized(α, grid, potname)
-2. Compute V using backward rotation at θ=0 with force_computation=true
-3. Compare matrices element-by-element
-4. Report maximum absolute difference and relative error
-
-## Parameters:
-- `α`: Channel structure
-- `grid`: Mesh structure
-- `potname`: Nuclear potential name (e.g., "AV18")
-- `n_gauss`: Number of Gauss quadrature points (default=40)
-- `tolerance`: Acceptable error threshold (default=1e-10)
-
-## Returns:
-- `test_passed`: Boolean indicating if test passed
-- `max_abs_error`: Maximum absolute difference between matrices
-- `max_rel_error`: Maximum relative error
-
-## Usage:
-```julia
-passed, abs_err, rel_err = test_V_scaled_at_zero(α, grid, "AV18")
-if passed
-    println("✓ Validation test PASSED")
-else
-    println("✗ Validation test FAILED")
-end
-```
-"""
-function test_V_scaled_at_zero(α, grid, potname; n_gauss=40, tolerance=1e-10)
-    println("\n" * "="^70)
-    println("VALIDATION TEST: V_matrix_optimized_scaled at θ=0")
-    println("="^70)
-
-    # Compute using standard method
-    println("\n1. Computing V using standard method (V_matrix_optimized)...")
-    @time V_standard = V_matrix_optimized(α, grid, potname)
-
-    # Compute using backward rotation method at θ=0 (force computation)
-    println("\n2. Computing V using backward rotation at θ=0 (force_computation=true)...")
-    @time V_scaled = V_matrix_optimized_scaled(α, grid, potname, θ_deg=0.0, n_gauss=n_gauss,
-                                                return_components=false, force_computation=true)
-
-    # Compare matrices
-    println("\n3. Comparing matrices...")
-
-    # Compute differences
-    diff_matrix = V_standard - V_scaled
-    max_abs_error = maximum(abs.(diff_matrix))
-
-    # Compute relative error (avoid division by zero)
-    V_standard_nonzero = V_standard[abs.(V_standard) .> 1e-15]
-    if length(V_standard_nonzero) > 0
-        rel_errors = abs.(diff_matrix[abs.(V_standard) .> 1e-15] ./ V_standard_nonzero)
-        max_rel_error = maximum(rel_errors)
-    else
-        max_rel_error = 0.0
-    end
-
-    # Check if test passed
-    test_passed = max_abs_error < tolerance
-
-    # Print results
-    println("\n" * "="^70)
-    println("TEST RESULTS")
-    println("="^70)
-    println("Matrix size:           $(size(V_standard, 1)) × $(size(V_standard, 2))")
-    println("Gauss quadrature:      $(n_gauss) points")
-    println("Maximum absolute error: $(max_abs_error)")
-    println("Maximum relative error: $(max_rel_error)")
-    println("Tolerance:             $(tolerance)")
-    println("-"^70)
-
-    if test_passed
-        println("✓ TEST PASSED: Backward rotation matches standard method at θ=0")
-    else
-        println("✗ TEST FAILED: Errors exceed tolerance")
-        println("  Consider increasing n_gauss or checking implementation")
-    end
-    println("="^70 * "\n")
-
-    return test_passed, max_abs_error, max_rel_error
-end
-
-
-"""
     Rxy_matrix_with_caching(α, grid)
 
-Optimized Rxy_matrix computation with Laguerre basis caching.
+Optimized Rxy_matrix with cached Laguerre basis functions.
 
-## Key Optimization: Cache Laguerre Basis Functions
+Pre-computes all basis evaluations at transformed coordinates (πb, ξb) before channel loops,
+avoiding redundant calculations. Expected speedup: 2-3× compared to naive implementation.
 
-The critical insight is that fπb and fξb only depend on the transformed
-coordinates (πb, ξb), which are computed from (ix, iy, iθ, perm_idx).
-They are **completely independent** of channel indices (iα, iαp)!
-
-### Original Implementation (matrices.jl:20-95):
-```julia
-for ix in 1:nx
-    for iy in 1:ny
-        for iθ in 1:nθ
-            # Compute πb, ξb
-            fπb = lagrange_laguerre_regularized_basis(πb, ...)  # Called here
-            fξb = lagrange_laguerre_regularized_basis(ξb, ...)  # Called here
-
-            for iα in 1:nchmax          # These loops are INSIDE
-                for iαp in 1:nchmax     # but fπb, fξb don't depend on iα, iαp!
-                    for ixp in 1:nx
-                        for iyp in 1:ny
-                            # Use fπb[ixp], fξb[iyp]
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-```
-
-**Problem**: For nx=20, ny=20, nθ=20, nchmax=10:
-- Laguerre basis called: 2 × 20 × 20 × 20 × 2 permutations = **32,000 times**
-- Each call: O(nx) or O(ny) operations
-- But there are only: 20 × 20 × 20 × 2 = **16,000 unique (πb, ξb) pairs**!
-
-### This Optimized Implementation:
-```julia
-# PRE-COMPUTE: Cache all Laguerre basis functions
-cache_fπb = Dict()  # Store fπb for each (ix, iy, iθ, perm_idx)
-cache_fξb = Dict()  # Store fξb for each (ix, iy, iθ, perm_idx)
-
-for ix, iy, iθ, perm_idx:
-    compute πb, ξb
-    cache_fπb[ix, iy, iθ, perm_idx] = lagrange_laguerre_regularized_basis(πb, ...)
-    cache_fξb[ix, iy, iθ, perm_idx] = lagrange_laguerre_regularized_basis(ξb, ...)
-
-# MAIN LOOP: Use cached values
-for ix in 1:nx
-    for iy in 1:ny
-        for iθ in 1:nθ
-            fπb = cache_fπb[ix, iy, iθ, perm_idx]  # FAST LOOKUP!
-            fξb = cache_fξb[ix, iy, iθ, perm_idx]  # FAST LOOKUP!
-
-            for iα in 1:nchmax
-                for iαp in 1:nchmax
-                    for ixp in 1:nx
-                        for iyp in 1:ny
-                            # Use cached fπb[ixp], fξb[iyp]
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-```
-
-## Performance Impact:
-
-**Before (original):**
-- Laguerre calls: 32,000 (2 per (ix,iy,iθ,perm) × nα × nαp iterations)
-- Cost per call: O(nx) operations
-- Total: 32,000 × O(nx) = 640,000 operations for nx=20
-
-**After (cached):**
-- Laguerre calls: 16,000 (2 per (ix,iy,iθ,perm) - computed once!)
-- Cache lookups: 32,000 (O(1) each)
-- Total: 16,000 × O(nx) + 32,000 = 320,000 + 32,000 operations
-
-**Expected speedup: 2-3× for Rxy_matrix computation**
-
-## Additional Optimizations:
-
-1. **Pre-compute normalization factors** outside loops
-2. **Early exit** for negligible G-coefficients
-3. **@inbounds** for inner loops (skip bounds checking)
-4. **Pre-allocate** cache with known size
-
-## Memory Usage:
-
-**Cache size**:
-- fπb cache: nθ × nx × ny × 2 × nx × 8 bytes ≈ 20 × 20 × 20 × 2 × 20 × 8 = 1.28 MB
-- fξb cache: nθ × nx × ny × 2 × ny × 8 bytes ≈ 20 × 20 × 20 × 2 × 20 × 8 = 1.28 MB
-- **Total cache: ~2.5 MB** (negligible compared to matrix size!)
-
-## Returns:
+# Returns
 - `Rxy`: Full rearrangement matrix (Rxy_31 + Rxy_32)
 - `Rxy_31`: Rearrangement from coordinate set 1 to 3
 - `Rxy_32`: Rearrangement from coordinate set 2 to 3
 
-## Example Usage:
+# Example
 ```julia
-include("Rxy_matrix_cached.jl")
-using .Rxy_matrix_cached
-
-# Compute with caching (2-3× faster)
 Rxy, Rxy_31, Rxy_32 = Rxy_matrix_with_caching(α, grid)
 ```
 """
@@ -1216,109 +979,31 @@ end
 """
     compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2; θ=0.0)
 
-Compute the initial state vector φ for scattering calculations.
+Compute initial state vector φ for deuteron scattering: φᵢ = [φ_d(x) F_λ(ky)] / [ϕx ϕy]
 
-# Formula
-The initial state vector is computed as:
-```
-φᵢ(θ) = [φ_d^{α}(xᵢ e^{iθ}) F_λ^{α}(k·yᵢ e^{iθ})] / [f_{ix}(xᵢ) f_{iy}(yᵢ)]
-```
-
-where:
-- φ_d^{α}(x) is the bound state wavefunction component for channel α
-- F_λ^{α}(ky) is the regular Coulomb function with angular momentum λ from channel α
-- f_{ix}(x) = grid.ϕx[ix] and f_{iy}(y) = grid.ϕy[iy] are the basis functions
-- θ is the complex scaling angle (default 0 for real calculations)
-
-# Important Physics
-The deuteron (J12=1) contains BOTH ³S₁ (~96%, l=0) and ³D₁ (~4%, l=2) components.
-The initial state populates ALL three-body channels that couple to the deuteron:
-- Channels with J12=1, s12=1, and l∈{0,2}
-- Across ALL possible λ values (orbital angular momentum of third particle)
-- Each channel uses its own λ for computing the Coulomb function F_λ(ky)
-
-This is physically correct because:
-1. The deuteron has multiple angular momentum components (³S₁ + ³D₁)
-2. The third particle can have any λ while conserving total angular momentum
-3. Each (l, λ) combination couples differently to the deuteron
+# Physics
+Populates ALL three-body channels coupling to deuteron (J12=1 with ³S₁ + ³D₁ components).
+Each channel uses its own λ for Coulomb function F_λ(ky).
 
 # Arguments
-- `grid`: Mesh structure containing grid points and basis functions
-- `α`: Three-body channel structure with quantum numbers (l, s12, J12, λ, etc.)
-- `φ_d_matrix`: Deuteron wavefunction matrix (grid.nx × n_2b_channels)
-  - Typically n_2b_channels = 2: column 1 = ³S₁ (l=0), column 2 = ³D₁ (l=2)
-  - From bound2b calculation with J12=1
-- `E`: Scattering energy (MeV) in center-of-mass frame
-- `z1z2`: Product of charges Z₁*Z₂ for Coulomb interaction
-
-# Keyword Arguments
-- `θ`: Complex scaling angle (radians, default = 0.0)
+- `grid`: Mesh with basis functions ϕx, ϕy
+- `α`: Three-body channels with quantum numbers (l, s12, J12, λ)
+- `φ_d_matrix`: Deuteron wavefunction from bound2b (nx × 2 for ³S₁, ³D₁)
+- `E`: Scattering energy (MeV)
+- `z1z2`: Charge product Z₁*Z₂
+- `θ`: Complex scaling angle (default 0)
 
 # Returns
-- `φ`: Initial state vector of length (grid.nx * grid.ny * n_channels)
-  - Ordering: i = (iα - 1) * nx * ny + (ix - 1) * ny + iy
-  - Same convention as V_matrix_optimized and Rxy_matrix_optimized
-  - iα (channel): slowest varying, ix: middle, iy (fastest varying)
-  - Only channels coupling to deuteron are non-zero
-
-# Physical Interpretation
-This vector represents the incoming scattering state where:
-- The deuteron is in its bound state (with all angular momentum components)
-- The third particle scatters with Coulomb interaction
-- The division by basis functions projects onto the Laguerre basis
-- Multiple channels are populated simultaneously (not just one!)
+- `φ`: Vector of length nx × ny × n_channels, ordered i = (iα-1)*nx*ny + (ix-1)*ny + iy
 
 # Example
 ```julia
-include("twobody.jl")
-using .TwoBody
-
-# Compute deuteron bound state (returns matrix with ³S₁ and ³D₁ components)
-bound_energies, bound_wavefunctions = bound2b(grid, potential)
-φ_d_matrix = bound_wavefunctions[1]  # Ground state, size (nx, 2)
-
-# Set up scattering
-E = 10.0  # MeV
-z1z2 = 1.0  # proton-deuteron (charge product)
-
-# Compute initial state (populates ALL channels coupling to deuteron)
+bound_energies, bound_wavefunctions = bound2b(grid, "AV18")
+φ_d_matrix = ComplexF64.(bound_wavefunctions[1])
 φ = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2)
-
-# For complex scaling (resonance calculations)
-θ = 0.1  # radians
-φ_scaled = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ)
 ```
 """
 function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64}, E, z1z2; θ=0.0)
-    """
-    Compute the initial state vector φ for deuteron scattering.
-
-    The deuteron bound state (J12=1) contains both ³S₁ (l=0) and ³D₁ (l=2) components.
-    ALL three-body channels that couple to these bound state components are populated,
-    across ALL possible λ values (orbital angular momentum between third particle and pair).
-
-    # Arguments
-    - `grid`: Numerical mesh containing x, y grids and basis functions ϕx, ϕy
-    - `α`: Three-body channel structure with quantum numbers (l, s12, J12, λ, etc.)
-    - `φ_d_matrix`: Deuteron wavefunction matrix (grid.nx × n_2b_channels)
-                    where n_2b_channels typically = 2 for ³S₁ and ³D₁ components
-    - `E`: Scattering energy (MeV)
-    - `z1z2`: Product of charges Z₁Z₂ for Coulomb interaction
-    - `θ`: Complex scaling angle (default=0.0 for no scaling)
-
-    # Returns
-    - `φ`: Initial state vector of length nx × ny × n_channels
-           Ordered as: i = (iα - 1)*nx*ny + (ix - 1)*ny + iy
-
-    # Physics
-    The initial state is constructed as:
-    φᵢ^(α) = [φ_d^(α)(xᵢ) × F_λ(kyᵢ)] / [ϕx(xᵢ) × ϕy(yᵢ)]
-
-    where:
-    - φ_d^(α)(x) is the deuteron wavefunction component for channel α
-    - F_λ(ky) is the regular Coulomb function with angular momentum λ
-    - ϕx, ϕy are the Laguerre basis functions
-    """
     # Load COULCC library if not already loaded
     if CoulCC.libcoulcc[] == C_NULL
         CoulCC.load_library()
