@@ -1,0 +1,8 @@
+# Fortran compiled files
+*.o
+*.mod
+
+# Dynamic libraries
+*.dylib
+*.so
+*.dll
