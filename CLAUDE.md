@@ -37,6 +37,9 @@ This creates `libpotentials.dylib` (macOS), `libpotentials.so` (Linux), or `libp
 - **Fortran compiler**: `gfortran` with `-O2 -fPIC -Wall -Wextra` optimization
 - **Platform detection**: Automatic selection of shared library format
 - **F77/F90 compatibility**: Separate compilation flags for legacy and modern Fortran code
+- **COULCC library**: Compiled automatically by `setup.sh` via `Makefile_coulcc` in `swift/`
+  - Creates `libcoulcc.dylib` (macOS), `libcoulcc.so` (Linux), or `libcoulcc.dll` (Windows)
+  - Provides Coulomb wavefunctions for scattering calculations
 
 ### Running Calculations
 - **Main calculation**: `cd swift && julia swift_3H.jl` - Run 3H (tritium) bound state calculation
@@ -72,11 +75,13 @@ The codebase is organized into three main module directories:
 
 3. **swift/**: Core Faddeev implementation
    - `matrices.jl`: Matrix elements for kinetic energy (T), potential (V), and coordinate transformations (Rxy)
+   - `matrices_optimized.jl`: Optimized matrix computations with caching and complex scaling support
    - `threebodybound.jl`: Direct eigenvalue solver for bound state energies
    - `MalflietTjon.jl`: Iterative Malfiet-Tjon eigenvalue solver with secant method convergence
    - `twobody.jl`: Two-body reference calculations (deuteron)
    - `laguerre.jl`: Basis function implementations
    - `Gcoefficient.jl`: Angular momentum coupling coefficients
+   - `coulcc.jl`: Julia wrapper for COULCC Fortran library (Coulomb wavefunctions)
 
 4. **3Npot/**: Three-body nuclear force models
    - `UIX.jl`: Urbana IX three-body force implementation with Y(r) and T(r) functions
@@ -160,6 +165,43 @@ The framework uses sophisticated indexing schemes:
 - **Physical constants**: Uses PDG pion mass values with proper averaging formula
 - **Delta functions**: Matrix elements include channel selection rules and coordinate constraints
 - **Isospin phase convention**: The isospin phase factor is `(-1)^(T12_prime + 2*t1 + t2 + t3)` where T12_prime is from the **ket** (incoming channel), not the bra (outgoing channel). This must match the phase convention in `Gcoefficient.jl` line 91 for consistent angular momentum recoupling.
+
+### Scattering Calculations
+The framework supports scattering calculations with proper treatment of Coulomb interactions and complex scaling:
+
+**Initial State Vector Construction:**
+```julia
+# 1. Compute two-body bound state (e.g., deuteron)
+bound_energies, bound_wavefunctions = bound2b(grid, "AV18")
+φ_d_matrix = ComplexF64.(bound_wavefunctions[1])  # Ground state with ³S₁ + ³D₁ components
+
+# 2. Set up scattering parameters
+E = 10.0   # Scattering energy (MeV)
+z1z2 = 1.0 # Charge product (e.g., proton-deuteron)
+θ = 0.0    # Complex scaling angle (radians, optional)
+
+# 3. Compute initial state vector
+φ = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ)
+```
+
+**Key Physics:**
+- Deuteron (J12=1) contains both ³S₁ (~96%) and ³D₁ (~4%) components
+- Initial state populates ALL three-body channels coupling to deuteron
+- Each channel uses its own λ for Coulomb function F_λ(ky)
+- Channels with J12≠1 have zero wavefunction (no deuteron bound state exists)
+
+**COULCC Library:**
+- Provides regular (F) and irregular (G) Coulomb wavefunctions
+- Interface: `coulcc(x, η, lmin; lmax=λmax, mode=4)` returns vector of F_λ values
+- Complex scaling supported: evaluate at rotated coordinates x·exp(iθ)
+- Optimized: single call returns all λ values from lmin to lmax
+
+**Complex Scaling:**
+- Used for resonance calculations and continuum discretization
+- Matrices support complex scaling via backward rotation method
+- `V_matrix_optimized_scaled(α, grid, potname, θ_deg=10.0)`
+- `T_matrix_optimized(α, grid, θ_deg=10.0)` for kinetic energy
+- Falls back to standard methods automatically when θ=0
 
 ### Modifying Calculations
 - Channel configurations: Edit parameters in notebook initialization cells
