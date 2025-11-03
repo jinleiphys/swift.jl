@@ -107,9 +107,19 @@ The codebase is organized into three main module directories:
 
 **Scattering Calculations:**
 1. **Initial state setup**: `compute_initial_state_vector()` creates source state (e.g., deuteron + nucleon)
+   - Computes initial wavefunction φ = [φ_d(x) F_λ(ky)] / [ϕx ϕy]
+   - Uses COULCC library for Coulomb functions F_λ
+   - Supports complex scaling (θ≠0) for resonance calculations
 2. **Matrix assembly**: `compute_scattering_matrix()` builds A = E*B - T - V*(I + Rxy)
+   - Returns component matrices for M^{-1} preconditioner construction
 3. **Source term**: `compute_VRxy_phi()` computes b = V*Rxy_31*φ
+   - Optimized multiplication order: V * (Rxy_31 * φ) for efficiency
 4. **Linear solve**: `solve_scattering_equation()` solves [A]c = b for scattering wavefunction
+   - **LU method**: Direct factorization for small systems
+   - **GMRES method**: Preconditioned iterative solver with M^{-1} = [E*B - T - V_αα]^{-1}
+     - Uses diagonal potential V_αα only (within-channel coupling)
+     - Same preconditioner as Malfiet-Tjon bound state solver
+     - Improves convergence for large systems
    - Supports complex scaling for resonance calculations
 
 ### Data Flow
