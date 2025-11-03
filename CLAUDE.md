@@ -76,6 +76,7 @@ The codebase is organized into three main module directories:
 3. **swift/**: Core Faddeev implementation
    - `matrices.jl`: Matrix elements for kinetic energy (T), potential (V), and coordinate transformations (Rxy)
    - `matrices_optimized.jl`: Optimized matrix computations with caching and complex scaling support
+   - `scattering.jl`: Inhomogeneous scattering equation solver for three-body scattering calculations
    - `threebodybound.jl`: Direct eigenvalue solver for bound state energies
    - `MalflietTjon.jl`: Iterative Malfiet-Tjon eigenvalue solver with secant method convergence
    - `twobody.jl`: Two-body reference calculations (deuteron)
@@ -94,6 +95,8 @@ The codebase is organized into three main module directories:
 - **Three-body forces**: Urbana IX (UIX) model with Y(r) and T(r) radial functions
 
 ### Computational Workflow
+
+**Bound State Calculations:**
 1. **Channel generation**: `α3b()` creates allowed quantum states based on conservation laws
 2. **Mesh initialization**: `initialmesh()` sets up hyperspherical coordinate grids
 3. **Matrix construction**: Build Hamiltonian H = T + V + V*Rxy using Faddeev rearrangement
@@ -102,10 +105,16 @@ The codebase is organized into three main module directories:
    - **Direct method**: `ThreeBody_Bound()` solves generalized eigenvalue problem `eigen(H, B)`
    - **Iterative method**: `malfiet_tjon_solve()` uses secant iteration to find λ(E) = 1
 
+**Scattering Calculations:**
+1. **Initial state setup**: `compute_initial_state_vector()` creates source state (e.g., deuteron + nucleon)
+2. **Matrix assembly**: `compute_scattering_matrix()` builds A = E*B - T - V*(I + Rxy)
+3. **Source term**: `compute_VRxy_phi()` computes b = V*Rxy_31*φ
+4. **Linear solve**: `solve_scattering_equation()` solves [A]c = b for scattering wavefunction
+   - Supports complex scaling for resonance calculations
+
 ### Data Flow
-- Input: Nuclear system parameters (J, T, parity, particle spins/isospins)
-- Processing: Channel coupling → Matrix elements → Eigenvalue problem
-- Output: Binding energies and three-body wave functions
+- **Bound states**: System parameters → Channel coupling → Matrix elements → Eigenvalue problem → Binding energies and wavefunctions
+- **Scattering**: System parameters + Initial state → Matrix assembly → Inhomogeneous equation → Scattering wavefunction and observables
 
 ## Important Implementation Details
 
@@ -121,6 +130,7 @@ The codebase is organized into three main module directories:
 - **Eigenvalue methods**: Two complementary approaches:
   - **Direct diagonalization**: Generalized eigenvalue problem `eigen(H, B)` finds all states
   - **Malfiet-Tjon iteration**: Reformulates as `λ(E)[c] = [E*B - T - V]⁻¹ * V*R * [c]`
+- **Scattering solver**: Inhomogeneous equation solver with LU factorization or GMRES iterative method
 - **Convergence**: Secant method iteration until `|λ(E) - 1| < tolerance`
 
 ### Faddeev Normalization (Critical for Truncated Model Space)

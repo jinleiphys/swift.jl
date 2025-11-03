@@ -23,7 +23,7 @@ const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
 const ħ = 197.3269718 # MeV. fm
 
-export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, Rxy_matrix_with_caching, compute_initial_state_vector
+export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, Rxy_matrix_with_caching, compute_initial_state_vector, compute_VRxy_phi
 
 # Coulomb potential function (matches matrices.jl implementation)
 function VCOUL_point(R, z12)
@@ -84,30 +84,17 @@ end
 """
     T_matrix_optimized(α, grid; return_components=false, θ_deg=0.0)
 
-OPTIMIZED VERSION of T_matrix using fused computation to avoid intermediate matrices.
+Compute kinetic energy matrix T with fused computation and optional complex scaling.
 
-## Key Optimizations:
-1. Pre-compute overlap matrices Nx and Ny once (not per channel)
-2. Compute block Kronecker products (nx*ny × nx*ny) instead of full matrix Kronecker (nα*nx*ny × nα*nx*ny)
-3. **FUSED COMPUTATION**: Build final matrix directly instead of creating two intermediate matrices
-4. Minimal memory allocations and memory bandwidth usage
+# Arguments
+- `α`: Channel structure
+- `grid`: Mesh structure
+- `return_components`: Return (T, Tx_ch, Ty_ch, Nx, Ny) if true
+- `θ_deg`: Complex scaling angle in degrees (multiplies T by exp(-2iθ))
 
-## Performance:
-- Old: Creates Tx_matrix + Ty_matrix, then adds (90% of time in addition!)
-- New: Builds Tmatrix directly with fused Tx_block + Ty_block
-- Expected speedup: 4-5× compared to previous version
-
-## Complex Scaling:
-- θ_deg: Complex scaling angle in degrees (default=0.0 for no scaling)
-- The kinetic energy matrices Tx and Ty are multiplied by exp(-2iθ)
-
-## Usage:
+# Example
 ```julia
-Tmat = T_matrix_optimized(α, grid)
-# or with components for M_inverse
-Tmat, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
-# or with complex scaling
-Tmat = T_matrix_optimized(α, grid, θ_deg=10.0)
+T = T_matrix_optimized(α, grid, θ_deg=10.0)
 ```
 """
 function T_matrix_optimized(α, grid; return_components=false, θ_deg=0.0)
@@ -1170,6 +1157,28 @@ function compute_initial_state_vector(grid, α, φ_d::Vector{Float64}, args...; 
     # Convert vector to matrix with single column
     φ_d_matrix = reshape(ComplexF64.(φ_d), length(φ_d), 1)
     return compute_initial_state_vector(grid, α, φ_d_matrix, args...; kwargs...)
+end
+
+"""
+    compute_VRxy_phi(V_θ, Rxy_31, φ_θ)
+
+Compute b(θ) = V(θ) * Rxy_31 * φ(θ) for Faddeev scattering calculations.
+
+# Arguments
+- `V_θ`: Potential matrix (nα*nx*ny × nα*nx*ny), real or complex
+- `Rxy_31`: Rearrangement matrix (nα*nx*ny × nα*nx*ny)
+- `φ_θ`: Initial state vector (nα*nx*ny,)
+
+# Returns
+- `b`: Source term vector b(θ) = V(θ) * Rxy_31 * φ(θ)
+
+"""
+function compute_VRxy_phi(V_θ, Rxy_31, φ_θ)
+    # Compute b = V * (Rxy_31 * φ)
+    # This order is more efficient than (V * Rxy_31) * φ
+    temp = Rxy_31 * φ_θ
+    b = V_θ * temp
+    return b
 end
 
 end # end module

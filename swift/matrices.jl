@@ -13,7 +13,7 @@ const amu= 931.49432 # MeV
 const m=1.0079713395678829 # amu
 const ħ=197.3269718 # MeV. fm
 
-export Rxy_matrix, T_matrix, V_matrix, Bmatrix, M_inverse, M_inverse_operator, MInverseCache, precompute_M_inverse_cache, M_inverse_operator_cached
+export Rxy_matrix, T_matrix, V_matrix, Bmatrix, M_inverse_operator
 
 # 1.008665 amu for neutron  amu=931.49432 MeV
 
@@ -528,43 +528,22 @@ end
 """
     precompute_M_inverse_cache(α, grid, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
 
-Precompute all energy-independent components of M^{-1} operator.
-
-This performs all expensive eigendecompositions and matrix operations that don't
-depend on energy E. The result can be reused for multiple energy evaluations,
-providing significant speedup (typically 10-20×) when evaluating M^{-1} at many energies.
+Precompute energy-independent components of M^{-1} for reuse at multiple energies.
 
 # Arguments
 - `α`: Channel structure
 - `grid`: Mesh structure
-- `Tx_channels`: Vector of kinetic energy matrices in x direction for each channel
-- `Ty_channels`: Vector of kinetic energy matrices in y direction for each channel
-- `V_x_diag_channels`: Vector of diagonal potential matrices in x direction for each channel
-- `Nx`: Overlap matrix in x direction
-- `Ny`: Overlap matrix in y direction
+- `Tx_channels`, `Ty_channels`: Kinetic energy matrices per channel
+- `V_x_diag_channels`: Diagonal potential matrices per channel
+- `Nx`, `Ny`: Overlap matrices
 
 # Returns
-- `MInverseCache`: Cached components for fast M^{-1} evaluation
-
-# Performance
-- Computation time: ~1-3 seconds (one-time cost)
-- Replaces: 6-10 seconds per energy evaluation
-- Speedup: 10-20× for iterative energy searches
+- `MInverseCache`: Cache for fast M^{-1} evaluation with M_inverse_operator_cached
 
 # Example
 ```julia
-# Get matrix components (once)
-T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true)
-Vmat, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
-
-# Precompute cache (once, ~1-3 seconds)
 cache = precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-
-# Use cached components for many energies (each ~0.1-0.5 seconds)
-for E in energy_values
-    M_inv_op = M_inverse_operator_cached(E, cache)
-    result = M_inv_op(vector)
-end
+M_inv_op = M_inverse_operator_cached(E, cache)
 ```
 """
 function precompute_M_inverse_cache(α, grid, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
@@ -614,27 +593,19 @@ end
 """
     M_inverse_operator_cached(E, cache::MInverseCache)
 
-Create M^{-1} operator function using precomputed cache.
-
-This is the fast version that uses cached eigendecompositions. Only the energy-dependent
-diagonal inverse D^{-1} = 1/(E - d_x - d_y) needs to be recomputed.
+Create M^{-1} operator function using precomputed cache (fast version).
 
 # Arguments
 - `E`: Energy value
-- `cache`: Precomputed cache from `precompute_M_inverse_cache`
+- `cache`: Precomputed cache from precompute_M_inverse_cache
 
 # Returns
-A function that applies M^{-1} to vectors efficiently
-
-# Performance
-- Typical time: 0.1-0.5 seconds (vs 6-10 seconds for uncached version)
-- Speedup: 10-20×
+- Function that applies M^{-1} to vectors
 
 # Example
 ```julia
-cache = precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-M_inv_op = M_inverse_operator_cached(-7.5, cache)
-result = M_inv_op(some_vector)
+M_inv_op = M_inverse_operator_cached(E, cache)
+result = M_inv_op(vector)
 ```
 """
 function M_inverse_operator_cached(E::Float64, cache::MInverseCache{T}) where T
@@ -669,41 +640,25 @@ function M_inverse_operator_cached(E::Float64, cache::MInverseCache{T}) where T
 end
 
 """
-    M_inverse(α, grid, E, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
+    M_inverse_operator(α, grid, E, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
 
-Compute the inverse of the M matrix for the Faddeev equation using pre-computed components.
-
-The M matrix is defined as:
-M = E[I_α ⊗ N_x ⊗ N_y] - ∑_α [δ_αα ⊗ H_x^α ⊗ N_y] - ∑_α [δ_αα ⊗ N_x ⊗ T_y^α]
-
-where H_x^α = T_x^α + V_x^α (diagonal part of potential).
-
-The inverse is computed efficiently using eigendecomposition:
-M^{-1} = U * D^{-1} * U^† * [I_α ⊗ N_x^{-1} ⊗ N_y^{-1}]
-
-where U contains the transformation matrices and D is the diagonal energy matrix.
+Create M^{-1} operator function without precomputed cache.
 
 # Arguments
 - `α`: Channel structure
-- `grid`: Mesh grid structure
+- `grid`: Mesh structure
 - `E`: Energy value (MeV)
-- `Tx_channels`: Vector of T_x^α matrices (from T_matrix with return_components=true)
-- `Ty_channels`: Vector of T_y^α matrices (from T_matrix with return_components=true)
-- `V_x_diag_channels`: Vector of diagonal V_x^α matrices (from V_matrix with return_components=true)
-- `Nx`: Overlap matrix in x-direction (from T_matrix with return_components=true)
-- `Ny`: Overlap matrix in y-direction (from T_matrix with return_components=true)
+- `Tx_channels`, `Ty_channels`: Kinetic energy matrices per channel
+- `V_x_diag_channels`: Diagonal potential matrices per channel
+- `Nx`, `Ny`: Overlap matrices
 
 # Returns
-- `M_inv`: Inverse of M matrix
+- Function that applies M^{-1} to vectors
 
-# Example usage
+# Example
 ```julia
-# First compute T and V with components
-Tmat, Tx_ch, Ty_ch, Nx, Ny = T_matrix(α, grid, return_components=true)
-Vmat, V_x_diag_ch = V_matrix(α, grid, potname, return_components=true)
-
-# Then compute M inverse
-M_inv = M_inverse(α, grid, E, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+M_inv_op = M_inverse_operator(α, grid, E, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+result = M_inv_op(vector)
 ```
 """
 function M_inverse_operator(α, grid, E, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
@@ -770,83 +725,5 @@ function M_inverse_operator(α, grid, E, Tx_channels, Ty_channels, V_x_diag_chan
         return result
     end
 end
-
-function M_inverse(α, grid, E, Tx_channels, Ty_channels, V_x_diag_channels, Nx, Ny)
-    nα = α.nchmax
-    nx = grid.nx
-    ny = grid.ny
-
-    # Compute inverses of overlap matrices
-    Nx_inv = inv(Nx)
-    Ny_inv = inv(Ny)
-
-    # Store eigenvectors and eigenvalues for each channel
-    Ux_arrays = Vector{Matrix{Float64}}(undef, nα)
-    Uy_arrays = Vector{Matrix{Float64}}(undef, nα)
-    Ux_inv_arrays = Vector{Matrix{Float64}}(undef, nα)
-    Uy_inv_arrays = Vector{Matrix{Float64}}(undef, nα)
-    dx_arrays = Vector{Vector{Float64}}(undef, nα)
-    dy_arrays = Vector{Vector{Float64}}(undef, nα)
-
-    # Compute eigendecompositions for each channel
-    for iα in 1:nα
-        # Compute H_x^α = T_x^α + V_x^α (using pre-computed components)
-        Hx_alpha = Tx_channels[iα] + V_x_diag_channels[iα]
-
-        # Eigendecomposition of N_x^{-1} * H_x^α
-        Nx_inv_Hx = Nx_inv * Hx_alpha
-        eigen_x = eigen(Nx_inv_Hx)
-        Ux_arrays[iα] = real(eigen_x.vectors)
-        dx_arrays[iα] = real(eigen_x.values)
-        Ux_inv_arrays[iα] = inv(Ux_arrays[iα])
-
-        # Eigendecomposition of N_y^{-1} * T_y^α (using pre-computed component)
-        Ny_inv_Ty = Ny_inv * Ty_channels[iα]
-        eigen_y = eigen(Ny_inv_Ty)
-        Uy_arrays[iα] = real(eigen_y.vectors)
-        dy_arrays[iα] = real(eigen_y.values)
-        Uy_inv_arrays[iα] = inv(Uy_arrays[iα])
-    end
-
-    # KEY INSIGHT: The matrix in the eigenvalue basis is DIAGONAL!
-    # M^{-1} = U * D^{-1} * U^{-1} * [I_α ⊗ N_x^{-1} ⊗ N_y^{-1}]
-    # where D^{-1} is diagonal with elements: 1/(E - d_x^α[ix] - d_y^α[iy])
-
-    # Pre-compute N_inv_block = N_x^{-1} ⊗ N_y^{-1} (same for all channels)
-    N_inv_block = kron(Nx_inv, Ny_inv)  # Only nx*ny × nx*ny
-
-    # Build the full M_inv matrix using block-diagonal structure
-    # This is still needed because we need to multiply M_inv * LHS and M_inv * VRxy
-    M_inv = zeros(nα * nx * ny, nα * nx * ny)
-
-    for iα in 1:nα
-        idx_start = (iα-1) * nx * ny + 1
-        idx_end = iα * nx * ny
-
-        # U_α and U_inv_α blocks
-        U_block = kron(Ux_arrays[iα], Uy_arrays[iα])
-        U_inv_block = kron(Ux_inv_arrays[iα], Uy_inv_arrays[iα])
-
-        # Diagonal elements: D^{-1}[ix, iy] = 1/(E - d_x^α[ix] - d_y^α[iy])
-        D_inv_block_diag = zeros(nx * ny)
-        for ix in 1:nx
-            for iy in 1:ny
-                idx_local = (ix-1) * ny + iy
-                D_inv_block_diag[idx_local] = 1.0 / (E - dx_arrays[iα][ix] - dy_arrays[iα][iy])
-            end
-        end
-
-        # M_inv block = U_α * D_inv_α * U_inv_α * N_inv_block
-        temp1 = U_inv_block * N_inv_block
-        temp2 = Diagonal(D_inv_block_diag) * temp1
-        M_inv_block = U_block * temp2
-
-        M_inv[idx_start:idx_end, idx_start:idx_end] = M_inv_block
-    end
-
-    return M_inv
-end
-
-
 
 end # end module matrices

@@ -14,50 +14,31 @@ using .matrices_optimized
 include("../3Npot/UIX.jl")
 include("../3Npot/UIX_optimized.jl")
 
-export malfiet_tjon_solve, malfiet_tjon_solve_optimized, compute_lambda_eigenvalue, compute_lambda_eigenvalue_optimized, print_convergence_summary, arnoldi_eigenvalue, compute_position_expectation, compute_channel_probabilities, RHSCache, precompute_RHS_cache, compute_uix_potential, compute_uix_potential_optimized
+export malfiet_tjon_solve, malfiet_tjon_solve_optimized, compute_lambda_eigenvalue, compute_lambda_eigenvalue_optimized, print_convergence_summary, arnoldi_eigenvalue, compute_channel_probabilities, RHSCache, precompute_RHS_cache, compute_uix_potential, compute_uix_potential_optimized
 
 """
     compute_uix_potential(α, grid, Rxy_31, Rxy)
 
-Helper function to compute UIX three-body potential.
-This function handles loading the UIX module and computing the potential.
+Compute UIX three-body potential.
 """
 function compute_uix_potential(α, grid, Rxy_31, Rxy)
-    # UIX module already loaded at module initialization
     return UIX.full_UIX_potential(α, grid, Rxy_31, Rxy)
 end
 
 """
     compute_uix_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
 
-Optimized helper function to compute UIX three-body potential.
-
-This function uses the optimized UIX implementation with:
-- Cached radial functions (Y, T)
-- Cached Wigner symbols and S-matrix elements
-- Hybrid sparse/dense matrix operations
-- Pre-computed G-coefficients
+Compute UIX three-body potential using optimized implementation with cached G-coefficients.
 
 # Arguments
 - `α`: Channel structure
-- `grid`: Mesh grid structure
+- `grid`: Mesh structure
 - `Rxy_31`: Rearrangement matrix α₃ → α₁
 - `Rxy`: Combined rearrangement matrix (Rxy_31 + Rxy_32)
-- `Gαα`: Pre-computed G-coefficients (to avoid recomputation)
+- `Gαα`: Pre-computed G-coefficients
 
 # Returns
-- UIX three-body potential matrix (optimized, 2-3x faster than standard version)
-
-# Performance
-Expected ~2-3x speedup compared to `compute_uix_potential`, with the benefit
-increasing for larger grid sizes.
-
-# Example
-```julia
-# Inside malfiet_tjon_solve_optimized:
-Gαα = computeGcoefficient(α, grid)
-V_UIX = compute_uix_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
-```
+- UIX three-body potential matrix
 """
 function compute_uix_potential_optimized(α, grid, Rxy_31, Rxy, Gαα)
     # UIX_optimized module already loaded at module initialization
@@ -110,33 +91,16 @@ end
 
 Precompute energy-independent RHS matrix: RHS = (V - V_αα) + V*R (+ UIX).
 
-This is the single most expensive operation that's currently repeated for every energy,
-taking ~1.0-1.5 seconds. By caching it, we eliminate this cost entirely.
-
 # Arguments
-- `V`: Full potential matrix (nα*nx*ny × nα*nx*ny)
-- `V_x_diag_ch`: Vector of diagonal potential matrices for each channel (from V_matrix)
-- `Rxy`: Rearrangement matrix (nα*nx*ny × nα*nx*ny)
+- `V`: Full potential matrix
+- `V_x_diag_ch`: Vector of diagonal potential matrices per channel
+- `Rxy`: Rearrangement matrix
 - `α`: Channel structure
 - `grid`: Mesh structure
 - `V_UIX`: Optional UIX three-body force matrix
 
 # Returns
-- `RHSCache`: Cached RHS matrix for reuse
-
-# Performance
-- Computation time: ~1.0-1.5 seconds (one-time cost)
-- Replaces: 1.0-1.5 seconds per energy evaluation
-- Speedup: Eliminates 30-40% of per-energy cost
-
-# Example
-```julia
-# After computing V, V_x_diag_ch, and Rxy:
-RHS_cache = precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=V_UIX)
-
-# Then use cached RHS for all energy evaluations
-λ, eigenvec = compute_lambda_eigenvalue_optimized(...; RHS_cache=RHS_cache)
-```
+- `RHSCache`: Cached RHS matrix for reuse at multiple energies
 """
 function precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing)
     nα = α.nchmax
@@ -191,167 +155,6 @@ function precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing)
     end
 
     return RHSCache(RHS_matrix, n_total)
-end
-
-"""
-    GMRESResult
-
-Summary of a GMRES solve.
-
-# Fields
-- `converged::Bool`: Whether the residual tolerance was met
-- `iterations::Int`: Total Krylov iterations performed
-- `residual_norm::Float64`: Final residual ‖A*x - b‖
-- `rel_residual::Float64`: Relative residual ‖A*x - b‖ / ‖b‖
-"""
-struct GMRESResult
-    converged::Bool
-    iterations::Int
-    residual_norm::Float64
-    rel_residual::Float64
-end
-
-"""
-    gmres_matfree(A, b; M=nothing, x0=nothing, abstol=1e-10, reltol=1e-10,
-                  maxiter=200, restart=50, verbose=false)
-
-Restarted GMRES for matrix-free operators with optional left preconditioning.
-
-# Arguments
-- `A`: Linear operator. Can be a matrix or a function `v -> A*v`.
-- `b`: Right-hand side vector.
-- `M`: Optional left preconditioner (matrix or function). The solver
-        works with the transformed system `M*(A*x) = M*b`.
-- `x0`: Optional initial guess. Defaults to the zero vector.
-
-# Keyword arguments
-- `abstol`: Absolute residual tolerance.
-- `reltol`: Relative residual tolerance (based on ‖b‖).
-- `maxiter`: Maximum GMRES iterations (across all restarts).
-- `restart`: Krylov subspace dimension for restarts.
-- `verbose`: Print basic convergence information when `true`.
-
-# Returns
-- `x`: Approximate solution to `A*x = b`.
-- `info::GMRESResult`: Convergence summary.
-"""
-function gmres_matfree(A, b;
-                       M=nothing,
-                       x0=nothing,
-                       abstol::Float64=1e-10,
-                       reltol::Float64=1e-10,
-                       maxiter::Int=200,
-                       restart::Int=50,
-                       verbose::Bool=false)
-    maxiter <= 0 && throw(ArgumentError("maxiter must be positive"))
-    restart <= 0 && throw(ArgumentError("restart must be positive"))
-
-    A_op = A isa AbstractMatrix ? (v -> A * v) : A
-    M_op = M === nothing ? nothing : (M isa AbstractMatrix ? (v -> M * v) : M)
-
-    rhs_orig = M_op === nothing ? copy(b) : M_op(b)
-    T = promote_type(eltype(rhs_orig), eltype(b))
-    rhs = Vector{T}(rhs_orig)
-    b_vec = Vector{T}(b)
-    n = length(rhs)
-    rhs_norm = norm(b)
-
-    x = if x0 === nothing
-        zeros(T, n)
-    else
-        length(x0) == n || throw(DimensionMismatch("x0 has incorrect length"))
-        convert(Vector{T}, copy(x0))
-    end
-
-    apply_operator = M_op === nothing ? (v -> Vector{T}(A_op(v))) : (v -> Vector{T}(M_op(A_op(v))))
-    residual = rhs - apply_operator(x)
-    raw_residual = b_vec - Vector{T}(A_op(x))
-    β = norm(residual)
-    β0 = β
-
-    if β == 0.0
-        residual_norm = norm(raw_residual)
-        rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
-        return x, GMRESResult(true, 0, residual_norm, rel_residual)
-    end
-
-    total_iters = 0
-    restart = min(restart, maxiter)
-    max_restarts = ceil(Int, maxiter / restart)
-
-    for restart_idx in 1:max_restarts
-        m = min(restart, maxiter - total_iters)
-        m <= 0 && break
-
-        V = zeros(T, n, m + 1)
-        H = zeros(T, m + 1, m)
-
-        β = norm(residual)
-        if β < abstol || β / β0 < reltol
-            raw_residual = b_vec - Vector{T}(A_op(x))
-            residual_norm = norm(raw_residual)
-            rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
-            return x, GMRESResult(true, total_iters, residual_norm, rel_residual)
-        end
-
-        V[:, 1] .= residual / β
-        e1 = zeros(T, m + 1)
-        e1[1] = β
-
-        actual_m = m
-
-        for j in 1:m
-            vj = view(V, :, j)
-            w = apply_operator(vj)
-
-            for i in 1:j
-                vi = view(V, :, i)
-                H[i, j] = dot(vi, w)
-                w .-= H[i, j] .* vi
-            end
-
-            H[j + 1, j] = norm(w)
-
-            total_iters += 1
-
-            if abs(H[j + 1, j]) ≤ 1e-14
-                actual_m = j
-                break
-            elseif j < m
-                V[:, j + 1] .= w / H[j + 1, j]
-            end
-        end
-
-        H_reduced = view(H, 1:actual_m + 1, 1:actual_m)
-        V_reduced = view(V, :, 1:actual_m)
-        e1_reduced = view(e1, 1:actual_m + 1)
-
-        y = H_reduced \ e1_reduced
-        x .+= V_reduced * y
-
-        residual = rhs - apply_operator(x)
-        β = norm(residual)
-
-        if verbose
-            println("    GMRES restart $restart_idx: residual=$(β)")
-        end
-
-        if β < abstol || β / β0 < reltol
-            raw_residual = b_vec - Vector{T}(A_op(x))
-            residual_norm = norm(raw_residual)
-            rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
-            return x, GMRESResult(true, total_iters, residual_norm, rel_residual)
-        end
-
-        if total_iters >= maxiter
-            break
-        end
-    end
-
-    raw_residual = b_vec - Vector{T}(A_op(x))
-    residual_norm = norm(raw_residual)
-    rel_residual = rhs_norm > 0 ? residual_norm / rhs_norm : residual_norm
-    return x, GMRESResult(false, total_iters, residual_norm, rel_residual)
 end
 
 """
@@ -748,41 +551,14 @@ end
                                        verbose=false, use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-6,
                                        previous_eigenvector=nothing, V_UIX=nothing)
 
-**OPTIMIZED VERSION** using M⁻¹ preconditioner for faster eigenvalue computation.
+Optimized version using M⁻¹ preconditioner: λ(E0) [c] = M⁻¹(E0) * (V - V_αα + V*R + UIX) [c]
 
-This function computes the eigenvalue λ(E0) for the reformulated Faddeev equation:
-    λ(E0) [c] = M⁻¹(E0) * (V - V_αα + V*R + UIX) [c]
-
-where:
-- M⁻¹ = [E0*B - T - V_αα]⁻¹ is the preconditioner (diagonal potential only)
-- V_αα is the diagonal part of the potential (within channels)
-- V - V_αα is the off-diagonal part (channel coupling)
-
-# Key Differences from Original
-1. **Preconditioner**: Uses M⁻¹ = [E*B - T - V_αα]⁻¹ instead of [E*B - T - V]⁻¹
-2. **RHS formulation**: K(E) = M⁻¹ * (V - V_αα + V*R + UIX)
-3. **Better conditioning**: M⁻¹ is cheaper to compute (diagonal potential only)
-4. **Physical interpretation**: Separates diagonal from off-diagonal channel coupling
-
-# Physics
-The reformulation separates the potential into diagonal and off-diagonal parts:
-- V_αα: Within-channel interaction (included in preconditioner)
-- V - V_αα: Channel-channel coupling (treated as perturbation)
-
-This is similar to the M⁻¹ preconditioner used in GMRES, but applied to eigenvalue problem.
-
-# Arguments
-Same as `compute_lambda_eigenvalue()`, see that function for detailed documentation.
+Uses M⁻¹ = [E0*B - T - V_αα]⁻¹ with diagonal potential only for faster computation.
 
 # Returns
 - `λ`: Dominant eigenvalue
 - `eigenvec`: Corresponding eigenvector
-- `arnoldi_iters`: Number of Arnoldi iterations performed
-
-# Performance Benefits
-- Faster LHS inversion (M⁻¹ has diagonal potential only, not full V)
-- Better numerical conditioning
-- More efficient when V has strong off-diagonal coupling
+- `arnoldi_iters`: Number of Arnoldi iterations
 """
 function compute_lambda_eigenvalue_optimized(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
                                             verbose::Bool=false, use_arnoldi::Bool=true,
@@ -1014,39 +790,22 @@ end
                       use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-10,
                       include_uix=false)
 
-Solve the Faddeev equation using the Malfiet-Tjon method with secant iteration
-and efficient Arnoldi eigenvalue computation.
+Solve Faddeev equation using Malfiet-Tjon method: λ(E) [c] = [E*B - H0 - V]⁻¹ R [c]
 
-The method solves: λ(E) [c] = [E*B - H0 - V]⁻¹ R [c]
-where the ground state energy satisfies λ(E_gs) = 1.
+Uses secant iteration to find energy where λ(E_gs) = 1.
 
 # Arguments
-- `α`: Channel structure from channels module
-- `grid`: Mesh structure from mesh module
-- `potname`: Nuclear potential name (e.g., "AV18", "MT")
+- `α`: Channel structure
+- `grid`: Mesh structure
+- `potname`: Nuclear potential (e.g., "AV18", "MT")
 - `e2b`: Two-body threshold energies
-- `E0`: First initial energy guess (default: -8.0 MeV)
-- `E1`: Second initial energy guess (default: -7.0 MeV)
-- `tolerance`: Convergence tolerance |λ-1| < tolerance (default: 1e-6)
-- `max_iterations`: Maximum secant method iterations (default: 100)
-- `verbose`: Print iteration details (default: true)
-- `use_arnoldi`: Use Arnoldi method for eigenvalue computation (default: true)
-- `krylov_dim`: Krylov subspace dimension for Arnoldi (default: 50)
-- `arnoldi_tol`: Arnoldi convergence tolerance (default: 1e-10)
+- `E0`, `E1`: Initial energy guesses (default: -8.0, -7.0 MeV)
+- `tolerance`: Convergence tolerance |λ-1| (default: 1e-6)
+- `max_iterations`: Maximum iterations (default: 100)
 - `include_uix`: Include UIX three-body force (default: false)
 
 # Returns
-- `MalflietTjonResult`: Structure containing converged energy, eigenvalue, and diagnostics
-
-# Method
-Uses secant method iteration:
-E_{n+1} = E_n - [λ(E_n) - 1] * (E_n - E_{n-1}) / [λ(E_n) - λ(E_{n-1})]
-
-The Arnoldi method efficiently computes eigenvalues of the Faddeev kernel
-K(E) = [EB - H₀ - V]⁻¹ R using Krylov subspace projection, avoiding
-expensive full matrix diagonalization.
-
-Convergence occurs when |λ(E_n) - 1| < tolerance.
+- `MalflietTjonResult`: Converged energy, eigenvalue, and diagnostics
 """
 function malfiet_tjon_solve(α, grid, potname, e2b;
                            E0::Float64=-8.0, E1::Float64=-7.0,
@@ -1404,25 +1163,18 @@ end
 
 """
         check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; tolerance=1e-12, verbose=true)
-    
-    Check if the rearrangement matrices Rxy_31 and Rxy_32 are equal.
-    
-    In a three-body system with identical particles (like three nucleons),
-    the rearrangement operators R₃₁ and R₃₂ should be equal due to particle
-    exchange symmetry: R₃₁ (1↔3) should equal R₃₂ (2↔3) when particles 
-    1 and 2 are identical.
-    
+
+    Check if rearrangement matrices Rxy_31 and Rxy_32 are equal (particle exchange symmetry).
+
     # Arguments
-    - `Rxy_31`: Rearrangement matrix for 1↔3 particle exchange
-    - `Rxy_32`: Rearrangement matrix for 2↔3 particle exchange  
-    - `α`: Channel structure with quantum numbers
-    - `grid`: Spatial grid information
-    - `tolerance`: Numerical tolerance for matrix comparison (default: 1e-12)
-    - `verbose`: Print detailed comparison results (default: true)
-    
+    - `Rxy_31`: Rearrangement matrix for 1↔3 exchange
+    - `Rxy_32`: Rearrangement matrix for 2↔3 exchange
+    - `tolerance`: Numerical tolerance (default: 1e-12)
+    - `verbose`: Print detailed results (default: true)
+
     # Returns
-    - `are_equal`: Boolean indicating if matrices are equal within tolerance
-    - `max_diff`: Maximum absolute difference between matrix elements
+    - `are_equal`: Boolean indicating equality within tolerance
+    - `max_diff`: Maximum absolute difference
     """
     function check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; tolerance=1e-12, verbose=true)
         # Check that matrices have the same dimensions
@@ -1625,28 +1377,17 @@ end
 """
     compute_channel_probabilities(ψ_normalized, B, α, grid)
 
-Compute the probability contribution of each channel in the three-body wave function.
-
-The probability contribution of each channel i is computed as:
-    P_i = real(ψ_normalized[i]' * B[i,i] * ψ_normalized[i])
-
-where ψ_normalized is the FULL Faddeev wavefunction Ψ̄ = (1 + Rxy)ψ̄₃ normalized
-using the Faddeev scheme: |Ψ̄⟩ = |Ψ⟩/√(3⟨Ψ|ψ₃⟩) so that ⟨Ψ̄|Ψ̄⟩ = 1.
+Compute probability contribution of each channel: P_i = ⟨ψ_i|B|ψ_i⟩
 
 # Arguments
-- `ψ_normalized`: Normalized FULL wave function |Ψ̄⟩ where ⟨Ψ̄|B|Ψ̄⟩ = 1
+- `ψ_normalized`: Normalized full wavefunction |Ψ̄⟩
 - `B`: Overlap matrix
-- `α`: Channel structure (used to get channel information)
-- `grid`: Mesh structure (used to get grid dimensions)
+- `α`: Channel structure
+- `grid`: Mesh structure
 
 # Returns
-- `channel_probs`: Vector of probability contributions for each channel (sum to 1)
-- `channel_info`: Vector of channel descriptions for labeling
-
-# Physics
-In the Faddeev formalism, each channel represents a specific coupling of
-angular momentum and isospin quantum numbers. The probability contribution
-shows how much each channel contributes to the total three-body bound state.
+- `channel_probs`: Vector of probability contributions per channel
+- `channel_info`: Vector of channel descriptions
 """
 function compute_channel_probabilities(ψ_normalized, B, α, grid)
     # Channel probabilities from the FULL wavefunction Ψ̄
@@ -1700,39 +1441,17 @@ end
                                  use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-6,
                                  include_uix=false)
 
-**OPTIMIZED VERSION** of Malfiet-Tjon solver using optimized T, V, and Rxy matrix functions.
+Optimized Malfiet-Tjon solver using optimized T, V, and Rxy matrix functions.
 
-This version uses:
-- `T_matrix_optimized()` for ~8× faster kinetic energy matrix computation
-- `V_matrix_optimized()` for ~1.5-2× faster potential matrix computation
-- `Rxy_matrix_optimized()` for ~2× faster rearrangement matrix computation
-- Overall speedup: ~2-3× for matrix construction phase
-
-All other arguments and behavior are identical to `malfiet_tjon_solve()`.
-
-# Performance Benefits
-- Faster matrix construction (typically 40-60% of total time)
-- Same numerical accuracy as non-optimized version
-- 50% memory reduction in Rxy computation (exploits symmetry)
+Uses T_matrix_optimized, V_matrix_optimized, and Rxy_matrix_optimized for faster computation.
 
 # Arguments
-See `malfiet_tjon_solve()` documentation for detailed argument descriptions.
+See `malfiet_tjon_solve()` for detailed argument descriptions.
 
 # Returns
-- `MalflietTjonResult`: Structure containing converged energy, eigenvalue, and diagnostics
+- `MalflietTjonResult`: Converged energy, eigenvalue, and diagnostics
 - `ψtot`: Normalized total wave function
 - `ψ3`: Normalized component wave function
-
-# Example
-```julia
-# using .channels, .mesh, .MalflietTjon
-
-α = α3b(true, 0.5, 0.5, 1, 2, 0, 4, 0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 2.0)
-grid = initialmesh(12, 15, 15, 15.0, 15.0, 0.5)
-e2b = [-2.2246]
-
-result, ψtot, ψ3 = malfiet_tjon_solve_optimized(α, grid, "AV18", e2b; include_uix=true)
-```
 """
 function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
                                      E0::Float64=-8.0, E1::Float64=-7.0,
