@@ -78,10 +78,14 @@ function bound2b(grid, potname; θ_deg=0.0, n_gauss=nothing, verbose=false)
         if real(eigenvalues[i]) < 0.0 && abs(imag(eigenvalues[i])) < imag_tol
             bound_count += 1
             eigenvec = eigenvectors[:, i]
-            norm = sum(abs2.(eigenvec))
 
-            if norm ≠ 1.0
-                eigenvec = eigenvec / sqrt(norm)
+            # Proper B-normalization: ⟨ψ|B|ψ⟩ = 1
+            # This is correct for both θ=0 and θ≠0 (complex scaling)
+            norm_squared = eigenvec' * B * eigenvec
+            norm = sqrt(real(norm_squared))  # Take real part in case of numerical noise
+
+            if abs(norm - 1.0) > 1e-10
+                eigenvec = eigenvec / norm
             end
 
             # Compute the wave function with multiple components
