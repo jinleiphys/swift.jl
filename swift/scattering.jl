@@ -9,6 +9,9 @@ using SparseArrays
 include("matrices_optimized.jl")
 using .matrices_optimized
 
+include("matrices.jl")
+using .matrices
+
 export solve_scattering_equation, compute_scattering_matrix
 
 """
@@ -31,6 +34,7 @@ Compute the left-hand side matrix A = E*B - T - V*(I + Rxy) for scattering equat
 - `Rxy`: Total rearrangement matrix (Rxy_31 + Rxy_32)
 - `Rxy_31`: Rearrangement matrix from coordinate set 1 to 3
 - `Rxy_32`: Rearrangement matrix from coordinate set 2 to 3
+- `Tx_ch`, `Ty_ch`, `V_x_diag_ch`, `Nx`, `Ny`: Component matrices for M_inverse_operator
 """
 function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
     N = α.nchmax * grid.nx * grid.ny
@@ -39,23 +43,21 @@ function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
     println("  Energy E = $E MeV")
     println("  Matrix size: $N × $N")
 
-    # Compute overlap matrix B
-    println("  Computing overlap matrix B...")
-    Nx = matrices_optimized.compute_overlap_matrix(grid.nx, grid.xx)
-    Ny = matrices_optimized.compute_overlap_matrix(grid.ny, grid.yy)
-    B = kron(Matrix{Float64}(I, α.nchmax, α.nchmax), kron(Nx, Ny))
-
-    # Compute kinetic energy matrix T
+    # Compute kinetic energy matrix T with components
     println("  Computing kinetic energy matrix T...")
-    T = T_matrix_optimized(α, grid, θ_deg=θ_deg)
+    T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true, θ_deg=θ_deg)
 
-    # Compute potential matrix V
+    # Compute potential matrix V with components
     println("  Computing potential matrix V...")
     if θ_deg == 0.0
-        V = V_matrix_optimized(α, grid, potname)
+        V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
     else
-        V = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg)
+        V, V_x_diag_ch = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, return_components=true)
     end
+
+    # Compute overlap matrix B
+    println("  Computing overlap matrix B...")
+    B = kron(Matrix{Float64}(I, α.nchmax, α.nchmax), kron(Nx, Ny))
 
     # Compute rearrangement matrices
     println("  Computing rearrangement matrices Rxy...")
@@ -75,13 +77,16 @@ function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
 
     println("  Scattering matrix computed successfully.")
 
-    return A, B, T, V, Rxy, Rxy_31, Rxy_32
+    return A, B, T, V, Rxy, Rxy_31, Rxy_32, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny
 end
 
 """
     solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, method=:lu)
 
 Solve the inhomogeneous scattering equation: [E*B - T - V*(I + Rxy)] c = b
+
+For GMRES method, uses M^{-1} = [E*B - T - V_αα]^{-1} as left preconditioner,
+where V_αα is the diagonal potential (within-channel coupling only).
 
 # Arguments
 - `E`: Scattering energy (MeV)
@@ -90,7 +95,7 @@ Solve the inhomogeneous scattering equation: [E*B - T - V*(I + Rxy)] c = b
 - `potname`: Nuclear potential name (e.g., "AV18")
 - `φ_θ`: Initial state vector (from compute_initial_state_vector)
 - `θ_deg`: Complex scaling angle in degrees (default 0)
-- `method`: Solution method (:lu for LU factorization, :iterative for GMRES)
+- `method`: Solution method (:lu for LU factorization, :gmres for preconditioned GMRES)
 
 # Returns
 - `c`: Solution vector
@@ -109,8 +114,8 @@ bound_energies, bound_wavefunctions = bound2b(grid, "AV18")
 E = 10.0  # MeV
 φ_θ = compute_initial_state_vector(grid, α, φ_d, E, z1z2=1.0)
 
-# Solve scattering equation
-c, A, b = solve_scattering_equation(E, α, grid, "AV18", φ_θ)
+# Solve scattering equation with GMRES and M^{-1} preconditioner
+c, A, b = solve_scattering_equation(E, α, grid, "AV18", φ_θ, method=:gmres)
 ```
 """
 function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, method=:lu)
@@ -118,8 +123,8 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
     println("SOLVING INHOMOGENEOUS SCATTERING EQUATION")
     println("="^70)
 
-    # Compute scattering matrix
-    A, B, T, V, Rxy, Rxy_31, Rxy_32 = compute_scattering_matrix(E, α, grid, potname, θ_deg=θ_deg)
+    # Compute scattering matrix and component matrices
+    A, B, T, V, Rxy, Rxy_31, Rxy_32, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny = compute_scattering_matrix(E, α, grid, potname, θ_deg=θ_deg)
 
     # Compute right-hand side: b = V * Rxy_31 * φ
     println("\nComputing right-hand side b = V * Rxy_31 * φ...")
@@ -133,13 +138,20 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
     if method == :lu
         println("  Using LU factorization...")
         c = A \ b
-    elseif method == :iterative
-        println("  Using GMRES iterative solver...")
+    elseif method == :gmres
+        println("  Using GMRES iterative solver with M^{-1} preconditioner...")
         using IterativeSolvers
-        c, history = gmres(A, b, log=true, verbose=true)
+
+        # Compute M^{-1} preconditioner: M = E*B - T - V_αα (diagonal potential only)
+        println("  Computing M^{-1} preconditioner...")
+        M_inv_op = matrices.M_inverse_operator(α, grid, E, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+
+        # Solve with left preconditioner: M^{-1} * A * c = M^{-1} * b
+        println("  Running GMRES with preconditioner...")
+        c, history = gmres(A, b, Pl=M_inv_op, log=true, verbose=true, maxiter=200, reltol=1e-6)
         println("  GMRES converged in $(length(history)) iterations")
     else
-        error("Unknown method: $method. Use :lu or :iterative")
+        error("Unknown method: $method. Use :lu or :gmres")
     end
 
     println("\nSolution computed successfully.")
