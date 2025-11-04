@@ -806,7 +806,7 @@ function main()
 
     # Load Plotly.js by reading and injecting it
     println("Loading Plotly.js...")
-    plotly_js = read("plotly-2.33.0.min.js", String)
+    plotly_js = read("general_modules/plotly-2.33.0.min.js", String)
     Blink.js(win, Blink.JSString(plotly_js))
     sleep(0.5)  # Give it time to load
     println("✓ Plotly.js injected successfully!")
