@@ -6,3 +6,12 @@
 *.dylib
 *.so
 *.dll
+
+# Plotly library (download locally via curl)
+plotly-*.min.js
+
+# Test files
+test_gui.jl
+
+# Generated visualization images
+*.png
