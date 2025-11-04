@@ -753,7 +753,7 @@ function run_calculation_web(params::Dict)
         end
 
         # Generate interactive plots using Plotly.js
-        web_output("🔍 DEBUG: Starting visualization...")
+        web_output("Generating visualizations...")
 
         # Prepare data as Julia arrays
         z_data = collect(ψ_ch')
@@ -761,18 +761,11 @@ function run_calculation_web(params::Dict)
         y_data = collect(y_points)
         prob_data = collect(total_prob)
 
-        web_output("🔍 DEBUG: Data sizes - z: $(size(z_data)), x: $(length(x_data)), y: $(length(y_data)), prob: $(length(prob_data))")
-
         # Call JavaScript functions with data
-        web_output("🔍 DEBUG: Calling createPlot1...")
-        result1 = @js_ win window.createPlot1($z_data, $x_data, $y_data, $dominant_ch)
-        web_output("🔍 DEBUG: createPlot1 result: $result1")
+        @js_ win window.createPlot1($z_data, $x_data, $y_data, $dominant_ch)
+        @js_ win window.createPlot2($x_data, $prob_data)
 
-        web_output("🔍 DEBUG: Calling createPlot2...")
-        result2 = @js_ win window.createPlot2($x_data, $prob_data)
-        web_output("🔍 DEBUG: createPlot2 result: $result2")
-
-        web_output("✓ Visualizations complete! Open developer tools (should open automatically) to see detailed logs.")
+        web_output("✓ Visualizations complete!")
 
     catch e
         @js_ win document.getElementById("status").textContent = "❌ Error occurred"
@@ -800,6 +793,18 @@ function main()
     global win = Window()
     title(win, "SWIFT Nuclear Calculator")
     size(win, 1920, 1080)
+
+    # Center the window on the primary display
+    try
+        @js_ win require("@electron/remote").getCurrentWindow().center()
+    catch
+        # Fallback for older Electron versions
+        try
+            @js_ win require("electron").remote.getCurrentWindow().center()
+        catch e
+            println("Note: Could not center window automatically (multi-monitor setup may affect positioning)")
+        end
+    end
 
     # Load HTML
     body!(win, HTML_CONTENT)
