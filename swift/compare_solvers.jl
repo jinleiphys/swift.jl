@@ -288,13 +288,13 @@ println()
 
 println("Iteration    Residual")
 println("-"^40)
-for (i, res) in enumerate(history)
-    @printf("%9d    %.6e\n", i, res)
-    if i >= 10 && history.iters > 15
-        println("    ... (showing first 10 iterations)")
-        println("    ... (total $(history.iters) iterations)")
-        break
-    end
+residuals = history.data[:resnorm]
+for i in 1:min(10, length(residuals))
+    @printf("%9d    %.6e\n", i, residuals[i])
+end
+if length(residuals) > 10
+    println("    ... (showing first 10 iterations)")
+    println("    ... (total $(history.iters) iterations)")
 end
 println()
 
