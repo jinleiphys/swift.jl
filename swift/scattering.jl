@@ -15,6 +15,40 @@ using .matrices
 
 export solve_scattering_equation, compute_scattering_matrix
 
+# ============================================================================
+# Preconditioner operator wrapper
+# ============================================================================
+
+"""
+    PreconditionerOperator
+
+Wrapper to convert a function-based preconditioner into a LinearAlgebra operator
+that supports `ldiv!` for use with GMRES.
+"""
+struct PreconditionerOperator{T}
+    apply::Function
+    size::Int
+end
+
+# Define ldiv! to apply the preconditioner function
+function LinearAlgebra.ldiv!(y::AbstractVector, P::PreconditionerOperator, x::AbstractVector)
+    result = P.apply(x)
+    copyto!(y, result)
+    return y
+end
+
+# Define ldiv! for single argument (in-place version)
+function LinearAlgebra.ldiv!(P::PreconditionerOperator, x::AbstractVector)
+    result = P.apply(x)
+    copyto!(x, result)
+    return x
+end
+
+# Define size for the operator
+Base.size(P::PreconditionerOperator) = (P.size, P.size)
+Base.size(P::PreconditionerOperator, d::Int) = d <= 2 ? P.size : 1
+Base.eltype(::PreconditionerOperator{T}) where T = T
+
 """
     compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
 
@@ -145,7 +179,10 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
 
         # Compute M^{-1} preconditioner: M = E*B - T - V_αα (diagonal potential only)
         println("  Computing M^{-1} preconditioner...")
-        M_inv_op = matrices.M_inverse_operator(α, grid, E, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+        M_inv_func = matrices.M_inverse_operator(α, grid, E, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+
+        # Wrap function in PreconditionerOperator for GMRES
+        M_inv_op = PreconditionerOperator{ComplexF64}(M_inv_func, length(b))
 
         # Solve with left preconditioner: M^{-1} * A * c = M^{-1} * b
         println("  Running GMRES with preconditioner...")
