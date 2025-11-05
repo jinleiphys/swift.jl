@@ -1162,7 +1162,10 @@ end
 """
     compute_VRxy_phi(V_θ, Rxy_31, φ_θ)
 
-Compute b(θ) = V(θ) * Rxy_31 * φ(θ) for Faddeev scattering calculations.
+Compute b(θ) = 2 * V(θ) * Rxy_31 * φ(θ) for Faddeev scattering calculations.
+
+The factor of 2 arises from the symmetry of the Faddeev equations, accounting for
+two equivalent rearrangement channels contributing to the source term.
 
 # Arguments
 - `V_θ`: Potential matrix (nα*nx*ny × nα*nx*ny), real or complex
@@ -1170,14 +1173,15 @@ Compute b(θ) = V(θ) * Rxy_31 * φ(θ) for Faddeev scattering calculations.
 - `φ_θ`: Initial state vector (nα*nx*ny,)
 
 # Returns
-- `b`: Source term vector b(θ) = V(θ) * Rxy_31 * φ(θ)
+- `b`: Source term vector b(θ) = 2 * V(θ) * Rxy_31 * φ(θ)
 
 """
 function compute_VRxy_phi(V_θ, Rxy_31, φ_θ)
-    # Compute b = V * (Rxy_31 * φ)
+    # Compute b = 2 * V * (Rxy_31 * φ)
+    # Factor of 2 from Faddeev symmetry (two equivalent rearrangement channels)
     # This order is more efficient than (V * Rxy_31) * φ
     temp = Rxy_31 * φ_θ
-    b = V_θ * temp
+    b = 2.0 * V_θ * temp
     return b
 end
 

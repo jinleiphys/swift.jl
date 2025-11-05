@@ -112,7 +112,8 @@ The codebase is organized into three main module directories:
    - Supports complex scaling (θ≠0) for resonance calculations
 2. **Matrix assembly**: `compute_scattering_matrix()` builds A = E*B - T - V*(I + Rxy)
    - Returns component matrices for M^{-1} preconditioner construction
-3. **Source term**: `compute_VRxy_phi()` computes b = V*Rxy_31*φ
+3. **Source term**: `compute_VRxy_phi()` computes b = 2*V*Rxy_31*φ
+   - Factor of 2 from Faddeev symmetry (two equivalent rearrangement channels)
    - Optimized multiplication order: V * (Rxy_31 * φ) for efficiency
 4. **Linear solve**: `solve_scattering_equation()` solves [A]c = b for scattering wavefunction
    - **LU method**: Direct factorization for small systems

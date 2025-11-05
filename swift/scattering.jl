@@ -5,6 +5,7 @@ module Scattering
 
 using LinearAlgebra
 using SparseArrays
+using IterativeSolvers
 
 include("matrices_optimized.jl")
 using .matrices_optimized
@@ -126,8 +127,9 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
     # Compute scattering matrix and component matrices
     A, B, T, V, Rxy, Rxy_31, Rxy_32, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny = compute_scattering_matrix(E, α, grid, potname, θ_deg=θ_deg)
 
-    # Compute right-hand side: b = V * Rxy_31 * φ
-    println("\nComputing right-hand side b = V * Rxy_31 * φ...")
+    # Compute right-hand side: b = 2 * V * Rxy_31 * φ
+    # Factor of 2 from Faddeev symmetry (two equivalent rearrangement channels)
+    println("\nComputing right-hand side b = 2 * V * Rxy_31 * φ...")
     b = compute_VRxy_phi(V, Rxy_31, φ_θ)
 
     # Solve linear system A*c = b
@@ -140,7 +142,6 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
         c = A \ b
     elseif method == :gmres
         println("  Using GMRES iterative solver with M^{-1} preconditioner...")
-        using IterativeSolvers
 
         # Compute M^{-1} preconditioner: M = E*B - T - V_αα (diagonal potential only)
         println("  Computing M^{-1} preconditioner...")
