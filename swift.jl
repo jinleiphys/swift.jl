@@ -794,20 +794,44 @@ function main()
     title(win, "SWIFT Nuclear Calculator")
     size(win, 1920, 1080)
 
-    # Center the window on the primary display
-    try
-        @js_ win require("@electron/remote").getCurrentWindow().center()
-    catch
-        # Fallback for older Electron versions
-        try
-            @js_ win require("electron").remote.getCurrentWindow().center()
-        catch e
-            println("Note: Could not center window automatically (multi-monitor setup may affect positioning)")
-        end
-    end
-
-    # Load HTML
+    # Load HTML first
     body!(win, HTML_CONTENT)
+
+    # Center the window on the current screen (multi-monitor support)
+    sleep(0.5)  # Give window time to render
+
+    try
+        # Use JavaScript window.screen API to detect current display and center window
+        win_width = 1920
+        win_height = 1080
+
+        Blink.js(win, Blink.JSString("""
+        (function() {
+            try {
+                // Get current screen dimensions using Web API
+                const screenWidth = window.screen.width;
+                const screenHeight = window.screen.height;
+                const screenX = window.screen.availLeft || 0;
+                const screenY = window.screen.availTop || 0;
+
+                // Calculate center position on current screen
+                const winWidth = $win_width;
+                const winHeight = $win_height;
+                const x = screenX + Math.round((screenWidth - winWidth) / 2);
+                const y = screenY + Math.round((screenHeight - winHeight) / 2);
+
+                // Move window to calculated position
+                window.moveTo(x, y);
+            } catch (e) {
+                console.error('Window positioning error:', e.message);
+            }
+        })();
+        """))
+
+        println("✓ Window centered on current screen")
+    catch e
+        println("Note: Could not apply window positioning: ", e)
+    end
 
     # Load Plotly.js by reading and injecting it
     println("Loading Plotly.js...")

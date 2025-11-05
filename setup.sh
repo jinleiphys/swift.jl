@@ -202,11 +202,44 @@ else
 fi
 
 echo ""
+
+# Step 5: Verify GUI dependencies
+echo "Step 5: Verifying GUI dependencies..."
+echo "=========================================="
+
+cd "$SCRIPT_DIR"
+
+# Check if Plotly.js exists
+if [ -f "general_modules/plotly-2.33.0.min.js" ]; then
+    echo -e "${GREEN}Plotly.js found${NC}"
+else
+    echo -e "${YELLOW}Plotly.js not found in general_modules/${NC}"
+    echo "The GUI visualization may not work without it."
+fi
+
+# Check if swift.jl exists
+if [ -f "swift.jl" ]; then
+    echo -e "${GREEN}GUI launcher (swift.jl) found${NC}"
+else
+    echo -e "${YELLOW}Warning: swift.jl not found${NC}"
+fi
+
+# Make run_gui.sh executable
+if [ -f "run_gui.sh" ]; then
+    chmod +x run_gui.sh
+    echo -e "${GREEN}run_gui.sh made executable${NC}"
+fi
+
+echo ""
 echo "=========================================="
 echo -e "${GREEN}Setup completed successfully!${NC}"
 echo "=========================================="
 echo ""
 echo "You can now:"
-echo "  - Start development: cd swift && julia"
+echo "  - Run GUI interface: ./run_gui.sh (or: julia swift.jl)"
 echo "  - Run main calculation: cd swift && julia swift_3H.jl"
+echo "  - Run tests: julia NNpot/test_comprehensive.jl"
+echo "  - Start development: cd swift && julia"
+echo ""
+echo "Note: The GUI supports multi-monitor setups and will center on your current screen."
 echo ""
