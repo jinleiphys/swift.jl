@@ -187,7 +187,7 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
         # Solve with left preconditioner: M^{-1} * A * c = M^{-1} * b
         println("  Running GMRES with preconditioner...")
         c, history = gmres(A, b, Pl=M_inv_op, log=true, verbose=true, maxiter=200, reltol=1e-6)
-        println("  GMRES converged in $(length(history)) iterations")
+        println("  GMRES converged in $(history.iters) iterations")
     else
         error("Unknown method: $method. Use :lu or :gmres")
     end

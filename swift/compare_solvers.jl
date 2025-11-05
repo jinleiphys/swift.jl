@@ -209,7 +209,7 @@ rel_residual_gmres = norm(residual_gmres) / norm(b)
 
 println("\n✓ GMRES solution obtained")
 println("  Computation time: $(round(time_gmres, digits=3)) seconds")
-println("  Iterations: $(length(history))")
+println("  Iterations: $(history.iters)")
 println("  Solution norm: ||c|| = $(round(norm(c_gmres), digits=6))")
 println("  Residual: ||A*c - b|| = $(round(norm(residual_gmres), digits=10))")
 println("  Relative residual: ||A*c - b|| / ||b|| = $(round(rel_residual_gmres, digits=12))")
@@ -246,8 +246,8 @@ println()
 println("Memory and Efficiency:")
 println("-"^70)
 @printf("  %-30s: %d\n", "System size", length(b))
-@printf("  %-30s: %d\n", "GMRES iterations", length(history))
-@printf("  %-30s: %.3f sec/iter\n", "Time per iteration", time_gmres / length(history))
+@printf("  %-30s: %d\n", "GMRES iterations", history.iters)
+@printf("  %-30s: %.3f sec/iter\n", "Time per iteration", time_gmres / history.iters)
 println()
 
 println("Solution Verification:")
@@ -290,9 +290,9 @@ println("Iteration    Residual")
 println("-"^40)
 for (i, res) in enumerate(history)
     @printf("%9d    %.6e\n", i, res)
-    if i >= 10 && length(history) > 15
+    if i >= 10 && history.iters > 15
         println("    ... (showing first 10 iterations)")
-        println("    ... (total $(length(history)) iterations)")
+        println("    ... (total $(history.iters) iterations)")
         break
     end
 end
