@@ -268,8 +268,8 @@ for iα in 1:n_channels
 
     ch_diff = norm(c_lu_ch - c_gmres_ch) / norm(c_lu_ch)
     if ch_diff > max_channel_diff
-        max_channel_diff = ch_diff
-        max_channel_idx = iα
+        global max_channel_diff = ch_diff
+        global max_channel_idx = iα
     end
 end
 
