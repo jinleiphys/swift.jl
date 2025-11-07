@@ -274,39 +274,23 @@ end
 """
     Rxy_13_matrix_optimized(α, grid)
 
-Compute Rxy_13 = transpose(Rxy_31) matrix
+Compute Rxy_13 rearrangement matrix for identical particle systems.
 
 ## Physics:
 - Rxy_31 represents ⟨x₃y₃α₃|x₁y₁α₁⟩ (transformation from coordinates 1 to 3)
 - Rxy_13 represents ⟨x₁y₁α₁|x₃y₃α₃⟩ (transformation from coordinates 3 to 1)
-- Relationship: Rxy_13 = transpose(Rxy_31)
+- **For identical particles (fermions/bosons): Rxy_13 = Rxy_31** due to particle exchange symmetry
+- This is achieved by swapping αin ↔ αout in the G coefficient phase factors
 
-## Implementation Strategy:
-- Uses transformation parameters: (a,b,c,d) = (-0.5, -1.0, 0.75, -0.5)
-- Uses custom G coefficients computed with same (a,b,c,d) parameters
-- Keeps perm_index=1 for correct 9j/6j coupling coefficients
-- Normal matrix indexing [i, ip]
-
-## G Coefficient Computation:
-- Uses `computeGcoefficient_custom(α, grid, -0.5, -1.0, 0.75, -0.5)`
-- The custom G coefficients incorporate the Rxy_13 coordinate transformation
-- perm_index=1 ensures the same angular momentum coupling as Rxy_31
-
-## Key Findings:
-- Rxy_32 = Rxy_31 (proven numerically to machine precision)
-- Rxy_32 ≠ transpose(Rxy_31)
-- The transpose relationship requires custom G coefficients with Rxy_13 transformation
-
-## Key Optimizations:
-1. Pre-compute invariant quantities outside loops
-2. Skip negligible G-coefficient contributions early
-3. Optimized innerloop structure with @inbounds
-4. Lower memory overhead than caching approach
+## Implementation:
+- Transformation parameters: (a,b,c,d) = (-0.5, -1.0, 0.75, -0.5)
+- Custom G coefficients with swapped channel indices (αin ↔ αout) via `Gαα_custom()`
+- perm_index=1 for correct 9j/6j coupling coefficients
 
 ## Usage:
 ```julia
 Rxy_13 = Rxy_13_matrix_optimized(α, grid)
-# Verify: norm(Rxy_13 - transpose(Rxy_31)) ≈ 0
+# For fermions: Rxy_13 = Rxy_31 (verified to machine precision)
 ```
 """
 function Rxy_13_matrix_optimized(α, grid)
