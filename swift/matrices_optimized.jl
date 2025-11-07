@@ -23,7 +23,7 @@ const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
 const ħ = 197.3269718 # MeV. fm
 
-export T_matrix_optimized, Rxy_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, Rxy_matrix_with_caching, compute_initial_state_vector, compute_VRxy_phi
+export T_matrix_optimized, Rxy_matrix_optimized, Rxy_13_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, Rxy_matrix_with_caching, compute_initial_state_vector, compute_VRxy_phi
 
 # Coulomb potential function (matches matrices.jl implementation)
 function VCOUL_point(R, z12)
@@ -268,6 +268,134 @@ function Rxy_matrix_optimized(α, grid)
     Rxy = Rxy_31 + Rxy_32
 
     return Rxy, Rxy_31, Rxy_32
+end
+
+
+"""
+    Rxy_13_matrix_optimized(α, grid)
+
+Compute Rxy_13 = transpose(Rxy_31) matrix
+
+## Physics:
+- Rxy_31 represents ⟨x₃y₃α₃|x₁y₁α₁⟩ (transformation from coordinates 1 to 3)
+- Rxy_13 represents ⟨x₁y₁α₁|x₃y₃α₃⟩ (transformation from coordinates 3 to 1)
+- Relationship: Rxy_13 = transpose(Rxy_31)
+
+## Implementation Strategy:
+- Uses transformation parameters: (a,b,c,d) = (-0.5, -1.0, 0.75, -0.5)
+- Uses custom G coefficients computed with same (a,b,c,d) parameters
+- Keeps perm_index=1 for correct 9j/6j coupling coefficients
+- Normal matrix indexing [i, ip]
+
+## G Coefficient Computation:
+- Uses `computeGcoefficient_custom(α, grid, -0.5, -1.0, 0.75, -0.5)`
+- The custom G coefficients incorporate the Rxy_13 coordinate transformation
+- perm_index=1 ensures the same angular momentum coupling as Rxy_31
+
+## Key Findings:
+- Rxy_32 = Rxy_31 (proven numerically to machine precision)
+- Rxy_32 ≠ transpose(Rxy_31)
+- The transpose relationship requires custom G coefficients with Rxy_13 transformation
+
+## Key Optimizations:
+1. Pre-compute invariant quantities outside loops
+2. Skip negligible G-coefficient contributions early
+3. Optimized innerloop structure with @inbounds
+4. Lower memory overhead than caching approach
+
+## Usage:
+```julia
+Rxy_13 = Rxy_13_matrix_optimized(α, grid)
+# Verify: norm(Rxy_13 - transpose(Rxy_31)) ≈ 0
+```
+"""
+function Rxy_13_matrix_optimized(α, grid)
+    # Pre-allocate result matrix
+    Rxy_13 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
+
+    # Use custom G coefficients with Rxy_13 transformation parameters
+    # Keep perm_index=1 for correct 9j/6j coupling coefficients
+    Gαα = computeGcoefficient_custom(α, grid, -0.5, -1.0, 0.75, -0.5)
+
+    # Pre-compute phi products for normalization (invariant across iθ)
+    ϕx_norm = zeros(grid.nx)
+    ϕy_norm = zeros(grid.ny)
+    for ix in 1:grid.nx
+        ϕx_norm[ix] = 1.0 / grid.ϕx[ix]
+    end
+    for iy in 1:grid.ny
+        ϕy_norm[iy] = 1.0 / grid.ϕy[iy]
+    end
+
+    # Transformation parameters for Rxy_13
+    # perm_index=1 ensures correct 9j/6j coupling coefficients
+    perm_idx = 1
+    a, b, c, d = -0.5, -1.0, 0.75, -0.5
+
+    # Main computation loop
+    for ix in 1:grid.nx
+        xa = grid.xi[ix]
+        xa_norm = ϕx_norm[ix]
+
+        for iy in 1:grid.ny
+            ya = grid.yi[iy]
+            ya_norm = ϕy_norm[iy]
+            xy_norm = xa_norm * ya_norm  # Pre-compute product
+
+            for iθ in 1:grid.nθ
+                cosθ = grid.cosθi[iθ]
+                dcosθ = grid.dcosθi[iθ]
+
+                # Pre-compute common angular factor
+                base_angular_factor = dcosθ * xa * ya
+
+                # Compute transformed coordinates
+                πb_sq = a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ
+                ξb_sq = c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ
+
+                πb = sqrt(πb_sq)
+                ξb = sqrt(ξb_sq)
+
+                # Compute Laguerre basis functions (unavoidable cost)
+                fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
+                fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
+
+                # Pre-compute normalization factor for this point
+                norm_factor = base_angular_factor / (πb * ξb) * xy_norm
+
+                # Channel coupling loop
+                for iα in 1:α.nchmax
+                    i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
+
+                    for iαp in 1:α.nchmax
+                        # Get G coefficient with NORMAL channel indices: G[iα, iαp]
+                        G_coeff = Gαα[iθ, iy, ix, iα, iαp, perm_idx]
+
+                        if abs(G_coeff) < 1e-14
+                            continue  # Skip negligible contributions
+                        end
+
+                        # Final adjustment factor
+                        adj_factor = norm_factor * G_coeff
+
+                        # Optimized inner loop with @inbounds and @simd
+                        @inbounds for ixp in 1:grid.nx
+                            fπb_ixp = fπb[ixp]
+                            ip_base = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny
+
+                            # Vectorized operation for inner loop
+                            @simd for iyp in 1:grid.ny
+                                ip = ip_base + iyp
+                                Rxy_13[i, ip] += adj_factor * fπb_ixp * fξb[iyp]
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return Rxy_13
 end
 
 

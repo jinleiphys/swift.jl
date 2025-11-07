@@ -2,7 +2,7 @@ module Gcoefficient
 using WignerSymbols
 include("fortran_spherical_harmonics.jl")
 using .FortranSphericalHarmonics
-export computeGcoefficient, u9
+export computeGcoefficient, computeGcoefficient_custom, Gαα_custom, u9
 
 
 # Yλout = zeros(Float64,nθ,λmax^2+2*λmax+1,2)        # last dimension for the permutation operator 1 for P+; 2 for P-
@@ -25,6 +25,40 @@ export computeGcoefficient, u9
 
     Yλout, Ylin, Yλin = initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
     Gresult = Gαα(nθ, ny, nx, α, Yλout, Ylin, Yλin, grid)
+    return Gresult
+ end
+
+ """
+    computeGcoefficient_custom(α, grid, a1, b1, c1, d1)
+
+ Compute G coefficient with custom transformation parameters for perm_index=1.
+ This allows computing Rxy_13 which uses perm_index=1 coupling coefficients
+ but with different (a,b,c,d) transformation than Rxy_31.
+
+ # Arguments
+ - `α`: Channel structure
+ - `grid`: Mesh structure
+ - `a1, b1, c1, d1`: Custom transformation parameters for perm_index=1
+
+ # Usage
+ ```julia
+ # For Rxy_13: use perm_index=1 with custom transformation parameters
+ Gαα_13 = computeGcoefficient_custom(α, grid, -0.5, -1.0, 0.75, -0.5)
+ ```
+ """
+ function computeGcoefficient_custom(α, grid, a1, b1, c1, d1)
+
+    λmax = maximum(α.λ)
+    lmax = maximum(α.l)
+    nθ = grid.nθ
+    nx = grid.nx
+    ny = grid.ny
+    cosθi = grid.cosθi
+    xi = grid.xi
+    yi = grid.yi
+
+    Yλout, Ylin, Yλin = initialY_custom(λmax, lmax, nθ, nx, ny, cosθi, xi, yi, a1, b1, c1, d1)
+    Gresult = Gαα_custom(nθ, ny, nx, α, Yλout, Ylin, Yλin, grid)
     return Gresult
  end 
 
@@ -175,6 +209,150 @@ export computeGcoefficient, u9
  end
 
 
+ """
+    Gαα_custom(nθ, ny, nx, α, Yλout, Ylin, Yλin, grid)
+
+ Custom version of Gαα for perm_index=1 only.
+ Used for computing Rxy_13 with custom phase factor (to be updated by user).
+
+ This function is identical to the perm_index=1 branch of Gαα, but allows
+ for custom phase factor modifications.
+ """
+ function Gαα_custom(nθ, ny, nx, α, Yλout, Ylin, Yλin, grid)
+    s1 = α.s1
+    s2 = α.s2
+    s3 = α.s3
+    t1 = α.t1
+    t2 = α.t2
+    t3 = α.t3
+
+    # Only perm_index=1, so last dimension is size 1
+    Gαoutαin = zeros(Float64, nθ, ny, nx, α.nchmax, α.nchmax, 1)
+
+    # Pre-compute invariant quantities outside loops
+    hat_T12 = [hat(α.T12[i]) for i in 1:α.nchmax]
+    hat_J12 = [hat(α.J12[i]) for i in 1:α.nchmax]
+    hat_J3 = [hat(α.J3[i]) for i in 1:α.nchmax]
+    hat_s12 = [hat(α.s12[i]) for i in 1:α.nchmax]
+
+    # Cache for expensive calculations
+    u9_cache = Dict{Tuple{Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64}, Float64}()
+    wigner6j_cache = Dict{Tuple{Float64,Float64,Float64,Float64,Float64,Float64}, Float64}()
+    Y4_cache = Dict{Tuple{Int,Int,Int}, Array{Float64,4}}()
+
+    # Helper function for cached u9 calculation
+    function cached_u9(args...)
+        key = args
+        if !haskey(u9_cache, key)
+            u9_cache[key] = u9(args...)
+        end
+        return u9_cache[key]
+    end
+
+    # Helper function for cached wigner6j calculation
+    function cached_wigner6j(args...)
+        key = args
+        if !haskey(wigner6j_cache, key)
+            wigner6j_cache[key] = wigner6j(args...)
+        end
+        return wigner6j_cache[key]
+    end
+
+    # Helper function for cached Y4 calculation
+    function cached_Y4(LL, αout, αin)
+        key = (LL, αout, αin)
+        if !haskey(Y4_cache, key)
+            Y4_cache[key] = YYcoupling(α, nθ, ny, nx, Ylin, Yλin, Yλout, LL, αout, αin)
+        end
+        return Y4_cache[key]
+    end
+
+    # Pre-compute valid channel combinations (only perm_index=1)
+    valid_combinations = Vector{Tuple{Int,Int,Int,Float64,Float64,Float64,Int,Int}}()
+
+    perm_index = 1
+    for αout in 1:α.nchmax
+        for αin in 1:α.nchmax
+            # Check if channels can couple - they must have the same total isospin T
+            if α.T[αin] != α.T[αout]
+                continue
+            end
+
+            # perm_index=1 specific values with αin and αout swapped
+            phase = (-1)^round(Int, α.s12[αout] + 2*s1 + s2 + s3) * (-1)^round(Int, α.T12[αout] + 2*t1 + t2 + t3)
+            Cisospin = hat_T12[αout] * hat_T12[αin] * cached_wigner6j(t1,t2,α.T12[αin],t3,α.T[αin],α.T12[αout])
+            s_ref = s1  # Reference spin for coupling
+            nSmin = max(round(Int, 2*abs(α.s12[αout]-s1)), round(Int, 2*abs(α.s12[αin]-s3)))
+            nSmax = min(round(Int, 2*(α.s12[αout]+s1)), round(Int, 2*(α.s12[αin]+s3)))
+
+            # Skip if isospin coupling is zero
+            if abs(Cisospin) < 1e-14
+                continue
+            end
+
+            # Pre-compute spin coupling coefficient
+            Cspin = hat_J12[αin] * hat_J12[αout] * hat_J3[αin] * hat_J3[αout] * hat_s12[αin] * hat_s12[αout]
+
+            LLmin = max(abs(α.l[αin]-α.λ[αin]), abs(α.l[αout]-α.λ[αout]))
+            LLmax = min(α.l[αin]+α.λ[αin], α.l[αout]+α.λ[αout])
+
+            # Store valid combination for later processing
+            for LL in LLmin:LLmax
+                push!(valid_combinations, (αout, αin, LL, phase, Cisospin, Cspin, nSmin, nSmax))
+            end
+        end
+    end
+
+    # Optimized main computation loop - process by LL first for better Y4 cache usage
+    for (αout, αin, LL, phase, Cisospin, Cspin, nSmin, nSmax) in valid_combinations
+
+        # Get Y4 coupling (cached)
+        Y4 = cached_Y4(LL, αout, αin)
+
+        for nSS in nSmin:nSmax
+            SS = nSS / 2.0
+
+            # Triangle inequality check for |LL - SS| ≤ J ≤ LL + SS
+            if (round(Int, 2*abs(LL-SS)) > round(Int, 2*α.J) || round(Int, 2*(LL+SS)) < round(Int, 2*α.J))
+                continue
+            end
+
+            # Pre-compute common u9 factor (cached)
+            u9_out = cached_u9(float(α.l[αout]), α.s12[αout], α.J12[αout],
+                              float(α.λ[αout]), α.s3, α.J3[αout],
+                              float(LL), SS, α.J)
+
+            u9_in = cached_u9(float(α.l[αin]), α.s12[αin], α.J12[αin],
+                             float(α.λ[αin]), s1, α.J3[αin],
+                             float(LL), SS, α.J)
+
+            # Skip if either u9 coefficient is zero
+            if abs(u9_out) < 1e-14 || abs(u9_in) < 1e-14
+                continue
+            end
+
+            f0 = (2*SS + 1.0) * u9_out * u9_in
+
+            # Compute spin recoupling coefficient (cached)
+            f1 = cached_wigner6j(s1, s2, α.s12[αout], s3, SS, α.s12[αin])
+
+            # Skip if wigner6j coefficient is zero
+            if abs(f1) < 1e-14
+                continue
+            end
+
+            # Final coefficient
+            coeff = phase * Cisospin * Cspin * f0 * f1
+
+            # Optimized array accumulation
+            @views Gαoutαin[:,:,:,αout, αin, 1] .+= Y4[:, :, :, perm_index] .* coeff
+        end
+    end
+
+    return Gαoutαin
+ end
+
+
  function YYcoupling(α, nθ, ny, nx, Ylin, Yλin, Yλout, LL, αout, αin)
 
     
@@ -260,10 +438,17 @@ export computeGcoefficient, u9
     return Y4
 end
 
-function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
-    
+function initialY_custom(λmax, lmax, nθ, nx, ny, cosθi, xi, yi, a1, b1, c1, d1)
+    """
+    Custom version of initialY that allows specifying transformation parameters (a,b,c,d).
+    Used for computing Rxy_13 with:
+    - Transformation parameters (a,b,c,d) = (-0.5, -1.0, 0.75, -0.5)
+    - perm_index=1 for correct 9j/6j coupling coefficients (same as Rxy_31)
+    - Normal channel indices G[iα, iαp]
+    """
+
     Yλout = zeros(Float64, nθ, λmax^2 + 2*λmax + 1)
-    Ylin = zeros(Float64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)    
+    Ylin = zeros(Float64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)
     Yλin = zeros(Float64, nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
 
     # Set x_3 as z-direction
@@ -278,7 +463,78 @@ function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
         end
     end
 
-  for perm_index in 1:2 
+    # Use custom parameters (only perm_index=1)
+    a = a1
+    b = b1
+    c = c1
+    d = d1
+    perm_index = 1
+
+    # Set the ϕ angle for the spherical harmonics
+    ϕx = b < 0 ? π : 0.0
+    ϕy = d < 0 ? π : 0.0
+
+    for ix in 1:nx
+        for iy in 1:ny
+            for iθ in 1:nθ
+                # Compute transformed coordinates with safety checks
+                xin_squared = a^2*xi[ix]^2 + b^2*yi[iy]^2 + 2*a*b*xi[ix]*yi[iy]*cosθi[iθ]
+                yin_squared = c^2*xi[ix]^2 + d^2*yi[iy]^2 + 2*c*d*xi[ix]*yi[iy]*cosθi[iθ]
+
+                xin = sqrt(max(xin_squared, 1e-15))  # Avoid zero
+                yin = sqrt(max(yin_squared, 1e-15))  # Avoid zero
+
+                xzin = a*xi[ix] + b*yi[iy]*cosθi[iθ]
+                yzin = c*xi[ix] + d*yi[iy]*cosθi[iθ]
+
+                # Ensure argument to acos is in valid range [-1, 1] and avoid division by zero
+                θx = acos(clamp(xzin/xin, -1.0, 1.0))
+                θy = acos(clamp(yzin/yin, -1.0, 1.0))
+
+                Yl = computeYlm_fortran(θx, ϕx, lmax)
+                Yλ = computeYlm_fortran(θy, ϕy, λmax)
+
+                # Compute spherical harmonics for each (l,m) combination
+                for l in 0:lmax
+                    for m in -l:l
+                        nch = l^2 + l + m + 1
+                        Ylin[iθ, iy, ix, nch, perm_index] = real(Yl[nch])  # Extract real part
+                    end
+                end
+
+                # Compute spherical harmonics for each (λ,m) combination
+                for λ in 0:λmax
+                    for m in -λ:λ
+                        nch = λ^2 + λ + m + 1
+                        Yλin[iθ, iy, ix, nch, perm_index] = real(Yλ[nch])  # Extract real part
+                    end
+                end
+            end
+        end
+    end
+
+    return Yλout, Ylin, Yλin
+end  # function initialY_custom
+
+function initialY(λmax, lmax, nθ, nx, ny, cosθi, xi, yi)
+
+    Yλout = zeros(Float64, nθ, λmax^2 + 2*λmax + 1)
+    Ylin = zeros(Float64, nθ, ny, nx, lmax^2 + 2*lmax + 1, 2)
+    Yλin = zeros(Float64, nθ, ny, nx, λmax^2 + 2*λmax + 1, 2)
+
+    # Set x_3 as z-direction
+    for i in 1:nθ
+        Yλ = computeYlm_fortran(acos(cosθi[i]), 0.0, λmax)
+        for λ in 0:λmax
+           for m in -λ:λ
+              nch = λ^2 + λ + m + 1  # Standard indexing for Y_λ^m
+              nch_conj = λ^2 + λ + (-m) + 1  # Index for Y_λ^{-m}
+              Yλout[i, nch] = real(Yλ[nch_conj]) * (-1)^m  # Y_λ^m* = (-1)^m* Y_λ^{-m}
+            end
+        end
+    end
+
+  for perm_index in 1:2
     # Now compute the spherical harmonics for incoming channels
        if perm_index == 1  # compute Gα3α1: x1 = -1/2*x3 + 1*y3, y1 = -3/4*x3 - 1/2*y3
            a = -0.5
