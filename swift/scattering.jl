@@ -199,41 +199,40 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
 end
 
 """
-    compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; σ_l=0.0)
+    compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E; σ_l=0.0)
 
 Compute the scattering amplitude f(k) for three-body scattering.
 
 # Physics:
 The scattering amplitude is:
-f(k) = -4μ₃/(ℏ²k_d²) e^(-iσ_l) ⟨φ | V | Rxy_31 | ψ₃^(in) + ψ₃^(sc)⟩
+f(k) = -4μ₃/(ℏ²k_d²) e^(-iσ_l) ⟨ψ_in | V | Rxy_31 | ψ₃^(in) + ψ₃^(sc)⟩
 
 where:
-- ψ₃^(in) = Rxy_31 × φ (initial state in α₃ coordinates, using Rxy_13 = Rxy_31 for fermions)
+- ψ₃^(in) is the initial state in α₃ coordinates
 - ψ₃^(sc) is the solution of the Faddeev scattering equation
 - μ = 2m/3 is the reduced mass for deuteron-nucleon system
 
-The calculation proceeds as a product of 4 matrix/vector operations:
-φ* × V × Rxy_31 × (ψ₃^(in) + ψ₃^(sc))
+The calculation proceeds as:
+ψ_in* × V × Rxy_31 × (ψ_in + ψ_sc)
 
 # Arguments
-- `φ`: Initial state vector in α₁ coordinates (deuteron + nucleon)
+- `ψ_in`: Initial state vector ψ₃^(in) in α₃ coordinates
 - `V`: Potential matrix in α₁ coordinates
 - `Rxy_31`: Rearrangement matrix from α₃ to α₁ coordinates
 - `ψ_sc`: Scattering wave function ψ₃^(sc) in α₃ coordinates (solution of Faddeev equation)
-- `E`: Scattering energy (MeV)
+- `E`: Scattering energy (MeV) in cm frame
 - `σ_l`: Coulomb phase shift (default: 0.0)
 
 # Returns
 - `f_k`: Complex scattering amplitude f(k)
-- `ψ_in`: Initial state in α₃ coordinates ψ₃^(in) = Rxy_31 × φ
 
 # Example
 ```julia
 # Compute scattering amplitude
-f_k, ψ_in = compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E)
+f_k = compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E)
 ```
 """
-function compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; σ_l=0.0)
+function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E; σ_l=0.0)
     # Constants
     ħ = 197.3269718  # MeV·fm (ħc)
     m = 1.0079713395678829     # Nucleon mass in amu
@@ -251,17 +250,12 @@ function compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; σ_l=0.0)
     println("  Wave number k = $k fm⁻¹")
     println("  Coulomb phase σ_l = $σ_l")
 
-    # Step 1: Compute ψ₃^(in) in α₃ coordinates
-    # For identical particles: Rxy_13 = Rxy_31, so ψ₃^(in) = Rxy_31 × φ
-    println("  Computing ψ₃^(in) = Rxy_31 × φ...")
-    ψ_in = Rxy_31 * φ
-
-    # Step 2: Compute total wave function in α₃ coordinates
+    # Compute total wave function in α₃ coordinates
     println("  Computing ψ₃^(total) = ψ₃^(in) + ψ₃^(sc)...")
     ψ_total = ψ_in + ψ_sc
 
-    # Step 3: Compute the matrix-vector products
-    # f(k) ∝ ⟨φ* | V | Rxy_31 | ψ_total⟩
+    # Compute the matrix-vector products
+    # f(k) ∝ ⟨ψ_in* | V | Rxy_31 | ψ_total⟩
 
     # Compute Rxy_31 × ψ_total first (more efficient order)
     println("  Computing Rxy_31 × ψ_total...")
@@ -271,11 +265,11 @@ function compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; σ_l=0.0)
     println("  Computing V × (Rxy_31 × ψ_total)...")
     temp2 = V * temp1
 
-    # Compute inner product ⟨φ | temp2⟩ = φ* · temp2
-    println("  Computing ⟨φ | V × Rxy_31 × ψ_total⟩...")
-    inner_product = dot(φ, temp2)
+    # Compute inner product ⟨ψ_in | temp2⟩ = ψ_in* · temp2
+    println("  Computing ⟨ψ_in | V × Rxy_31 × ψ_total⟩...")
+    inner_product = dot(ψ_in, temp2)
 
-    # Step 4: Apply prefactor
+    # Apply prefactor
     # f(k) = -4μ₃/(ℏ²k²) e^(-iσ_l) × inner_product
     prefactor = -4.0 * μ * amu / (ħ^2 * k_squared) * exp(-im * σ_l)
     f_k = prefactor * inner_product
@@ -284,7 +278,7 @@ function compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; σ_l=0.0)
     println("  arg(f(k)) = $(angle(f_k)) rad")
     println("Scattering amplitude computed successfully.")
 
-    return f_k, ψ_in
+    return f_k
 end
 
 end # module
