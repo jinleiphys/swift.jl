@@ -205,10 +205,10 @@ Compute the scattering amplitude f(k) for three-body scattering.
 
 # Physics:
 The scattering amplitude is:
-f(k) = -4μ₃/(ℏ²k_d²) e^(-iσ_l) ⟨ψ_in | V | Rxy_31 | ψ₃^(in) + ψ₃^(sc)⟩
+f(k) = -4μ₃/(ℏ²k_d²) e^(-iσ_l) ⟨φ | V | Rxy_31 | φ + ψ₃^(sc)⟩
 
 where:
-- ψ₃^(in) is the initial state in α₃ coordinates
+- φ is the initial state (ψ_in = φ)
 - ψ₃^(sc) is the solution of the Faddeev scattering equation
 - μ = 2m/3 is the reduced mass for deuteron-nucleon system
 
@@ -216,7 +216,7 @@ The calculation proceeds as:
 ψ_in* × V × Rxy_31 × (ψ_in + ψ_sc)
 
 # Arguments
-- `ψ_in`: Initial state vector ψ₃^(in) in α₃ coordinates
+- `ψ_in`: Initial state vector φ (ψ_in = φ)
 - `V`: Potential matrix in α₁ coordinates
 - `Rxy_31`: Rearrangement matrix from α₃ to α₁ coordinates
 - `ψ_sc`: Scattering wave function ψ₃^(sc) in α₃ coordinates (solution of Faddeev equation)
@@ -228,8 +228,8 @@ The calculation proceeds as:
 
 # Example
 ```julia
-# Compute scattering amplitude
-f_k = compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E)
+# Compute scattering amplitude where ψ_in = φ
+f_k = compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E)
 ```
 """
 function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E; σ_l=0.0)

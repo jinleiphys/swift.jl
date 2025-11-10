@@ -47,11 +47,11 @@ V = V_matrix_optimized(α, grid, "AV18")
 Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
 println()
 
-# Create mock initial state vector ψ_in in α₃ coordinates
-# In real calculation, this would be: ψ_in = Rxy_31 * φ (or Rxy_13 * φ)
-println("Creating mock initial state ψ_in in α₃ coordinates...")
+# Create mock initial state vector φ (where ψ_in = φ)
+# In real calculation, this would come from compute_initial_state_vector
+println("Creating mock initial state φ...")
 N = α.nchmax * grid.nx * grid.ny
-ψ_in = zeros(ComplexF64, N)
+ψ_in = zeros(ComplexF64, N)  # ψ_in = φ
 
 # Populate a few channels with Gaussian-like functions
 for iα in 1:min(2, α.nchmax)
@@ -65,7 +65,7 @@ for iα in 1:min(2, α.nchmax)
         end
     end
 end
-println("  Initial state ψ_in created, norm = $(norm(ψ_in))")
+println("  Initial state φ created, norm = $(norm(ψ_in))")
 println()
 
 # Create mock scattering solution ψ_sc
@@ -87,9 +87,9 @@ println("--------")
 @printf("Magnitude: |f(k)| = %.6e fm\n", abs(f_k))
 @printf("Phase: arg(f(k)) = %.6f rad\n", angle(f_k))
 println()
-@printf("Initial state: ||ψ₃^(in)|| = %.6e\n", norm(ψ_in))
+@printf("Initial state: ||φ|| = %.6e\n", norm(ψ_in))
 @printf("Scattering state: ||ψ₃^(sc)|| = %.6e\n", norm(ψ_sc))
-@printf("Total state: ||ψ₃^(in) + ψ₃^(sc)|| = %.6e\n", norm(ψ_in + ψ_sc))
+@printf("Total state: ||φ + ψ₃^(sc)|| = %.6e\n", norm(ψ_in + ψ_sc))
 println()
 
 println("="^70)
