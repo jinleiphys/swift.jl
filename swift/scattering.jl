@@ -199,7 +199,7 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
 end
 
 """
-    compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E, μ, σ_l)
+    compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; σ_l=0.0)
 
 Compute the scattering amplitude f(k) for three-body scattering.
 
@@ -210,6 +210,7 @@ f(k) = -4μ₃/(ℏ²k_d²) e^(-iσ_l) ⟨φ | V | Rxy_31 | ψ₃^(in) + ψ₃^(
 where:
 - ψ₃^(in) = Rxy_31 × φ (initial state in α₃ coordinates, using Rxy_13 = Rxy_31 for fermions)
 - ψ₃^(sc) is the solution of the Faddeev scattering equation
+- μ = 2m/3 is the reduced mass for deuteron-nucleon system
 
 The calculation proceeds as a product of 4 matrix/vector operations:
 φ* × V × Rxy_31 × (ψ₃^(in) + ψ₃^(sc))
@@ -220,7 +221,6 @@ The calculation proceeds as a product of 4 matrix/vector operations:
 - `Rxy_31`: Rearrangement matrix from α₃ to α₁ coordinates
 - `ψ_sc`: Scattering wave function ψ₃^(sc) in α₃ coordinates (solution of Faddeev equation)
 - `E`: Scattering energy (MeV)
-- `μ`: Reduced mass in amu (default: 2m/3 for deuteron-nucleon)
 - `σ_l`: Coulomb phase shift (default: 0.0)
 
 # Returns
@@ -233,16 +233,14 @@ The calculation proceeds as a product of 4 matrix/vector operations:
 f_k, ψ_in = compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E)
 ```
 """
-function compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; μ=nothing, σ_l=0.0)
+function compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E; σ_l=0.0)
     # Constants
-    ħ = 197.326980  # MeV·fm (ħc)
-    m = 938.918     # Nucleon mass in MeV/c²
-    amu = 931.494   # MeV/c² (atomic mass unit)
+    ħ = 197.3269718  # MeV·fm (ħc)
+    m = 1.0079713395678829     # Nucleon mass in amu
+    amu = 931.49432   # MeV (atomic mass unit)
 
-    # Default reduced mass: μ = 2m/3 for deuteron-nucleon system
-    if μ === nothing
-        μ = (2.0 * m) / 3.0  # in amu
-    end
+    # Reduced mass: μ = 2m/3 for deuteron-nucleon system
+    μ = (2.0 * m) / 3.0  # in amu
 
     # Compute wave number k from energy E = ħ²k²/(2μ)
     k = sqrt(2.0 * μ * amu * E) / ħ  # in fm⁻¹
