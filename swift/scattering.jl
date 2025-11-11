@@ -6,6 +6,7 @@ module Scattering
 using LinearAlgebra
 using SparseArrays
 using IterativeSolvers
+using WignerSymbols
 
 include("matrices_optimized.jl")
 using .matrices_optimized
@@ -14,6 +15,7 @@ include("matrices.jl")
 using .matrices
 
 export solve_scattering_equation, compute_scattering_matrix, compute_scattering_amplitude
+export compute_collision_matrix, compute_eigenphase_shifts, compute_phase_shift_analysis
 
 # ============================================================================
 # Preconditioner operator wrapper
@@ -365,6 +367,354 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
     println("Scattering amplitude computed successfully.")
 
     return f_matrix, deuteron_channels, channel_labels
+end
+
+# ============================================================================
+# Phase shift analysis
+# ============================================================================
+
+"""
+    compute_collision_matrix(f_matrix, k)
+
+Compute the collision matrix U from the scattering amplitude matrix f.
+
+# Physics:
+U^{α₀,α₀'}(k) = 2ik f^{α₀,α₀'}(k) + δ_{α₀,α₀'}
+
+# Arguments
+- `f_matrix`: Scattering amplitude matrix [n_channels × n_channels]
+- `k`: Wave number (fm⁻¹)
+
+# Returns
+- `U_matrix`: Collision matrix [n_channels × n_channels]
+"""
+function compute_collision_matrix(f_matrix, k)
+    n = size(f_matrix, 1)
+    U_matrix = 2.0im * k * f_matrix + I(n)
+    return U_matrix
+end
+
+"""
+    recouple_to_channel_spin(U_matrix, α, deuteron_channels)
+
+Transform collision matrix to channel spin representation.
+
+# Physics:
+Following Seyler (Nucl. Phys. A 124, 253-272, 1969), we use channel spin 𝕊 = J₁₂ + s₃:
+
+U^J_{λ'₃𝕊',λ₃𝕊} = Σ_{J₃,J'₃} √(ĵ₃ĵ'₃𝕊̂𝕊̂') (-)^{2J-J₃-J'₃} {λ'₃ 1/2 J'₃; J₁₂ J 𝕊'}{λ₃ 1/2 J₃; J₁₂ J 𝕊} U_{λ'₃J'₃,λ₃J₃}^J
+
+where ĵ = √(2j+1).
+
+# Arguments
+- `U_matrix`: Collision matrix in J₃ basis [n_channels × n_channels]
+- `α`: Channel structure
+- `deuteron_channels`: Indices of deuteron channels
+
+# Returns
+- `U_channel_spin`: Dictionary with keys (J, parity) and values U^{Jπ} matrices in channel spin basis
+- `channel_spin_labels`: Dictionary with channel labels for each (J, parity)
+"""
+function recouple_to_channel_spin(U_matrix, α, deuteron_channels)
+    # Group channels by J and parity
+    J_parity_groups = Dict{Tuple{Float64, Int}, Vector{Int}}()
+
+    for (i, iα) in enumerate(deuteron_channels)
+        J_val = α.J[iα]
+        # Compute parity: π = (-)^{λ₃ + l₁₂}
+        λ₃ = α.λ[iα]
+        i2b = α.α2bindex[iα]
+        l_12 = α.α2b.l[i2b]
+        parity = Int(round((-1)^(λ₃ + l_12)))
+
+        key = (J_val, parity)
+        if !haskey(J_parity_groups, key)
+            J_parity_groups[key] = Int[]
+        end
+        push!(J_parity_groups[key], i)
+    end
+
+    U_channel_spin = Dict{Tuple{Float64, Int}, Matrix{ComplexF64}}()
+    channel_spin_labels = Dict{Tuple{Float64, Int}, Vector{String}}()
+
+    # For each (J, π) group, perform recoupling transformation
+    for ((J_val, parity), indices) in J_parity_groups
+        n_states = length(indices)
+
+        # Extract U submatrix for this (J, π)
+        U_Jpi = U_matrix[indices, indices]
+
+        # Build channel spin quantum numbers for each state
+        # 𝕊 = J₁₂ + s₃, where s₃ = 1/2 for single nucleon
+        channel_spin_info = []
+
+        for idx in indices
+            iα = deuteron_channels[idx]
+            λ₃ = α.λ[iα]
+            J₃ = α.J3[iα]
+            J₁₂ = α.J12[iα]
+            s₃ = 0.5  # Spin of third particle (nucleon)
+
+            # Channel spin: 𝕊 can be J₁₂ ± s₃
+            # Determine which 𝕊 value based on J₃ coupling
+            # J₃ = λ₃ + 𝕊, so 𝕊 = J₃ - λ₃
+            S_channel = J₃ - λ₃
+
+            push!(channel_spin_info, (λ₃=λ₃, J₃=J₃, J₁₂=J₁₂, S=S_channel))
+        end
+
+        # Build recoupling transformation matrix
+        # T_{i,j} = √(ĵ₃ĵ'₃𝕊̂𝕊̂') (-)^{2J-J₃-J'₃} {λ'₃ 1/2 J'₃; J₁₂ J 𝕊'}{λ₃ 1/2 J₃; J₁₂ J 𝕊}
+        T = zeros(ComplexF64, n_states, n_states)
+
+        for i in 1:n_states
+            info_i = channel_spin_info[i]
+            λ₃_i = info_i.λ₃
+            J₃_i = info_i.J₃
+            J₁₂_i = info_i.J₁₂
+            S_i = info_i.S
+
+            for j in 1:n_states
+                info_j = channel_spin_info[j]
+                λ₃_j = info_j.λ₃
+                J₃_j = info_j.J₃
+                J₁₂_j = info_j.J₁₂
+                S_j = info_j.S
+
+                # Dimension factors: ĵ = √(2j+1)
+                dim_factor = sqrt((2*J₃_i + 1) * (2*J₃_j + 1) * (2*S_i + 1) * (2*S_j + 1))
+
+                # Phase factor
+                phase = (-1)^Int(round(2*J_val - J₃_i - J₃_j))
+
+                # 6-j symbols using WignerSymbols package
+                # {λ'₃ 1/2 J'₃; J₁₂ J 𝕊'}
+                sixj_i = wigner6j(λ₃_i, 0.5, J₃_i, J₁₂_i, J_val, S_i)
+
+                # {λ₃ 1/2 J₃; J₁₂ J 𝕊}
+                sixj_j = wigner6j(λ₃_j, 0.5, J₃_j, J₁₂_j, J_val, S_j)
+
+                T[i, j] = dim_factor * phase * sixj_i * sixj_j
+            end
+        end
+
+        # Transform collision matrix: U_channel_spin = T' * U_Jpi * T
+        # Note: T is real, so T' = T†
+        U_CS = T' * U_Jpi * T
+
+        U_channel_spin[(J_val, parity)] = U_CS
+
+        # Create labels for this (J, π)
+        labels = String[]
+        for info in channel_spin_info
+            λ₃ = Int(round(info.λ₃))
+            S = info.S
+            # Label format: "λ=λ₃, 𝕊=S"
+            push!(labels, "λ=$λ₃, 𝕊=$S")
+        end
+        channel_spin_labels[(J_val, parity)] = labels
+    end
+
+    return U_channel_spin, channel_spin_labels
+end
+
+"""
+    compute_eigenphase_shifts(U_Jpi)
+
+Compute eigenphase shifts from collision matrix U^{Jπ}.
+
+# Physics:
+Eigenvalues λₖ = exp(2iδₖ), so δₖ = (1/2) arg(λₖ)
+
+# Arguments
+- `U_Jpi`: Collision matrix for specific (J, π)
+
+# Returns
+- `eigenphases`: Vector of eigenphase shifts δₖ (in radians)
+- `eigenvectors`: Matrix of real orthogonal eigenvectors (columns form u^{Jπ})
+"""
+function compute_eigenphase_shifts(U_Jpi)
+    # Diagonalize collision matrix
+    eigenvals, eigenvecs_complex = eigen(U_Jpi)
+
+    # Extract eigenphase shifts: δₖ = (1/2) arg(λₖ)
+    eigenphases = 0.5 * angle.(eigenvals)
+
+    # Eigenvectors should be real (or can be made real by choosing appropriate phase)
+    # For unitary matrices, eigenvectors can be chosen to be real
+    eigenvecs = real.(eigenvecs_complex)
+
+    # Ensure orthogonality (may need to orthogonalize if numerical errors)
+    # Use QR decomposition to get orthonormal set
+    Q, R = qr(eigenvecs)
+    eigenvecs = Matrix(Q)
+
+    return eigenphases, eigenvecs
+end
+
+"""
+    extract_mixing_parameters_3x3(u_matrix)
+
+Extract Blatt-Biedenharn mixing parameters (ε, ζ, η) from 3×3 orthogonal matrix.
+
+# Physics:
+u = v * w * x, where:
+- v rotates in (2,3) plane by angle ε (spin mixing)
+- w rotates in (1,3) plane by angle ζ (orbital mixing)
+- x rotates in (1,2) plane by angle η (mixed coupling)
+
+# Arguments
+- `u_matrix`: 3×3 orthogonal mixing matrix
+
+# Returns
+- `ε, ζ, η`: Mixing parameters (in radians)
+"""
+function extract_mixing_parameters_3x3(u_matrix)
+    # From u = v * w * x decomposition:
+    # u₁₃ = sin(ζ)
+    ζ = asin(u_matrix[1, 3])
+
+    # u₁₁ = cos(η) * cos(ζ)
+    η = acos(u_matrix[1, 1] / cos(ζ))
+
+    # u₂₃ = sin(ε) * cos(ζ)
+    ε = asin(u_matrix[2, 3] / cos(ζ))
+
+    return ε, ζ, η
+end
+
+"""
+    extract_mixing_parameters_2x2(u_matrix, J_val, parity)
+
+Extract mixing parameter from 2×2 orthogonal matrix.
+
+# Physics:
+For 2×2 case, only one mixing angle α:
+u = [cos(α)  sin(α);
+     -sin(α) cos(α)]
+
+The angle is denoted as:
+- η for J^π = 1/2⁺
+- ε for J^π = 1/2⁻
+
+# Arguments
+- `u_matrix`: 2×2 orthogonal mixing matrix
+- `J_val`: Total angular momentum J
+- `parity`: Parity (±1)
+
+# Returns
+- Named tuple with the appropriate mixing parameter
+"""
+function extract_mixing_parameters_2x2(u_matrix, J_val, parity)
+    # u₁₁ = cos(α)
+    α = acos(u_matrix[1, 1])
+
+    # Determine which parameter name to use
+    if isapprox(J_val, 0.5) && parity == 1
+        # J^π = 1/2⁺ → use η
+        return (η=α, ε=0.0, ζ=0.0)
+    elseif isapprox(J_val, 0.5) && parity == -1
+        # J^π = 1/2⁻ → use ε
+        return (ε=α, η=0.0, ζ=0.0)
+    else
+        # Default: return as η for other 2×2 cases
+        return (η=α, ε=0.0, ζ=0.0)
+    end
+end
+
+"""
+    compute_phase_shift_analysis(f_matrix, k, α, deuteron_channels, channel_labels)
+
+Complete phase shift analysis: compute collision matrix, recouple to channel spin basis,
+and extract eigenphase shifts and mixing parameters.
+
+# Arguments
+- `f_matrix`: Scattering amplitude matrix [n_deuteron × n_deuteron]
+- `k`: Wave number (fm⁻¹)
+- `α`: Channel structure
+- `deuteron_channels`: Indices of deuteron channels in three-body basis
+- `channel_labels`: Labels for deuteron channels
+
+# Returns
+- Dictionary with keys (J, π) containing:
+  - `eigenphases`: Vector of eigenphase shifts (radians)
+  - `mixing_params`: Named tuple (ε, ζ, η) or single angle
+  - `U_matrix`: Collision matrix in channel spin basis
+  - `labels`: Channel labels
+"""
+function compute_phase_shift_analysis(f_matrix, k, α, deuteron_channels, channel_labels)
+    println("\n" * "="^70)
+    println("Phase Shift Analysis (Blatt-Biedenharn Parameterization)")
+    println("="^70)
+
+    # Step 1: Compute collision matrix U = 2ik*f + I
+    println("\n1. Computing collision matrix U = 2ik*f + I...")
+    U_matrix = compute_collision_matrix(f_matrix, k)
+    println("   Collision matrix computed (size: $(size(U_matrix)))")
+
+    # Step 2: Recouple to channel spin representation
+    println("\n2. Recoupling to channel spin representation...")
+    U_channel_spin, cs_labels = recouple_to_channel_spin(U_matrix, α, deuteron_channels)
+    println("   Found $(length(U_channel_spin)) (J, π) groups")
+
+    # Step 3: For each (J, π), compute eigenphase shifts and mixing parameters
+    results = Dict{Tuple{Float64, Int}, Dict{String, Any}}()
+
+    for ((J_val, parity), U_Jpi) in U_channel_spin
+        parity_symbol = parity == 1 ? "+" : "-"
+        println("\n" * "-"^70)
+        println("3. Analyzing J^π = $(J_val)^$parity_symbol")
+        println("-"^70)
+
+        n_states = size(U_Jpi, 1)
+        println("   Matrix size: $n_states × $n_states")
+        println("   Channel spin labels: $(cs_labels[(J_val, parity)])")
+
+        # Compute eigenphase shifts
+        eigenphases, u_matrix = compute_eigenphase_shifts(U_Jpi)
+
+        println("   Eigenphase shifts (degrees):")
+        for (i, δ) in enumerate(eigenphases)
+            println("      δ_$i = $(rad2deg(δ))°")
+        end
+
+        # Extract mixing parameters
+        if n_states == 3
+            ε, ζ, η = extract_mixing_parameters_3x3(u_matrix)
+            mixing_params = (ε=ε, ζ=ζ, η=η)
+            println("   Mixing parameters (degrees):")
+            println("      ε (spin mixing)    = $(rad2deg(ε))°")
+            println("      ζ (orbital mixing) = $(rad2deg(ζ))°")
+            println("      η (mixed coupling) = $(rad2deg(η))°")
+        elseif n_states == 2
+            mixing_params = extract_mixing_parameters_2x2(u_matrix, J_val, parity)
+            if mixing_params.η != 0.0
+                println("   Mixing parameter (degrees):")
+                println("      η = $(rad2deg(mixing_params.η))°")
+            elseif mixing_params.ε != 0.0
+                println("   Mixing parameter (degrees):")
+                println("      ε = $(rad2deg(mixing_params.ε))°")
+            end
+        else
+            mixing_params = nothing
+            println("   Warning: Unexpected matrix size $n_states×$n_states")
+        end
+
+        # Store results
+        results[(J_val, parity)] = Dict(
+            "eigenphases" => eigenphases,
+            "mixing_params" => mixing_params,
+            "U_matrix" => U_Jpi,
+            "u_matrix" => u_matrix,
+            "labels" => cs_labels[(J_val, parity)]
+        )
+    end
+
+    println("\n" * "="^70)
+    println("Phase shift analysis completed")
+    println("="^70)
+
+    return results
 end
 
 end # module
