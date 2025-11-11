@@ -199,40 +199,47 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
 end
 
 """
-    compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E; σ_l=0.0)
+    compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix::Matrix{ComplexF64}, z1z2; θ=0.0, σ_l=0.0)
 
-Compute the scattering amplitude f(k) for three-body scattering.
+Compute the partial-wave scattering amplitude matrix f_{α₀_out, α₀_in}(k) for elastic deuteron scattering.
 
 # Physics:
-The scattering amplitude is:
-f(k) = -4μ₃/(ℏ²k_d²) e^(-iσ_l) ⟨φ | V | Rxy_31 | φ + ψ₃^(sc)⟩
+For elastic scattering, we match three-body channels to deuteron bound state channels (J12=1).
+The scattering amplitude for transition between deuteron channels α₀_in → α₀_out is:
+
+f_{α₀_out, α₀_in}(k) = -4μ₃/(ℏ²k²) e^(-iσ_l) ⟨φ_{α₀_out} | V | Rxy_31 | ψ_total⟩
 
 where:
-- φ is the initial state (ψ_in = φ)
-- ψ₃^(sc) is the solution of the Faddeev scattering equation
+- φ_{α₀} are asymptotic states in deuteron channels (J12=1, with ³S₁ and ³D₁ components)
+- ψ_total = φ + ψ₃^(sc) is the total wavefunction
 - μ = 2m/3 is the reduced mass for deuteron-nucleon system
 
-The calculation proceeds as:
-ψ_in* × V × Rxy_31 × (ψ_in + ψ_sc)
-
 # Arguments
-- `ψ_in`: Initial state vector φ (ψ_in = φ)
+- `ψ_in`: Initial state vector φ
 - `V`: Potential matrix in α₁ coordinates
 - `Rxy_31`: Rearrangement matrix from α₃ to α₁ coordinates
 - `ψ_sc`: Scattering wave function ψ₃^(sc) in α₃ coordinates (solution of Faddeev equation)
 - `E`: Scattering energy (MeV) in cm frame
+- `grid`: Grid structure with nx, ny dimensions
+- `α`: Channel structure with n_channels
+- `φ_d_matrix`: Deuteron bound state wavefunction matrix [nx × n_2b_channels]
+- `z1z2`: Charge product for Coulomb interaction
+- `θ`: Complex scaling angle in radians (default: 0.0)
 - `σ_l`: Coulomb phase shift (default: 0.0)
 
 # Returns
-- `f_k`: Complex scattering amplitude f(k)
+- `f_matrix`: Complex scattering amplitude matrix [n_deuteron_channels × n_deuteron_channels]
+              f_matrix[α₀_out, α₀_in] = scattering amplitude between deuteron channels
+- `channel_map`: Vector mapping deuteron channel indices to three-body channel indices
+- `channel_labels`: Vector of channel labels for identification
 
 # Example
 ```julia
-# Compute scattering amplitude where ψ_in = φ
-f_k = compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E)
+# Compute scattering amplitude matrix for deuteron elastic scattering
+f_matrix, channel_map, labels = compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix, z1z2)
 ```
 """
-function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E; σ_l=0.0)
+function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix::Matrix{ComplexF64}, z1z2; θ=0.0, σ_l=0.0)
     # Constants
     ħ = 197.3269718  # MeV·fm (ħc)
     m = 1.0079713395678829     # Nucleon mass in amu
@@ -245,40 +252,119 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E; σ_l=0.0)
     k = sqrt(2.0 * μ * amu * E) / ħ  # in fm⁻¹
     k_squared = k^2
 
-    println("Computing scattering amplitude f(k)...")
+    # Get dimensions
+    nx = grid.nx
+    ny = grid.ny
+    n_channels = length(α.l)
+    n_gridpoints = nx * ny
+    n_2b_channels = size(φ_d_matrix, 2)
+
+    println("Computing partial-wave scattering amplitude matrix for deuteron elastic scattering...")
     println("  Energy E = $E MeV")
     println("  Wave number k = $k fm⁻¹")
     println("  Coulomb phase σ_l = $σ_l")
+    println("  Total three-body channels: $n_channels")
 
-    # Compute total wave function in α₃ coordinates
+    # Step 1: Identify which three-body channels correspond to deuteron bound state (J12=1)
+    println("  Identifying deuteron channels (J12=1)...")
+
+    deuteron_channels = Vector{Int}()        # Three-body channel indices α
+    deuteron_2b_channels = Vector{Int}()     # Corresponding two-body channel indices
+    channel_labels = Vector{String}()        # Human-readable labels
+
+    for iα in 1:n_channels
+        # Get quantum numbers for this three-body channel
+        λ_channel = α.λ[iα]
+        i2b = α.α2bindex[iα]
+
+        # Get two-body quantum numbers
+        l_2b = α.α2b.l[i2b]
+        s12_2b = α.α2b.s12[i2b]
+        J12_2b = α.α2b.J12[i2b]
+
+        # Check if this channel couples to the deuteron bound state (J12=1, s12=1)
+        if Int(round(J12_2b)) == 1 && Int(round(s12_2b)) == 1
+            # Match to deuteron components: ³S₁ (l=0) or ³D₁ (l=2)
+            matched_2b_channel = 0
+            label = ""
+
+            if l_2b == 0 && n_2b_channels >= 1
+                matched_2b_channel = 1  # ³S₁
+                label = "³S₁, λ=$(Int(round(λ_channel)))"
+            elseif l_2b == 2 && n_2b_channels >= 2
+                matched_2b_channel = 2  # ³D₁
+                label = "³D₁, λ=$(Int(round(λ_channel)))"
+            end
+
+            if matched_2b_channel > 0
+                push!(deuteron_channels, iα)
+                push!(deuteron_2b_channels, matched_2b_channel)
+                push!(channel_labels, label)
+            end
+        end
+    end
+
+    n_deuteron = length(deuteron_channels)
+    println("  Found $n_deuteron deuteron channels:")
+    for i in 1:n_deuteron
+        println("    α₀=$i → α=$(deuteron_channels[i]): $(channel_labels[i])")
+    end
+
+    if n_deuteron == 0
+        error("No deuteron channels found! Check channel structure.")
+    end
+
+    # Step 2: Compute total wave function
     println("  Computing ψ₃^(total) = ψ₃^(in) + ψ₃^(sc)...")
     ψ_total = ψ_in + ψ_sc
 
-    # Compute the matrix-vector products
-    # f(k) ∝ ⟨ψ_in* | V | Rxy_31 | ψ_total⟩
-
-    # Compute Rxy_31 × ψ_total first (more efficient order)
-    println("  Computing Rxy_31 × ψ_total...")
+    # Step 3: Compute V × Rxy_31 × ψ_total (shared for all channel pairs)
+    println("  Computing V × Rxy_31 × ψ_total...")
     temp1 = Rxy_31 * ψ_total
-
-    # Compute V × temp1
-    println("  Computing V × (Rxy_31 × ψ_total)...")
     temp2 = V * temp1
 
-    # Compute inner product ⟨ψ_in | temp2⟩ = ψ_in* · temp2
-    println("  Computing ⟨ψ_in | V × Rxy_31 × ψ_total⟩...")
-    inner_product = dot(ψ_in, temp2)
+    # Step 4: Compute scattering amplitude matrix for deuteron channels
+    println("  Computing scattering amplitudes for deuteron channel pairs...")
 
-    # Apply prefactor
-    # f(k) = -4μ₃/(ℏ²k²) e^(-iσ_l) × inner_product
+    # Initialize amplitude matrix (for deuteron channels only)
+    f_matrix = zeros(ComplexF64, n_deuteron, n_deuteron)
+
+    # Prefactor: f(k) = -4μ₃/(ℏ²k²) e^(-iσ_l) × ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩
     prefactor = -4.0 * μ * amu / (ħ^2 * k_squared) * exp(-im * σ_l)
-    f_k = prefactor * inner_product
 
-    println("  |f(k)| = $(abs(f_k))")
-    println("  arg(f(k)) = $(angle(f_k)) rad")
+    for i_out in 1:n_deuteron
+        for i_in in 1:n_deuteron
+            # Map deuteron channel indices to three-body channel indices
+            α_out = deuteron_channels[i_out]
+            α_in = deuteron_channels[i_in]
+
+            # Extract channel components from ψ_total and temp2
+            idx_out_start = (α_out - 1) * n_gridpoints + 1
+            idx_out_end = α_out * n_gridpoints
+
+            idx_in_start = (α_in - 1) * n_gridpoints + 1
+            idx_in_end = α_in * n_gridpoints
+
+            # Get the incoming state component for this outgoing channel
+            ψ_out_component = ψ_in[idx_out_start:idx_out_end]
+
+            # Get V × Rxy_31 × ψ_total for the incoming channel
+            V_Rxy_ψ_component = temp2[idx_in_start:idx_in_end]
+
+            # Compute inner product ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩_{α₀_in}
+            inner_product = dot(ψ_out_component, V_Rxy_ψ_component)
+
+            # Apply prefactor
+            f_matrix[i_out, i_in] = prefactor * inner_product
+        end
+    end
+
+    println("  Scattering amplitude matrix computed:")
+    println("    Matrix size: $n_deuteron × $n_deuteron")
+    println("    Max |f_{α₀_out,α₀_in}| = $(maximum(abs.(f_matrix)))")
     println("Scattering amplitude computed successfully.")
 
-    return f_k
+    return f_matrix, deuteron_channels, channel_labels
 end
 
 end # module
