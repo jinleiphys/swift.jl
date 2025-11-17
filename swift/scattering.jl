@@ -98,7 +98,7 @@ function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
 
     # Compute rearrangement matrices
     println("  Computing rearrangement matrices Rxy...")
-    Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+    Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
 
     # Build scattering matrix: A = E*B - T - V*(I + Rxy)
     println("  Assembling scattering matrix A...")
@@ -114,7 +114,7 @@ function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
 
     println("  Scattering matrix computed successfully.")
 
-    return A, B, T, V, Rxy, Rxy_31, Rxy_32, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny
+    return A, B, T, V, Rxy, Rxy_31, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny
 end
 
 """

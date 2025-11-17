@@ -163,7 +163,7 @@ end
 Optimized Rxy_matrix with better algorithmic structure
 
 ## Key Optimizations:
-1. Compute only Rxy_31, use symmetry (Rxy_32 = Rxy_31) for 2× speedup
+1. Compute only Rxy_31, use symmetry (Rxy = 2*Rxy_31) for 2× speedup
 2. Pre-compute invariant quantities outside loops
 3. Skip negligible G-coefficient contributions early
 4. Optimized innerloop structure with @inbounds
@@ -176,7 +176,7 @@ Optimized Rxy_matrix with better algorithmic structure
 
 ## Usage:
 ```julia
-Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized_(α, grid)
+Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
 ```
 """
 function Rxy_matrix_optimized(α, grid)
@@ -264,10 +264,10 @@ function Rxy_matrix_optimized(α, grid)
     end
 
     # Use symmetry: Rxy_32 = Rxy_31 (exact equality due to physics symmetry)
-    Rxy_32 = Rxy_31
-    Rxy = Rxy_31 + Rxy_32
+    # Therefore: Rxy = Rxy_31 + Rxy_32 = 2*Rxy_31
+    Rxy = 2.0 * Rxy_31
 
-    return Rxy, Rxy_31, Rxy_32
+    return Rxy, Rxy_31
 end
 
 
@@ -917,13 +917,12 @@ Pre-computes all basis evaluations at transformed coordinates (πb, ξb) before 
 avoiding redundant calculations. Expected speedup: 2-3× compared to naive implementation.
 
 # Returns
-- `Rxy`: Full rearrangement matrix (Rxy_31 + Rxy_32)
+- `Rxy`: Full rearrangement matrix (2*Rxy_31, using symmetry Rxy_32 = Rxy_31)
 - `Rxy_31`: Rearrangement from coordinate set 1 to 3
-- `Rxy_32`: Rearrangement from coordinate set 2 to 3
 
 # Example
 ```julia
-Rxy, Rxy_31, Rxy_32 = Rxy_matrix_with_caching(α, grid)
+Rxy, Rxy_31 = Rxy_matrix_with_caching(α, grid)
 ```
 """
 function Rxy_matrix_with_caching(α, grid)
@@ -1058,9 +1057,8 @@ function Rxy_matrix_with_caching(α, grid)
     computation_time = time() - computation_start
     println("Rxy_31 computed in $(round(computation_time, digits=3)) seconds")
 
-    # Since Rxy_31 = Rxy_32, just reuse the same matrix!
-    Rxy_32 = Rxy_31
-    Rxy = Rxy_31 + Rxy_32  # Same as 2 * Rxy_31
+    # Since Rxy_32 = Rxy_31 (symmetry), we have Rxy = Rxy_31 + Rxy_32 = 2*Rxy_31
+    Rxy = 2.0 * Rxy_31
 
     # Performance summary
     total_time = cache_time + computation_time
@@ -1073,7 +1071,7 @@ function Rxy_matrix_with_caching(α, grid)
     println("Total time:          $(rpad(round(total_time, digits=3), 8)) s")
     println("="^70)
 
-    return Rxy, Rxy_31, Rxy_32
+    return Rxy, Rxy_31
 end
 
 """

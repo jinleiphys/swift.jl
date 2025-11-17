@@ -5,11 +5,13 @@ include("../general_modules/channels.jl")
 include("../general_modules/mesh.jl")
 include("matrices_optimized.jl")
 include("scattering.jl")
+include("twobody.jl")
 
 using .channels
 using .mesh
 using .matrices_optimized
 using .Scattering
+using .twobodybound
 
 println("="^70)
 println("    TEST: Scattering Amplitude Computation")
@@ -29,7 +31,7 @@ lmin = 0
 j2bmax = 1.0  # J12=1 for deuteron
 s1 = 0.5; s2 = 0.5; s3 = 0.5
 t1 = 0.5; t2 = 0.5; t3 = 0.5
-nθ = 6; nx = 12; ny = 12; xmax = 10; ymax = 10; alpha = 1
+nθ = 12; nx = 24; ny = 24; xmax = 20; ymax = 20; alpha = 1
 
 α = α3b(fermion, Jtot, T, Parity, lmax, lmin, λmax, λmin, s1, s2, s3, t1, t2, t3, MT, j2bmax)
 grid = initialmesh(nθ, nx, ny, Float64(xmax), Float64(ymax), Float64(alpha))
@@ -39,43 +41,51 @@ println("Grid: $(nx)×$(ny) mesh")
 println()
 
 # Scattering energy and charges
-E = 10.0   # MeV
+E = 1.0   # MeV
 z1z2 = 0.0 # Charge product for n+d (no Coulomb interaction)
-θ = 0.0    # Complex scaling angle
+θ_deg = 0.0    # Complex scaling angle in degrees
 
 println("Computing matrices...")
 V = V_matrix_optimized(α, grid, "AV18")
-Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
 println("  Matrices computed")
 println()
 
-# Create mock deuteron bound state wavefunction
-# In real calculation, this would come from bound2b()
-println("Creating mock deuteron bound state φ_d...")
-φ_d_matrix = zeros(ComplexF64, grid.nx, 2)  # 2 channels: ³S₁ and ³D₁
+# Compute deuteron bound state using bound2b with same complex scaling angle
+println("Computing deuteron bound state with bound2b...")
+println("  Complex scaling angle: θ = $(θ_deg)°")
+bound_energies, bound_wavefunctions = bound2b(grid, "AV18", θ_deg=θ_deg)
 
-# Mock ³S₁ component (channel 1) - dominant component ~96%
-for ix in 1:grid.nx
-    x = grid.xi[ix]
-    φ_d_matrix[ix, 1] = exp(-0.3*x) * sqrt(0.96)  # ~96% probability
+# Extract the ground state (deuteron)
+if isempty(bound_energies)
+    error("No bound states found! Check potential and mesh parameters.")
 end
 
-# Mock ³D₁ component (channel 2) - small D-wave component ~4%
-for ix in 1:grid.nx
-    x = grid.xi[ix]
-    φ_d_matrix[ix, 2] = exp(-0.3*x) * x * sqrt(0.04)  # ~4% probability
-end
+φ_d_matrix = ComplexF64.(bound_wavefunctions[1])  # Ground state with ³S₁ + ³D₁ components
+E_deuteron = real(bound_energies[1])
 
-println("  Deuteron wavefunction created")
-println("  ³S₁ component norm = $(norm(φ_d_matrix[:, 1]))")
-println("  ³D₁ component norm = $(norm(φ_d_matrix[:, 2]))")
+println("  Deuteron binding energy: $(round(E_deuteron, digits=4)) MeV")
+println("  Deuteron wavefunction computed")
 println()
 
 # Create initial state vector φ using compute_initial_state_vector
 println("Computing initial state vector φ...")
-ψ_in = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ)
+θ_rad = θ_deg * π / 180.0  # Convert to radians
+ψ_in = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ_rad)
+
+# Check which channels are populated (only deuteron channels should be non-zero)
+n_populated = 0
+for iα in 1:α.nchmax
+    idx_start = (iα-1) * grid.nx * grid.ny + 1
+    idx_end = iα * grid.nx * grid.ny
+    channel_norm = norm(ψ_in[idx_start:idx_end])
+    if channel_norm > 1e-10
+        n_populated += 1
+    end
+end
+
 println("  Initial state φ created")
-println("  Norm ||φ|| = $(norm(ψ_in))")
+println("  Populated channels: $n_populated / $(α.nchmax) (only deuteron channels should be populated)")
 println()
 
 # Create mock scattering solution ψ_sc
@@ -83,14 +93,14 @@ println()
 println("Creating mock scattering solution ψ_sc...")
 N = α.nchmax * grid.nx * grid.ny
 ψ_sc = 0.05 * randn(ComplexF64, N)  # Smaller perturbation
-println("  Scattering solution created")
-println("  Norm ||ψ_sc|| = $(norm(ψ_sc))")
+println("  Mock scattering solution created (random perturbation)")
+println("  Note: In real calculation, solve [E*B - T - V*(I + Rxy)]ψ_sc = 2*V*Rxy_31*φ")
 println()
 
 # Compute scattering amplitude matrix
 println("="^70)
 f_matrix, deuteron_channels, channel_labels = compute_scattering_amplitude(
-    ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix, z1z2, θ=θ, σ_l=0.0
+    ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix, z1z2, θ=θ_rad, σ_l=0.0
 )
 println("="^70)
 println()

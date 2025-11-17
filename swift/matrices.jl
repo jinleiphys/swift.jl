@@ -19,12 +19,12 @@ export Rxy_matrix, T_matrix, V_matrix, Bmatrix, M_inverse_operator
 
 function Rxy_matrix(α, grid)
     # the channel index can be computed by i(iα,ix, iy) = (iα-1) * grid.nx * grid.ny + (ix-1)*grid.ny + iy
-    Rxy_32 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny) # Initialize Rxy_32 matrix
+    # OPTIMIZATION: Only compute Rxy_31, use symmetry (Rxy_32 = Rxy_31) to save memory
     Rxy_31 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny) # Initialize Rxy_31 matrix
-    
+
     # Fixed typo in function name
     Gαα = computeGcoefficient(α, grid)
-       
+
     # compute the Rxy matrix from α1 to α3
     a = -0.5; b = 1.0; c = -0.75; d = -0.5
     for ix in 1:grid.nx
@@ -36,11 +36,11 @@ function Rxy_matrix(α, grid)
                 dcosθ = grid.dcosθi[iθ]
                 πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
                 ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
-                
-                
+
+
                 fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
                 fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
-                
+
                 for iα in 1:α.nchmax
                     i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
                     for iαp in 1:α.nchmax
@@ -57,41 +57,11 @@ function Rxy_matrix(α, grid)
         end
     end
 
+    # Use symmetry: Rxy_32 = Rxy_31 (exact equality due to physics symmetry)
+    # Therefore: Rxy = Rxy_31 + Rxy_32 = 2*Rxy_31
+    Rxy = 2.0 * Rxy_31
 
-    # compute the Rxy matrix from α2 to α3
-    a = -0.5; b = -1.0; c = 0.75; d = -0.5
-    for ix in 1:grid.nx
-        xa = grid.xi[ix]
-        for iy in 1:grid.ny
-            ya = grid.yi[iy]
-            for iθ in 1:grid.nθ
-                cosθ = grid.cosθi[iθ]
-                dcosθ = grid.dcosθi[iθ]
-                πb = sqrt(a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ)
-                ξb = sqrt(c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ)
-                
-                fπb = lagrange_laguerre_regularized_basis(πb, grid.xi, grid.ϕx, grid.α, grid.hsx)
-                fξb = lagrange_laguerre_regularized_basis(ξb, grid.yi, grid.ϕy, grid.α, grid.hsy)
-                
-                for iα in 1:α.nchmax
-                    i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
-                    for iαp in 1:α.nchmax
-                        adj_factor = dcosθ * Gαα[iθ, iy, ix, iα, iαp, 2] * xa * ya / (πb * ξb * grid.ϕx[ix] * grid.ϕy[iy]) 
-                        for ixp in 1:grid.nx
-                            for iyp in 1:grid.ny
-                                ip = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny + iyp
-                                Rxy_32[i, ip] += adj_factor * fπb[ixp] * fξb[iyp]
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    Rxy = Rxy_31 + Rxy_32
-    
-    return Rxy,Rxy_31, Rxy_32
+    return Rxy, Rxy_31
 end
 
 

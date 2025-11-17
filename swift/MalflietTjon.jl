@@ -1161,6 +1161,9 @@ function compute_total_wavefunction(ψ::Vector, Rxy, B)
     return ψ_normalized, ψ3_normalized
 end
 
+# NOTE: check_rxy_symmetry function commented out since we no longer compute Rxy_32
+# It used symmetry (Rxy_32 = Rxy_31) to save memory.
+#=
 """
         check_rxy_symmetry(Rxy_31, Rxy_32, α, grid; tolerance=1e-12, verbose=true)
 
@@ -1373,6 +1376,7 @@ end
         
         return are_equal, max_diff
     end
+=#
 
 """
     compute_channel_probabilities(ψ_normalized, B, α, grid)
@@ -1536,7 +1540,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
 
         print("    - Rxy matrix: ")
         r_start = time()
-        Rxy, Rxy_31, Rxy_32 = Rxy_matrix_with_caching(α, grid)
+        Rxy, Rxy_31 = Rxy_matrix_with_caching(α, grid)
         r_time = time() - r_start
         timings["Rxy_matrix"] = r_time
         @printf("%.3f s\n", r_time)
@@ -1572,7 +1576,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         V, V_x_diag_ch = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss, return_components=true)
 
         B = Bmatrix(α, grid)
-        Rxy, Rxy_31, Rxy_32 = Rxy_matrix_optimized(α, grid)
+        Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
 
         # Compute UIX three-body force if requested (separate from V)
         if include_uix

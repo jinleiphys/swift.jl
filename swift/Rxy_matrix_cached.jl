@@ -112,9 +112,8 @@ end
 - **Total cache: ~2.5 MB** (negligible compared to matrix size!)
 
 ## Returns:
-- `Rxy`: Full rearrangement matrix (Rxy_31 + Rxy_32)
+- `Rxy`: Full rearrangement matrix (2*Rxy_31, using symmetry Rxy_32 = Rxy_31)
 - `Rxy_31`: Rearrangement from coordinate set 1 to 3
-- `Rxy_32`: Rearrangement from coordinate set 2 to 3
 
 ## Example Usage:
 ```julia
@@ -122,13 +121,12 @@ include("Rxy_matrix_cached.jl")
 using .Rxy_matrix_cached
 
 # Compute with caching (2-3× faster)
-Rxy, Rxy_31, Rxy_32 = Rxy_matrix_with_caching(α, grid)
+Rxy, Rxy_31 = Rxy_matrix_with_caching(α, grid)
 ```
 """
 function Rxy_matrix_with_caching(α, grid)
-    # Pre-allocate result matrices
+    # Pre-allocate result matrix (only compute Rxy_31, use symmetry for Rxy_32)
     Rxy_31 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
-    Rxy_32 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
 
     # Compute G coefficients once (expensive but unavoidable)
     println("Computing G-coefficients...")
@@ -149,17 +147,16 @@ function Rxy_matrix_with_caching(α, grid)
     cache_fπb = Dict{Tuple{Int, Int, Int, Int}, Vector{ComplexF64}}()
     cache_fξb = Dict{Tuple{Int, Int, Int, Int}, Vector{ComplexF64}}()
 
-    # Pre-allocate cache (we know the size)
-    sizehint!(cache_fπb, 2 * grid.nx * grid.ny * grid.nθ)
-    sizehint!(cache_fξb, 2 * grid.nx * grid.ny * grid.nθ)
+    # Pre-allocate cache (only for perm_idx=1 since Rxy_32 = Rxy_31)
+    sizehint!(cache_fπb, grid.nx * grid.ny * grid.nθ)
+    sizehint!(cache_fξb, grid.nx * grid.ny * grid.nθ)
 
-    # Transformation parameters for both permutations
-    transform_params = [
-        (1, -0.5, 1.0, -0.75, -0.5),   # Rxy_31: perm_idx=1
-        (2, -0.5, -1.0, 0.75, -0.5)     # Rxy_32: perm_idx=2
-    ]
+    # Transformation parameters for Rxy_31 only (use symmetry for Rxy_32)
+    perm_idx = 1
+    a, b, c, d = -0.5, 1.0, -0.75, -0.5
 
-    for (perm_idx, a, b, c, d) in transform_params
+    # Cache only for Rxy_31 (perm_idx=1)
+    for _ in 1:1  # Dummy loop for code structure consistency
         for ix in 1:grid.nx
             xa = grid.xi[ix]
 
@@ -263,91 +260,22 @@ function Rxy_matrix_with_caching(α, grid)
     Rxy_31_time = time() - Rxy_31_start
     println("Rxy_31 computed in $(round(Rxy_31_time, digits=3)) seconds")
 
-    println("Computing Rxy_32 with cached basis functions...")
-    Rxy_32_start = time()
-
-    # Compute Rxy_32 (perm_idx = 2)
-    perm_idx = 2
-    a, b, c, d = -0.5, -1.0, 0.75, -0.5
-
-    for ix in 1:grid.nx
-        xa = grid.xi[ix]
-        xa_norm = ϕx_norm[ix]
-
-        for iy in 1:grid.ny
-            ya = grid.yi[iy]
-            ya_norm = ϕy_norm[iy]
-            xy_norm = xa_norm * ya_norm
-
-            for iθ in 1:grid.nθ
-                cosθ = grid.cosθi[iθ]
-                dcosθ = grid.dcosθi[iθ]
-
-                # Compute transformed coordinates (for normalization only)
-                πb_sq = a^2 * xa^2 + b^2 * ya^2 + 2*a*b*xa*ya*cosθ
-                ξb_sq = c^2 * xa^2 + d^2 * ya^2 + 2*c*d*xa*ya*cosθ
-                πb = sqrt(πb_sq)
-                ξb = sqrt(ξb_sq)
-
-                # CACHE LOOKUP: O(1) operation!
-                key = (ix, iy, iθ, perm_idx)
-                fπb = cache_fπb[key]
-                fξb = cache_fξb[key]
-
-                # Pre-compute normalization factor
-                base_angular_factor = dcosθ * xa * ya
-                norm_factor = base_angular_factor / (πb * ξb) * xy_norm
-
-                # Channel coupling loop
-                for iα in 1:α.nchmax
-                    i = (iα-1)*grid.nx*grid.ny + (ix-1)*grid.ny + iy
-
-                    for iαp in 1:α.nchmax
-                        # Get G coefficient
-                        G_coeff = Gαα[iθ, iy, ix, iα, iαp, perm_idx]
-
-                        # Early exit for negligible contributions
-                        if abs(G_coeff) < 1e-14
-                            continue
-                        end
-
-                        adj_factor = norm_factor * G_coeff
-
-                        # Optimized inner loop with @inbounds
-                        @inbounds for ixp in 1:grid.nx
-                            fπb_ixp = fπb[ixp]
-                            ip_base = (iαp-1)*grid.nx*grid.ny + (ixp-1)*grid.ny
-
-                            for iyp in 1:grid.ny
-                                ip = ip_base + iyp
-                                Rxy_32[i, ip] += adj_factor * fπb_ixp * fξb[iyp]
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    Rxy_32_time = time() - Rxy_32_start
-    println("Rxy_32 computed in $(round(Rxy_32_time, digits=3)) seconds")
-
-    # Combine results
-    Rxy = Rxy_31 + Rxy_32
+    # Use symmetry: Rxy_32 = Rxy_31 (exact equality due to physics symmetry)
+    # Therefore: Rxy = Rxy_31 + Rxy_32 = 2*Rxy_31
+    Rxy = 2.0 * Rxy_31
 
     # Performance summary
-    total_time = cache_time + Rxy_31_time + Rxy_32_time
+    total_time = cache_time + Rxy_31_time
     println("\n" * "="^70)
     println("PERFORMANCE SUMMARY")
     println("="^70)
     println("Cache construction:  $(rpad(round(cache_time, digits=3), 8)) s")
     println("Rxy_31 computation:  $(rpad(round(Rxy_31_time, digits=3), 8)) s")
-    println("Rxy_32 computation:  $(rpad(round(Rxy_32_time, digits=3), 8)) s")
     println("-"^70)
     println("Total time:          $(rpad(round(total_time, digits=3), 8)) s")
     println("="^70)
 
-    return Rxy, Rxy_31, Rxy_32
+    return Rxy, Rxy_31
 end
 
 end # module
