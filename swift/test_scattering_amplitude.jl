@@ -16,7 +16,7 @@ println("    TEST: Scattering Amplitude Computation")
 println("="^70)
 println()
 
-# Deuteron scattering system (p+d elastic scattering)
+# Deuteron scattering system (n+d elastic scattering)
 fermion = true
 Jtot = 0.5
 T = 0.5
@@ -40,7 +40,7 @@ println()
 
 # Scattering energy and charges
 E = 10.0   # MeV
-z1z2 = 1.0 # Charge product for p+d
+z1z2 = 0.0 # Charge product for n+d (no Coulomb interaction)
 θ = 0.0    # Complex scaling angle
 
 println("Computing matrices...")
