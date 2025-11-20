@@ -80,7 +80,7 @@ for iα in 1:α.nchmax
     idx_end = iα * grid.nx * grid.ny
     channel_norm = norm(ψ_in[idx_start:idx_end])
     if channel_norm > 1e-10
-        n_populated += 1
+        global n_populated += 1
     end
 end
 
@@ -88,13 +88,12 @@ println("  Initial state φ created")
 println("  Populated channels: $n_populated / $(α.nchmax) (only deuteron channels should be populated)")
 println()
 
-# Create mock scattering solution ψ_sc
-# In real calculation, this would come from solve_scattering_equation
-println("Creating mock scattering solution ψ_sc...")
-N = α.nchmax * grid.nx * grid.ny
-ψ_sc = 0.05 * randn(ComplexF64, N)  # Smaller perturbation
-println("  Mock scattering solution created (random perturbation)")
-println("  Note: In real calculation, solve [E*B - T - V*(I + Rxy)]ψ_sc = 2*V*Rxy_31*φ")
+# Solve scattering equation to get ψ_sc
+# Solves: [E*B - T - V*(I + Rxy)] ψ_sc = 2*V*Rxy_31*φ
+ψ_sc, A_matrix, b_vector = solve_scattering_equation(E, α, grid, "AV18", ψ_in,
+                                                       θ_deg=θ_deg, method=:lu)
+println("  Scattering solution ψ_sc computed via LU factorization")
+println("  Residual norm: ||A*ψ_sc - b|| = $(norm(A_matrix * ψ_sc - b_vector))")
 println()
 
 # Compute scattering amplitude matrix

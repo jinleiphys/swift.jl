@@ -70,7 +70,6 @@ Compute the left-hand side matrix A = E*B - T - V*(I + Rxy) for scattering equat
 - `V`: Potential matrix
 - `Rxy`: Total rearrangement matrix (Rxy_31 + Rxy_32)
 - `Rxy_31`: Rearrangement matrix from coordinate set 1 to 3
-- `Rxy_32`: Rearrangement matrix from coordinate set 2 to 3
 - `Tx_ch`, `Ty_ch`, `V_x_diag_ch`, `Nx`, `Ny`: Component matrices for M_inverse_operator
 """
 function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
@@ -161,7 +160,7 @@ function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, meth
     println("="^70)
 
     # Compute scattering matrix and component matrices
-    A, B, T, V, Rxy, Rxy_31, Rxy_32, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny = compute_scattering_matrix(E, α, grid, potname, θ_deg=θ_deg)
+    A, B, T, V, Rxy, Rxy_31, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny = compute_scattering_matrix(E, α, grid, potname, θ_deg=θ_deg)
 
     # Compute right-hand side: b = 2 * V * Rxy_31 * φ
     # Factor of 2 from Faddeev symmetry (two equivalent rearrangement channels)
@@ -445,100 +444,100 @@ function recouple_to_channel_spin(U_matrix, α, deuteron_channels)
         # Extract U submatrix for this (J, π)
         U_Jpi = U_matrix[indices, indices]
 
-        # Build channel spin quantum numbers for each state
-        # In J₃ basis: |(λ₃ s₃) J₃, J₁₂; J⟩ where J = J₃ ⊕ J₁₂
-        # In channel spin basis: |λ₃, (J₁₂ s₃) 𝕊; J⟩ where J = λ₃ ⊕ 𝕊
-        #
-        # Channel spin 𝕊 = J₁₂ ⊕ s₃ can be J₁₂ ± s₃
-        # For deuteron: J₁₂ = 1, s₃ = 1/2, so 𝕊 ∈ {1/2, 3/2}
-        #
-        # For transformation to work, we need (λ₃, J₃) from J₃ basis
-        channel_spin_info = []
+        # Step 1: Collect J₃ basis states for this (J, π)
+        J3_basis_states = []
+        s₃ = 0.5  # Nucleon spin
 
         for idx in indices
             iα = deuteron_channels[idx]
             λ₃ = α.λ[iα]
             J₃ = α.J3[iα]
             J₁₂ = α.J12[iα]
-            s₃ = 0.5  # Spin of third particle (nucleon)
-
-            # In J₃ basis, J₃ couples λ₃ and s₃: J₃ = λ₃ ⊕ s₃
-            # So J₃ must be in range [|λ₃ - s₃|, λ₃ + s₃]
-            # Store (λ₃, J₃) pairs from J₃ basis for recoupling
-            push!(channel_spin_info, (λ₃=λ₃, J₃=J₃, J₁₂=J₁₂, s₃=s₃))
+            push!(J3_basis_states, (λ₃=λ₃, J₃=J₃, J₁₂=J₁₂))
         end
 
-        # Build recoupling transformation matrix
-        # T_{i,j} = √(ĵ₃ĵ'₃𝕊̂𝕊̂') (-)^{2J-J₃-J'₃} {λ'₃ 1/2 J'₃; J₁₂ J 𝕊'}{λ₃ 1/2 J₃; J₁₂ J 𝕊}
-        T = zeros(ComplexF64, n_states, n_states)
+        # Step 2: Generate allowed channel spin states (λ, 𝕊) for this J
+        # Channel spin: 𝕊 = J₁₂ ⊕ s₃ (for deuteron: J₁₂=1, so 𝕊 = 1/2 or 3/2)
+        # Total: J = λ ⊕ 𝕊
+        channel_spin_states = []
 
-        for i in 1:n_states
-            info_i = channel_spin_info[i]
-            λ₃_i = info_i.λ₃
-            J₃_i = info_i.J₃
-            J₁₂_i = info_i.J₁₂
-            S_i = info_i.S
+        # Get unique λ values
+        λ_values = unique([st.λ₃ for st in J3_basis_states])
+        J₁₂ = J3_basis_states[1].J₁₂  # Same for all (deuteron J₁₂=1)
 
-            for j in 1:n_states
-                info_j = channel_spin_info[j]
-                λ₃_j = info_j.λ₃
-                J₃_j = info_j.J₃
-                J₁₂_j = info_j.J₁₂
-                S_j = info_j.S
-
-                # Dimension factors: ĵ = √(2j+1)
-                dim_factor = sqrt((2*J₃_i + 1) * (2*J₃_j + 1) * (2*S_i + 1) * (2*S_j + 1))
-
-                # Phase factor
-                phase = (-1)^Int(round(2*J_val - J₃_i - J₃_j))
-
-                # 6-j symbols using WignerSymbols package
-                # Use twice-j representation: multiply all j by 2 to get integers
-                # Then use wigner6j with integer arguments
-                λ₃_i_2j = Int(round(2 * λ₃_i))
-                J₃_i_2j = Int(round(2 * J₃_i))
-                J₁₂_i_2j = Int(round(2 * J₁₂_i))
-                S_i_2j = Int(round(2 * S_i))
-                J_val_2j = Int(round(2 * J_val))
-
-                λ₃_j_2j = Int(round(2 * λ₃_j))
-                J₃_j_2j = Int(round(2 * J₃_j))
-                J₁₂_j_2j = Int(round(2 * J₁₂_j))
-                S_j_2j = Int(round(2 * S_j))
-
-                # {λ'₃ 1/2 J'₃; J₁₂ J 𝕊'} with twice-j values
-                # wigner6j accepts vararg of integers in twice-j representation
-                try
-                    sixj_i = wigner6j(λ₃_i_2j, 1, J₃_i_2j, J₁₂_i_2j, J_val_2j, S_i_2j)
-                    sixj_j = wigner6j(λ₃_j_2j, 1, J₃_j_2j, J₁₂_j_2j, J_val_2j, S_j_2j)
-                    T[i, j] = dim_factor * phase * sixj_i * sixj_j
-                catch e
-                    # If 6-j symbol calculation fails (e.g., triangle rule violation), set to zero
-                    T[i, j] = 0.0
-                    @warn "6-j symbol failed for (i=$i, j=$j): $e"
+        # Generate all (λ, 𝕊) combinations that couple to J
+        for λ in λ_values
+            for 𝕊 in [abs(J₁₂ - s₃), J₁₂ + s₃]  # 𝕊 = 1/2 or 3/2
+                # Check if J is in allowed range: |λ - 𝕊| ≤ J ≤ λ + 𝕊
+                if abs(λ - 𝕊) <= J_val <= λ + 𝕊
+                    push!(channel_spin_states, (λ=λ, 𝕊=𝕊))
                 end
             end
         end
 
-        # Transform collision matrix: U_channel_spin = T' * U_Jpi * T
-        # Note: T is real, so T' = T†
-        U_CS = T' * U_Jpi * T
+        n_cs = length(channel_spin_states)
+
+        # Step 3: Build transformation matrix T[n_cs, n_states]
+        # U^J_{λ𝕊,λ'𝕊'} = Σ_{J₃,J'₃} T*_{λ𝕊,J₃} U_{J₃,J'₃} T_{J'₃,λ'𝕊'}
+        # where T_{J₃,λ𝕊} = √(ĵ₃𝕊̂) (-)^{2J-J₃} {λ s₃ J₃; J₁₂ J 𝕊}
+        T = zeros(ComplexF64, n_cs, n_states)
+
+        for (i, cs_state) in enumerate(channel_spin_states)
+            λ = cs_state.λ
+            𝕊 = cs_state.𝕊
+
+            for (j, j3_state) in enumerate(J3_basis_states)
+                λ₃ = j3_state.λ₃
+                J₃ = j3_state.J₃
+
+                # Only non-zero if λ values match
+                if !isapprox(λ, λ₃)
+                    continue
+                end
+
+                # Dimension factor: √(ĵ₃𝕊̂) = √((2J₃+1)(2𝕊+1))
+                dim_factor = sqrt((2*J₃ + 1) * (2*𝕊 + 1))
+
+                # Phase: (-)^{2J-J₃}
+                # Note: For recoupling we don't square J₃ here
+                phase = (-1)^Int(round(2*J_val - J₃))
+
+                # 6-j symbol: {λ s₃ J₃; J₁₂ J 𝕊}
+                # Convert to twice-j representation
+                λ_2j = Int(round(2 * λ))
+                s₃_2j = 1  # s₃ = 1/2, so 2*s₃ = 1
+                J₃_2j = Int(round(2 * J₃))
+                J₁₂_2j = Int(round(2 * J₁₂))
+                J_2j = Int(round(2 * J_val))
+                𝕊_2j = Int(round(2 * 𝕊))
+
+                try
+                    sixj = wigner6j(λ_2j, s₃_2j, J₃_2j, J₁₂_2j, J_2j, 𝕊_2j)
+                    T[i, j] = dim_factor * phase * sixj
+                catch e
+                    T[i, j] = 0.0
+                end
+            end
+        end
+
+        # Step 4: Transform collision matrix to channel spin basis
+        # U_CS[n_cs, n_cs] = T * U_Jpi * T†
+        U_CS = T * U_Jpi * T'
 
         U_channel_spin[(J_val, parity)] = U_CS
 
-        # Create labels for this (J, π)
+        # Step 5: Create labels
         labels = String[]
-        for info in channel_spin_info
-            λ₃ = Int(round(info.λ₃))
-            S = info.S
-            # Label format: "λ=λ₃, 𝕊=S"
-            # Format S properly for half-integer values
-            if S == round(S)
-                S_str = string(Int(S))
+        for cs_state in channel_spin_states
+            λ = Int(round(cs_state.λ))
+            𝕊 = cs_state.𝕊
+            # Format 𝕊 properly for half-integer
+            if 𝕊 == round(𝕊)
+                𝕊_str = string(Int(𝕊))
             else
-                S_str = string(S)
+                𝕊_str = string(𝕊)
             end
-            push!(labels, "λ=$λ₃, 𝕊=$S_str")
+            push!(labels, "λ=$λ, 𝕊=$𝕊_str")
         end
         channel_spin_labels[(J_val, parity)] = labels
     end
@@ -680,55 +679,10 @@ function compute_phase_shift_analysis(f_matrix, k, α, deuteron_channels, channe
     U_matrix = compute_collision_matrix(f_matrix, k)
     println("   Collision matrix computed (size: $(size(U_matrix)))")
 
-    # Step 2: Skip channel spin recoupling for now (complex transformation)
-    # Work directly in J₃ basis
-    println("\n2. Grouping channels by (J, π)...")
-
-    # Group channels by J and parity
-    J_val = α.J  # Same for all channels
-    J_parity_groups = Dict{Tuple{Float64, Int}, Vector{Int}}()
-
-    for (i, iα) in enumerate(deuteron_channels)
-        λ₃ = α.λ[iα]
-        i2b = α.α2bindex[iα]
-        l_12 = α.α2b.l[i2b]
-        parity = Int(round((-1)^(λ₃ + l_12)))
-
-        key = (J_val, parity)
-        if !haskey(J_parity_groups, key)
-            J_parity_groups[key] = Int[]
-        end
-        push!(J_parity_groups[key], i)
-    end
-
-    U_channel_spin = Dict{Tuple{Float64, Int}, Matrix{ComplexF64}}()
-    cs_labels = Dict{Tuple{Float64, Int}, Vector{String}}()
-
-    # Extract submatrices for each (J, π) group
-    for ((J_v, par), indices) in J_parity_groups
-        U_Jpi = U_matrix[indices, indices]
-        U_channel_spin[(J_v, par)] = U_Jpi
-
-        # Create labels in J₃ basis
-        labels = String[]
-        for idx in indices
-            iα = deuteron_channels[idx]
-            λ₃ = Int(round(α.λ[iα]))
-            J₃ = α.J3[iα]
-            i2b = α.α2bindex[iα]
-            l_12 = Int(round(α.α2b.l[i2b]))
-            # Format: "l=l₁₂, λ=λ₃, J₃=J₃"
-            if J₃ == round(J₃)
-                J₃_str = string(Int(J₃))
-            else
-                J₃_str = string(J₃)
-            end
-            channel_name = l_12 == 0 ? "³S₁" : "³D₁"
-            push!(labels, "$channel_name, λ=$λ₃, J₃=$J₃_str")
-        end
-        cs_labels[(J_v, par)] = labels
-    end
-
+    # Step 2: Recouple to channel spin basis (λ, 𝕊)
+    println("\n2. Recoupling to channel spin basis...")
+    U_channel_spin, cs_labels = recouple_to_channel_spin(U_matrix, α, deuteron_channels)
+    println("   Recoupled to (λ, 𝕊) basis")
     println("   Found $(length(U_channel_spin)) (J, π) groups")
 
     # Step 3: For each (J, π), compute eigenphase shifts and mixing parameters
