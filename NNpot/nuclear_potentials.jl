@@ -119,7 +119,8 @@ function potential_type_to_lpot(potential_type::String)::Int
         "SSCC_V14" => 101, # Super-Soft Core (C) v14
         "SSCC_V8" => 102,  # Super-Soft Core (C) v8'
         "SSCC_V8M" => 108, # Modified Super-Soft Core (C) v8'
-        "MT" => 200        # Malfliet-Tjon potential
+        "MT" => 200,       # Malfliet-Tjon potential
+        "MN" => 300        # Minnesota potential (Thompson 1977)
     )
     
     return get(potential_map, uppercase(potential_type), 1)  # Default to AV18 if not found
@@ -187,7 +188,24 @@ function potential_matrix(
         
         return potential
     end
-    
+
+    # Special case for MN (Minnesota) potential
+    if lpot == 300
+        for ia in 1:n_channels
+            for ib in 1:n_channels
+                l_ia = angular_momenta[ia]
+                l_ib = angular_momenta[ib]
+
+                # MN is purely central — no tensor coupling, diagonal only
+                if ia == ib
+                    potential[ia, ib] = calculate_mn_potential(r, l_ia, s)
+                end
+            end
+        end
+
+        return potential
+    end
+
     # For Argonne and SSCC potentials - the original implementation continues below
     # Convert tz to nucleon isospins for Argonne potentials
     t1z, t2z = -1, -1  # Default to NN
@@ -313,6 +331,62 @@ function calculate_mt_potential(wave_type::String, r::Float64)
     V = V_r * exp(-μ_r * r) / r - V_a * exp(-μ_a * r) / r
     
     return V
+end
+
+"""
+Calculate the Minnesota (MN) potential in partial-wave basis.
+
+Thompson 1977 convention (Eq. 9-11):
+  V(r) = [V_R + ½(1+P^σ)V_T + ½(1-P^σ)V_S] × [½u + ½(2-u)P^r]
+
+where P^σ = (-1)^(s+1) (spin exchange eigenvalue)
+      P^r = (-1)^l      (space exchange eigenvalue)
+      u = 1.0 (Serber force, default)
+
+Radial components are Gaussians:
+  V_R(r) = 200.0  exp(-1.487 r²)    (repulsive)
+  V_T(r) = -178.0 exp(-0.639 r²)    (triplet attractive)
+  V_S(r) = -91.85 exp(-0.465 r²)    (singlet attractive)
+
+Arguments:
+- r: separation in fm
+- l: orbital angular momentum
+- s: total spin (0 or 1)
+- u: exchange mixture parameter (default 1.0 = Serber)
+"""
+function calculate_mn_potential(r::Float64, l::Int, s::Int; u::Float64=1.0)
+    # Return zero for r = 0
+    if r ≈ 0.0
+        return 0.0
+    end
+
+    # MN parameters (Thompson 1977, Eq. 10-11)
+    V_R0 = 200.0    # MeV
+    κ_R  = 1.487    # fm⁻²
+    V_T0 = -178.0   # MeV
+    κ_T  = 0.639    # fm⁻²
+    V_S0 = -91.85   # MeV
+    κ_S  = 0.465    # fm⁻²
+
+    # Radial components
+    r2 = r * r
+    V_R = V_R0 * exp(-κ_R * r2)
+    V_T = V_T0 * exp(-κ_T * r2)
+    V_S = V_S0 * exp(-κ_S * r2)
+
+    # Spin exchange eigenvalue: P^σ = (-1)^(s+1)
+    P_sigma = Float64((-1)^(s + 1))
+
+    # Central part: V_R + ½(1+P^σ)V_T + ½(1-P^σ)V_S
+    V_central = V_R + 0.5 * (1.0 + P_sigma) * V_T + 0.5 * (1.0 - P_sigma) * V_S
+
+    # Space exchange eigenvalue: P^r = (-1)^l
+    P_r = Float64((-1)^l)
+
+    # Exchange factor: ½u + ½(2-u)P^r
+    f_exchange = 0.5 * u + 0.5 * (2.0 - u) * P_r
+
+    return V_central * f_exchange
 end
 
 end # module
