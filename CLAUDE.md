@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Julia-based nuclear physics framework implementing the Faddeev method for three-body quantum mechanical bound state calculations. The codebase specializes in solving nuclear three-body problems (like 3H tritium) using sophisticated numerical techniques including Laguerre basis functions, multi-channel coupling, and nuclear potential models.
+This is a Julia-based nuclear physics framework implementing the Faddeev method in coordinate (R-) space for three-body quantum mechanical bound-state and scattering calculations. Specializes in nuclear three-body problems (³H, ³He, n+d) on a Laguerre + Gauss-Legendre basis with multi-channel coupling, realistic NN potentials (AV18, AV14, Nijmegen, Minnesota), the Urbana IX three-nucleon force, and complex scaling for scattering above breakup threshold.
+
+**Method family**: configuration-space Faddeev / Faddeev-Yakubovsky on a Laguerre + Gauss-Legendre basis with complex scaling. **swift.jl is independently developed by Jin Lei (Tongji)**, following the methodological line of Rimantas Lazauskas (IPHC Strasbourg) — the code is Jin's, the approach (R-space Faddeev + Lagrange-mesh + complex scaling) is the Lazauskas line of thinking. Lazauskas also acts as the external cross-validation reference for the numerical results (see project memory). For the field-level method survey see [FADDEEV_R_SPACE_NOTES.md](FADDEEV_R_SPACE_NOTES.md) (local formalism reference notes) and the Carbonell-Deltuva-Fonseca-Lazauskas 2013 review (arXiv:1310.6631, archived at `~/research-wiki/sources/2013-arxiv-carbonell-bound-state-techniques-multiparticle-scattering.md`).
+
+**Capabilities as of 2026-05**:
+- Bound states: direct generalized eigenvalue solver + Malfiet-Tjon iteration (with Arnoldi).
+- Three-body forces: Urbana IX integrated into the Malfiet-Tjon path.
+- Scattering: inhomogeneous CC equation solver (LU / GMRES) with complex scaling, COULCC Coulomb wavefunctions, partial-wave scattering amplitude matrix, Blatt-Biedenharn eigenphase + mixing-parameter analysis.
 
 ## Development Commands
 
@@ -42,57 +49,69 @@ This creates `libpotentials.dylib` (macOS), `libpotentials.so` (Linux), or `libp
   - Provides Coulomb wavefunctions for scattering calculations
 
 ### Running Calculations
-- **Main calculation**: `cd swift && julia swift_3H.jl` - Run 3H (tritium) bound state calculation
-- **Script execution**: Run Julia files directly with `julia filename.jl`
-- **Interactive development**: Use Jupyter notebooks in any subdirectory (*.ipynb files) for exploration
-- **Memory-optimized runs**: Use `swift_3H_optimized.ipynb` for reduced memory calculations (~1-2 GB instead of 27 GB)
+- **³H (AV18, Malfiet-Tjon)**: `cd swift && julia swift_3H.jl` — the canonical tritium driver.
+- **³H (Minnesota, exact NCM VMC benchmark)**: `cd swift && julia swift_3H_MN.jl` — MN u=1.0 (Serber) potential; target E(³H) = −7.889 ± 0.047 MeV (NCM VMC reference).
+- **³He (with Coulomb)**: `cd swift && julia swift_3He.jl` — mirror of ³H with proton-proton Coulomb; MT = +0.5; explicit point-Coulomb handling in `matrices.jl`.
+- **n+d scattering**: `cd swift && julia ndscatt.jl` — three-body scattering driver using the same Faddeev infrastructure.
+- **Interactive**: `swift/swift_3H.ipynb` is the working notebook for exploration / method comparison.
 
 ### Testing
-- **Quick module test**: `julia NNpot/test.jl` - basic nuclear potential interface validation
-- **Comprehensive test**: `julia NNpot/test_comprehensive.jl` - full system validation with multiple potentials
-- **Physics validation**: `julia NNpot/test_channel_physics.jl` - channel coupling and quantum number consistency
-- **Specific debugging**: Various `debug_*.jl` and `simple_*test*.jl` files for targeted testing
+- **NNpot Julia interface**: `julia NNpot/test.jl` — basic AV18 / AV14 / Nijmegen interface validation.
+- **Minnesota potential**: `julia NNpot/test_mn.jl` — pure-Julia MN potential cross-check.
+- **Scattering amplitude pipeline**: `julia swift/test_scattering_amplitude.jl` — end-to-end n+d (`z1z2 = 0`) scattering at E = 1 MeV with MT potential and θ_deg = 8° complex scaling; computes deuteron bound state via `bound2b`, builds `ψ_in` via `compute_initial_state_vector`, solves [E·B − T − V·(I+Rxy)] ψ_sc = 2·V·Rxy_31·φ via LU, extracts partial-wave amplitude matrix and runs the Blatt-Biedenharn phase-shift analysis. **Tests use n+d (neutral); do not change to p+d (charged) without updating the Coulomb-wavefunction path.**
+- **Solver comparison**: `julia swift/compare_solvers.jl` — LU vs preconditioned GMRES head-to-head on the same scattering system.
 
 ### Development Workflow
-1. **Initial setup**: Run `./setup.sh` for automated environment setup (Julia installation, packages, Fortran libraries)
-2. **Development**: Modify code, run calculations with `cd swift && julia swift_3H.jl`
-3. **Interactive exploration**: Use Jupyter notebooks for debugging and method comparison
-4. **Testing**: Run specific tests to validate changes (e.g., `julia NNpot/test_comprehensive.jl`)
+1. **Initial setup**: Run `./setup.sh` for automated environment setup (Julia installation, packages, Fortran libraries).
+2. **Bound-state development**: edit, run `cd swift && julia swift_3H.jl` (or `swift_3H_MN.jl` for the MN benchmark).
+3. **Scattering development**: edit, run `julia swift/test_scattering_amplitude.jl` (fast smoke test) → `julia swift/ndscatt.jl` (production-size n+d).
+4. **Interactive exploration**: open `swift/swift_3H.ipynb` for method comparison / debugging.
+5. **Deeper-dive notes**: [OPTIMIZATION_ANALYSIS.md](OPTIMIZATION_ANALYSIS.md) (performance + memory analysis), [FADDEEV_R_SPACE_NOTES.md](FADDEEV_R_SPACE_NOTES.md) (formalism reference), [slides_presentation.md](slides_presentation.md) (talk-ready slides).
 
 ## Core Architecture
 
 ### Module Structure
-The codebase is organized into three main module directories:
+The codebase is organized into four module directories:
 
 1. **NNpot/**: Nuclear potential interface
-   - Fortran libraries (AV18, AV14, Nijmegen) with Julia wrappers
-   - `nuclear_potentials.jl`: Interface to compiled Fortran potentials
-   - Dynamic library compilation via makefiles
+   - Fortran libraries (AV18, AV14, Nijmegen) with Julia wrappers via `Libdl`
+   - `nuclear_potentials.jl`: dispatch by `potname` ∈ {"AV18", "AV14", "Nijmegen", "MN"}; Minnesota potential is pure-Julia (no Fortran).
+   - `makefile`: compiles `libpotentials.dylib` / `.so` / `.dll`.
+   - `test.jl`, `test_mn.jl`: interface smoke tests.
 
 2. **general_modules/**: Foundation components
-   - `channels.jl`: Three-body channel coupling calculations with angular momentum algebra
-   - `mesh.jl`: Laguerre-based numerical mesh generation for hyperspherical coordinates
+   - `channels.jl`: three-body channel coupling with angular-momentum algebra; entry point `α3b(...)`.
+   - `mesh.jl`: Laguerre + Gauss-Legendre mesh generation; entry point `initialmesh(...)`.
 
 3. **swift/**: Core Faddeev implementation
-   - `matrices.jl`: Matrix elements for kinetic energy (T), potential (V), and coordinate transformations (Rxy)
-   - `matrices_optimized.jl`: Optimized matrix computations with caching and complex scaling support
-   - `scattering.jl`: Inhomogeneous scattering equation solver for three-body scattering calculations
-   - `threebodybound.jl`: Direct eigenvalue solver for bound state energies
-   - `MalflietTjon.jl`: Iterative Malfiet-Tjon eigenvalue solver with secant method convergence
-   - `twobody.jl`: Two-body reference calculations (deuteron)
-   - `laguerre.jl`: Basis function implementations
-   - `Gcoefficient.jl`: Angular momentum coupling coefficients
-   - `coulcc.jl`: Julia wrapper for COULCC Fortran library (Coulomb wavefunctions)
+   - `matrices.jl`: T / V / Rxy matrix elements; explicit point-Coulomb branch for MT > 0 systems (e.g., ³He).
+   - `matrices_optimized.jl`: caching + complex-scaling-aware variants (`V_matrix_optimized`, `V_matrix_optimized_scaled`, `T_matrix_optimized`, `Rxy_matrix_optimized`).
+   - `Rxy_matrix_cached.jl`: per-channel cached Rxy with custom G coefficients (includes `Rxy_13`).
+   - `Gcoefficient.jl`: angular-momentum coupling coefficients (Wigner symbols).
+   - `laguerre.jl`: Laguerre basis function implementations.
+   - `spline.jl`: spline utilities.
+   - `twobody.jl`: two-body reference solver (`bound2b` → deuteron with ³S₁ + ³D₁).
+   - `threebodybound.jl`: direct generalized-eigenvalue bound-state solver (`ThreeBody_Bound`).
+   - `MalflietTjon.jl`: iterative bound-state solver (`malfiet_tjon_solve`, `malfiet_tjon_solve_optimized`) with Arnoldi eigenvalue routine (`arnoldi_eigenvalue`), RHS-cache precomputation (`RHSCache`, `precompute_RHS_cache`), channel-probability analysis (`compute_channel_probabilities`), and integrated UIX evaluation (`compute_uix_potential`, `compute_uix_potential_optimized`).
+   - `scattering.jl` (Module `Scattering`): inhomogeneous CC solver `solve_scattering_equation` (LU / GMRES with M⁻¹ preconditioner), `compute_initial_state_vector` (deuteron × Coulomb F_λ source), `compute_scattering_amplitude` (partial-wave amplitude matrix), `compute_collision_matrix` (U = 2ik·f + I), `compute_eigenphase_shifts`, `compute_phase_shift_analysis` (Blatt-Biedenharn eigenphase + mixing ε, ζ, η).
+   - `coulcc.jl` + `coulcc.f` + `Makefile_coulcc`: Julia wrapper for the COULCC Fortran library (Coulomb wavefunctions F_λ, G_λ).
+   - `ndscatt.jl`: production-size n+d scattering driver.
+   - `compare_solvers.jl`: LU vs GMRES diagnostics on the scattering equation.
+   - Drivers: `swift_3H.jl` (AV18), `swift_3H_MN.jl` (Minnesota), `swift_3He.jl` (with Coulomb).
+   - Tests: `test_scattering_amplitude.jl` (n+d MT smoke test with θ_deg = 8°).
+   - Notebook: `swift_3H.ipynb`.
 
 4. **3Npot/**: Three-body nuclear force models
-   - `UIX.jl`: Urbana IX three-body force implementation with Y(r) and T(r) functions
+   - `UIX.jl`: Urbana IX three-body force with Y(r) and T(r) radial functions.
+   - `UIX_optimized.jl`: cached / vectorised UIX matrix element evaluation.
 
 ### Key Physics Concepts
-- **Faddeev equations**: Three-body quantum mechanics using coordinate transformations
-- **Hyperspherical coordinates**: (x,y) representing relative distances in three-body system
-- **Channel coupling**: Multi-channel approach with different angular momentum states
-- **Nuclear potentials**: Realistic NN interactions (AV18, AV14, Nijmegen, Malfliet-Tjon)
-- **Three-body forces**: Urbana IX (UIX) model with Y(r) and T(r) radial functions
+- **Faddeev equations in R-space**: three-body quantum mechanics on Jacobi coordinates (x, y) with coordinate-transformation matrices Rxy_31, Rxy_32.
+- **Channel coupling**: |(l₁₂(s₁s₂)s₁₂)J₁₂, (λ₃s₃)J₃, J; (t₁t₂)T₁₂, t₃, T MT⟩ enumerated by `α3b(...)`.
+- **NN potentials**: realistic AV18 / AV14 / Nijmegen (Fortran) + Minnesota (Julia); switched by `potname`.
+- **Three-body forces**: Urbana IX (UIX) with Y(r) and T(r); evaluated in the Lagrange-function basis inside the `MalflietTjon` module.
+- **Complex scaling**: r → r·e^{iθ} for scattering above breakup threshold and resonance calculations; supported via `*_scaled` variants of the matrix builders.
+- **Scattering amplitude → phase shifts**: partial-wave f-matrix → collision matrix U → Blatt-Biedenharn eigenphase shifts + mixing parameters (ε, ζ, η) on the (λ, 𝕊) channel-spin basis.
 
 ### Computational Workflow
 
@@ -106,22 +125,14 @@ The codebase is organized into three main module directories:
    - **Iterative method**: `malfiet_tjon_solve()` uses secant iteration to find λ(E) = 1
 
 **Scattering Calculations:**
-1. **Initial state setup**: `compute_initial_state_vector()` creates source state (e.g., deuteron + nucleon)
-   - Computes initial wavefunction φ = [φ_d(x) F_λ(ky)] / [ϕx ϕy]
-   - Uses COULCC library for Coulomb functions F_λ
-   - Supports complex scaling (θ≠0) for resonance calculations
-2. **Matrix assembly**: `compute_scattering_matrix()` builds A = E*B - T - V*(I + Rxy)
-   - Returns component matrices for M^{-1} preconditioner construction
-3. **Source term**: `compute_VRxy_phi()` computes b = 2*V*Rxy_31*φ
-   - Factor of 2 from Faddeev symmetry (two equivalent rearrangement channels)
-   - Optimized multiplication order: V * (Rxy_31 * φ) for efficiency
-4. **Linear solve**: `solve_scattering_equation()` solves [A]c = b for scattering wavefunction
-   - **LU method**: Direct factorization for small systems
-   - **GMRES method**: Preconditioned iterative solver with M^{-1} = [E*B - T - V_αα]^{-1}
-     - Uses diagonal potential V_αα only (within-channel coupling)
-     - Same preconditioner as Malfiet-Tjon bound state solver
-     - Improves convergence for large systems
-   - Supports complex scaling for resonance calculations
+1. **Initial state**: `compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2; θ=0.0)` builds ψ_in = φ_d(x) · F_λ(ky) / (φx φy) populating only deuteron channels (J₁₂ = 1, ³S₁ + ³D₁). Uses COULCC for F_λ. Complex scaling via θ (radians).
+2. **Matrix assembly**: `compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)` returns A = E·B − T − V·(I + Rxy) plus component matrices (Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny) used to build the M⁻¹ preconditioner.
+3. **Source term**: 2·V·Rxy_31·φ — factor of 2 from Faddeev symmetry. Multiplication order V·(Rxy_31·φ) for efficiency.
+4. **Linear solve**: `solve_scattering_equation(E, α, grid, potname, ψ_in; θ_deg=0.0, method=:lu)` solves [A] ψ_sc = b.
+   - `method=:lu`: dense LU, for smoke tests and benchmarking.
+   - `method=:gmres`: preconditioned GMRES with M⁻¹ = [E·B − T − V_αα]⁻¹ (within-channel V only) — same preconditioner used by Malfiet-Tjon; required for larger meshes.
+   - Both branches accept complex scaling via θ_deg.
+5. **Amplitude + phase shifts**: `compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix, z1z2; θ=0.0, σ_l=0.0)` returns the partial-wave amplitude matrix f and the deuteron-channel labels. Pipe into `compute_phase_shift_analysis(f, k, α, deuteron_channels, channel_labels)` to get eigenphase shifts and Blatt-Biedenharn mixing parameters on the channel-spin basis.
 
 ### Data Flow
 - **Bound states**: System parameters → Channel coupling → Matrix elements → Eigenvalue problem → Binding energies and wavefunctions
@@ -188,50 +199,68 @@ The framework uses sophisticated indexing schemes:
 - **Isospin phase convention**: The isospin phase factor is `(-1)^(T12_prime + 2*t1 + t2 + t3)` where T12_prime is from the **ket** (incoming channel), not the bra (outgoing channel). This must match the phase convention in `Gcoefficient.jl` line 91 for consistent angular momentum recoupling.
 
 ### Scattering Calculations
-The framework supports scattering calculations with proper treatment of Coulomb interactions and complex scaling:
+The framework supports n+d (neutral) scattering with full machinery for Coulomb (p+d) and complex scaling. The reference end-to-end pipeline is `swift/test_scattering_amplitude.jl` (smoke test) and `swift/ndscatt.jl` (production).
 
-**Initial State Vector Construction:**
+**Reference pipeline** (matches `test_scattering_amplitude.jl`):
 ```julia
-# 1. Compute two-body bound state (e.g., deuteron)
-bound_energies, bound_wavefunctions = bound2b(grid, "AV18")
-φ_d_matrix = ComplexF64.(bound_wavefunctions[1])  # Ground state with ³S₁ + ³D₁ components
+# 1. Channels + mesh
+α    = α3b(fermion, Jtot, T, Parity, lmax, lmin, λmax, λmin, s1,s2,s3, t1,t2,t3, MT, j2bmax)
+grid = initialmesh(nθ, nx, ny, Float64(xmax), Float64(ymax), Float64(alpha))
 
-# 2. Set up scattering parameters
-E = 10.0   # Scattering energy (MeV)
-z1z2 = 1.0 # Charge product (e.g., proton-deuteron)
-θ = 0.0    # Complex scaling angle (radians, optional)
+# 2. Deuteron bound state (³S₁ + ³D₁)
+bound_E, bound_ψ = bound2b(grid, "MT", θ_deg=θ_deg)
+φ_d_matrix       = ComplexF64.(bound_ψ[1])
 
-# 3. Compute initial state vector
-φ = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ)
+# 3. Three-body matrices
+V              = V_matrix_optimized(α, grid, "MT")
+Rxy, Rxy_31    = Rxy_matrix_optimized(α, grid)
+
+# 4. Initial state ψ_in = φ_d(x) F_λ(ky)
+θ_rad = θ_deg * π / 180.0
+ψ_in  = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ_rad)
+
+# 5. Solve [E·B − T − V·(I+Rxy)] ψ_sc = 2·V·Rxy_31·φ
+ψ_sc, A, b = solve_scattering_equation(E, α, grid, "MT", ψ_in, θ_deg=θ_deg, method=:lu)
+
+# 6. Partial-wave amplitude matrix
+f, deuteron_channels, channel_labels = compute_scattering_amplitude(
+    ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix, z1z2, θ=θ_rad, σ_l=0.0)
+
+# 7. Blatt-Biedenharn phase-shift analysis
+k             = sqrt(2.0 * (2m/3) * 931.49432 * E) / 197.3269718
+phase_results = compute_phase_shift_analysis(f, k, α, deuteron_channels, channel_labels)
 ```
 
-**Key Physics:**
-- Deuteron (J12=1) contains both ³S₁ (~96%) and ³D₁ (~4%) components
-- Initial state populates ALL three-body channels coupling to deuteron
-- Each channel uses its own λ for Coulomb function F_λ(ky)
-- Channels with J12≠1 have zero wavefunction (no deuteron bound state exists)
+**Key physics**:
+- Deuteron (J₁₂ = 1) contains ³S₁ (~96%) + ³D₁ (~4%) components — both populated in ψ_in.
+- Initial state ψ_in lives only in deuteron-coupling channels; J₁₂ ≠ 1 channels are zero.
+- Each channel uses its own λ for F_λ(ky); COULCC returns all λ in a single call via `coulcc(x, η, lmin; lmax=λmax, mode=4)`.
+- For n+d use `z1z2 = 0.0`; for p+d (or any charged channel) use `z1z2 = 1.0` and the COULCC path activates the Coulomb wavefunctions.
 
-**COULCC Library:**
-- Provides regular (F) and irregular (G) Coulomb wavefunctions
-- Interface: `coulcc(x, η, lmin; lmax=λmax, mode=4)` returns vector of F_λ values
-- Complex scaling supported: evaluate at rotated coordinates x·exp(iθ)
-- Optimized: single call returns all λ values from lmin to lmax
+**Phase-shift output structure** (`compute_phase_shift_analysis` return):
+- `Dict{(J, π) → Dict("eigenphases", "mixing_params", "U_matrix", "u_matrix", "labels")}`.
+- `mixing_params` is a named tuple `(ε, ζ, η)` for 3×3 (J, π) blocks, `(ε, ζ=0, η)` or `(ε=0, ζ=0, η)` for 2×2 blocks.
 
-**Complex Scaling:**
-- Used for resonance calculations and continuum discretization
-- Matrices support complex scaling via backward rotation method
-- `V_matrix_optimized_scaled(α, grid, potname, θ_deg=10.0)`
-- `T_matrix_optimized(α, grid, θ_deg=10.0)` for kinetic energy
-- Falls back to standard methods automatically when θ=0
+**COULCC library**:
+- Provides regular F_λ and irregular G_λ Coulomb wavefunctions.
+- Built from `coulcc.f` by `Makefile_coulcc` into `libcoulcc.dylib` / `.so` / `.dll`.
+- Julia wrapper in `coulcc.jl` accepts complex arguments → complex-scaling-ready.
+
+**Complex scaling**:
+- Coordinates rotate r → r·e^{iθ}; matrices support this via the `*_scaled` variants:
+  - `V_matrix_optimized_scaled(α, grid, potname; θ_deg=10.0)`
+  - `T_matrix_optimized(α, grid; θ_deg=10.0)`
+- θ = 0 paths are zero-overhead (they short-circuit back to the real builders).
+- Validity bound: tan θ < η/k (η = inverse range of the short-range potential).
 
 ### Modifying Calculations
-- Channel configurations: Edit parameters in notebook initialization cells
-- Mesh parameters: Adjust `nx`, `ny`, `xmax`, `ymax`, `alpha` for convergence
-  - **Recommended for j2bmax=2.0**: nθ=12, nx=20, ny=20, xmax=16, ymax=16
-  - Provides convergence within 0.2 keV while maintaining computational efficiency
-  - For higher accuracy: increase to nx=25, ny=25 (converges within 1 keV)
-- Potential models: Change `potname` variable to switch between models
-- Three-body forces: Include UIX terms by adding X12_matrix to Hamiltonian construction
+- Channel quantum numbers: edit the header of the relevant driver (`swift_3H.jl`, `swift_3H_MN.jl`, `swift_3He.jl`, `ndscatt.jl`, `test_scattering_amplitude.jl`).
+- Mesh parameters: adjust `nx`, `ny`, `xmax`, `ymax`, `nθ`, `alpha` for convergence.
+  - **For j2bmax = 2.0, bound state**: `nθ=12, nx=20, ny=20, xmax=16, ymax=16` converges within 0.2 keV.
+  - For tighter convergence: `nx=25, ny=25` reaches ~1 keV.
+  - Scattering convergence (test_scattering_amplitude default) uses `nθ=12, nx=30, ny=70, xmax=30, ymax=60` for n+d at 1 MeV.
+- Potential: change `potname` ∈ {"AV18", "AV14", "Nijmegen", "MN", "MT"} (MT is the Malfliet-Tjon toy potential used in scattering tests).
+- Three-body forces: pass `include_uix=true` to `malfiet_tjon_solve_optimized(...)`; the module handles `compute_uix_potential_optimized` internally.
 
 ### Solver Selection and Performance
 - **Direct method**: Use `ThreeBody_Bound()` when you need all eigenvalues or for initial exploration
@@ -260,13 +289,14 @@ z1z2 = 1.0 # Charge product (e.g., proton-deuteron)
 - **Truncation effects**: Monitor total probability sum - as lmax/λmax increase, sum approaches 100%
 
 ### Required Julia Packages
-The project uses specific Julia packages that must be installed:
-- **SphericalHarmonics**: For spherical harmonic calculations
-- **WignerSymbols**: For angular momentum coupling coefficients
-- **JSON**: For data serialization in notebooks
-- **FastGaussQuadrature**: For numerical integration
-- **Kronecker**: For tensor product operations
-- **Revise**: For development workflow (hot reloading)
+- **SphericalHarmonics**: spherical harmonic evaluation.
+- **WignerSymbols**: angular-momentum coupling coefficients.
+- **FastGaussQuadrature**: Gauss-Legendre quadrature for the angular mesh.
+- **Kronecker**: tensor-product operations.
+- **IterativeSolvers**: GMRES path for `solve_scattering_equation` and for Arnoldi-based eigensolves in MalflietTjon.
+- **LinearAlgebra** + **SparseArrays**: standard library; BLAS thread count set to `Sys.CPU_THREADS` in the drivers.
+- **Printf**, **JSON**: I/O.
+- **Revise** (optional): hot reloading during development.
 
 ### Platform-Specific Notes
 - **Dynamic libraries**: Build system automatically detects platform and uses appropriate extensions
@@ -291,10 +321,16 @@ The project uses specific Julia packages that must be installed:
 - **Physical insight**: Malfiet-Tjon iteration demonstrates bound state formation mechanism via λ → 1
 
 ### Advanced Features and Optimizations
-- **Arnoldi eigenvalue solver**: Adaptive convergence with early termination for computational efficiency
-- **Caching system**: Automated caching of expensive Wigner coefficients and angular momentum calculations
-- **Memory optimization**: Progressive mesh refinement and sparse matrix representations where applicable
-- **Cross-platform symbol resolution**: Automatic handling of Fortran name-mangling across different platforms
-- **Comprehensive validation framework**: Built-in physics consistency checks and numerical stability monitoring
-- **Rearrangement matrix validation**: Automatic verification that `Rxy_32 = Rxy_31^T` (transpose relationship) as required by Faddeev coordinate transformation symmetry
-- **Performance profiling**: Integrated timing analysis for identifying computational bottlenecks
+- **Arnoldi eigenvalue solver** (`arnoldi_eigenvalue` in MalflietTjon.jl): adaptive convergence with early termination, used by `malfiet_tjon_solve_optimized`.
+- **RHSCache** (`precompute_RHS_cache` in MalflietTjon.jl): caches the V·Rxy product structure across Malfiet-Tjon iterations.
+- **Caching of Wigner coefficients**: angular-momentum coupling cached across V, T, Rxy, UIX builds.
+- **Cross-platform symbol resolution**: `find_symbol()` in `nuclear_potentials.jl` handles gfortran name-mangling on macOS / Linux / Windows.
+- **Validation framework**: `Rxy_32 = Rxy_31ᵀ` transpose check; energy consistency ⟨ψ|H|ψ⟩ vs eigenvalue; channel-probability sum diagnostic.
+- **Integrated timing**: `@elapsed` blocks in the drivers report per-stage cost; `compare_solvers.jl` is the dedicated LU vs GMRES benchmark.
+
+## Methodological references
+
+- **[FADDEEV_R_SPACE_NOTES.md](FADDEEV_R_SPACE_NOTES.md)** (local file in this repo): formalism reference notes covering the (x, y) Jacobi coordinates, channel-coupling algebra, Rxy rearrangement matrices, Faddeev normalization, and the bound-state eigenvalue problem (Sec. "Eigenvalue problem of the Faddeev Equations"). **Primary reference when modifying matrix-element code.**
+- **[OPTIMIZATION_ANALYSIS.md](OPTIMIZATION_ANALYSIS.md)** (local): performance + memory analysis notes for the Malfiet-Tjon / Arnoldi path.
+- **[slides_presentation.md](slides_presentation.md)** (local): talk-ready summary slides of the framework.
+- **Carbonell-Deltuva-Fonseca-Lazauskas 2013, arXiv:1310.6631** (review, 36 pp, 159 refs): comprehensive survey of bound-state-basis techniques for multiparticle scattering. Archived in the literature wiki at `~/research-wiki/sources/2013-arxiv-carbonell-bound-state-techniques-multiparticle-scattering.md`. **The Lazauskas-Carbonell configuration-space complex-scaling Faddeev-Yakubovsky line (refs [41, 42, 44, 50, 51] within that paper) is the methodological line Jin followed when independently designing swift.jl.** Read it when extending swift.jl to 4N or to scattering above breakup.
