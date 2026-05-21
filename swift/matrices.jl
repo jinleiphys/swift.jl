@@ -13,7 +13,10 @@ const amu= 931.49432 # MeV
 const m=1.0079713395678829 # amu
 const ħ=197.3269718 # MeV. fm
 
-export Rxy_matrix, T_matrix, V_matrix, Bmatrix, M_inverse_operator
+export Rxy_matrix, T_matrix, V_matrix, Bmatrix, M_inverse_operator,
+       MInverseCache, precompute_M_inverse_cache, M_inverse_operator_cached,
+       MInverseCacheVSector, precompute_M_inverse_cache_vsector, M_inverse_operator_cached_vsector,
+       group_channels_by_v_sector
 
 # 1.008665 amu for neutron  amu=931.49432 MeV
 
@@ -691,6 +694,238 @@ function M_inverse_operator(α, grid, E, Tx_channels, Ty_channels, V_x_diag_chan
             temp1 = U_inv_N_inv_blocks[iα] * v_block
             temp2 = D_inv_blocks[iα] .* temp1  # Element-wise multiplication (diagonal!)
             result[idx_start:idx_end] = U_blocks[iα] * temp2
+        end
+        return result
+    end
+end
+
+# ============================================================================
+# V-sector block-diagonal M⁻¹ (generalised Malfiet-Tjon split)
+# ============================================================================
+#
+# In the V-sector formulation, channels are grouped by the V-conservation
+# sector key q = (J12, T12, s12, λ, J3). V is block-diagonal across sectors,
+# so M(E) = EB - H₀ - V is also block-diagonal in q (in contrast to the
+# strict channel-diagonal M which uses only V_αα).
+#
+# Each sector block of M is inverted by a Kronecker eigendecomposition of
+# the (n_q · n_x) × (n_q · n_x) coupled matrix N^{(q)}_x⁻¹ · H^{(q)}_x
+# (where H^{(q)}_x = block-diag(T_x^a) + V^(q)), and the standard
+# n_y × n_y problem N_y⁻¹·T_y (sector-uniform by construction).
+
+"""
+    group_channels_by_v_sector(α) -> Vector{Vector{Int}}
+
+Group three-body channels into V-conservation sectors. Within each sector all
+channels share the same (J12, T12, s12, λ, J3); these are exactly the deltas
+enforced by `V_matrix` / `V_matrix_optimized` channel-coupling selection rules.
+
+Returns a vector of channel-index vectors, one entry per sector. Sectors are
+ordered by first-occurrence of their member channels.
+"""
+function group_channels_by_v_sector(α)
+    seen = Dict{NTuple{5, Float64}, Int}()  # key → sector index
+    sector_channels = Vector{Vector{Int}}()
+    for i in 1:α.nchmax
+        key = (α.J12[i], α.T12[i], α.s12[i], Float64(α.λ[i]), α.J3[i])
+        if haskey(seen, key)
+            push!(sector_channels[seen[key]], i)
+        else
+            push!(sector_channels, [i])
+            seen[key] = length(sector_channels)
+        end
+    end
+    return sector_channels
+end
+
+"""
+    MInverseCacheVSector
+
+Cache for V-sector block-diagonal M⁻¹ preconditioner.  Per-sector eigen-
+decompositions are stored.  Energy enters only through the diagonal
+`D_inv_blocks` recomputed via `M_inverse_operator_cached_vsector(E, cache)`.
+
+# Fields
+- `sector_channels`: Vector{Vector{Int}}, channel indices belonging to each sector
+- `U_blocks`: Per-sector  𝒰_x ⊗ U_y, size (n_q · n_x · n_y) × (n_q · n_x · n_y)
+- `U_inv_N_inv_blocks`: Per-sector (𝒰_x ⊗ U_y)⁻¹ · (I_{n_q} ⊗ N_x⁻¹ ⊗ N_y⁻¹)
+- `dx_arrays`: Per-sector eigenvalues of (I_{n_q} ⊗ N_x⁻¹) · H_x^{(q)} (length n_q · n_x)
+- `dy_arrays`: Per-sector eigenvalues of N_y⁻¹ · T_y (length n_y) — sector-uniform but cached per sector for symmetry
+- `nx`, `ny`: mesh sizes
+- `nchmax`: total channel count (for vector indexing)
+"""
+struct MInverseCacheVSector{T<:Union{Float64, ComplexF64}}
+    sector_channels::Vector{Vector{Int}}
+    U_blocks::Vector{Matrix{T}}
+    U_inv_N_inv_blocks::Vector{Matrix{T}}
+    dx_arrays::Vector{Vector{T}}
+    dy_arrays::Vector{Vector{T}}
+    nx::Int
+    ny::Int
+    nchmax::Int
+end
+
+"""
+    precompute_M_inverse_cache_vsector(α, grid, Tx_channels, Ty_channels, V_x_full, Nx, Ny)
+
+Precompute the V-sector block-diagonal M⁻¹ cache.
+
+# Arguments
+- `α`, `grid`: channel + mesh structures
+- `Tx_channels::Vector`, `Ty_channels::Vector`: per-channel kinetic matrices (n_x × n_x and n_y × n_y)
+- `V_x_full::Matrix{Matrix{T}}` (size α.nchmax × α.nchmax): cross-channel V_x blocks. Entry [i, j] must be the n_x × n_x matrix V_{ij}(x); entries between channels in different V-sectors are unused (may be zero). The strict-channel diagonal entries V_x_full[i, i] equal the existing `V_x_diag_ch[i]`.
+- `Nx`, `Ny`: overlap matrices
+
+# Returns
+`MInverseCacheVSector` for use with `M_inverse_operator_cached_vsector(E, cache)`.
+"""
+function precompute_M_inverse_cache_vsector(α, grid, Tx_channels, Ty_channels, V_x_full, Nx, Ny)
+    sector_channels = group_channels_by_v_sector(α)
+    n_sec = length(sector_channels)
+    nx = grid.nx
+    ny = grid.ny
+
+    DataType_T = eltype(Tx_channels[1])
+
+    Nx_inv = inv(Nx)
+    Ny_inv = inv(Ny)
+    N_inv_xy = kron(Nx_inv, Ny_inv)  # n_x n_y × n_x n_y
+
+    U_blocks = Vector{Matrix{DataType_T}}(undef, n_sec)
+    U_inv_N_inv_blocks = Vector{Matrix{DataType_T}}(undef, n_sec)
+    dx_arrays = Vector{Vector{DataType_T}}(undef, n_sec)
+    dy_arrays = Vector{Vector{DataType_T}}(undef, n_sec)
+
+    for (q, chans) in enumerate(sector_channels)
+        n_q = length(chans)
+
+        # Build the coupled x-Hamiltonian H^{(q)}_x of size (n_q · n_x) × (n_q · n_x):
+        #   diagonal-in-channel block (i_a, i_a) = T_x^{chans[i_a]} + V_{chans[i_a], chans[i_a]}
+        #   off-diagonal block (i_a, i_b) = V_{chans[i_a], chans[i_b]} (for i_a ≠ i_b)
+        Hx_q = zeros(DataType_T, n_q * nx, n_q * nx)
+        for (i_a, a) in enumerate(chans)
+            row = (i_a - 1) * nx + 1 : i_a * nx
+            # Kinetic on the diagonal channel block
+            Hx_q[row, row] .+= Tx_channels[a]
+            for (i_b, b) in enumerate(chans)
+                col = (i_b - 1) * nx + 1 : i_b * nx
+                Hx_q[row, col] .+= V_x_full[a, b]
+            end
+        end
+
+        # Sector overlap N^{(q)}_x = I_{n_q} ⊗ N_x; its inverse is I_{n_q} ⊗ N_x⁻¹
+        # Build (I_{n_q} ⊗ N_x⁻¹) · H^{(q)}_x for the generalised eigenvalue problem
+        NxInv_Hx_q = zeros(DataType_T, n_q * nx, n_q * nx)
+        for i_a in 1:n_q
+            row = (i_a - 1) * nx + 1 : i_a * nx
+            for i_b in 1:n_q
+                col = (i_b - 1) * nx + 1 : i_b * nx
+                NxInv_Hx_q[row, col] = Nx_inv * Hx_q[row, col]
+            end
+        end
+
+        eigen_x = eigen(NxInv_Hx_q)
+        Ux_q = eigen_x.vectors             # (n_q n_x) × (n_q n_x)
+        dx_q = eigen_x.values              # length n_q n_x
+        Ux_q_inv = inv(Ux_q)
+
+        # y-direction: all channels in this sector share the same λ → identical T_y, so
+        # one eigendecomposition per sector (could be reused across sectors with the same λ,
+        # but we keep one per sector for simplicity).
+        a_ref = chans[1]
+        eigen_y = eigen(Ny_inv * Ty_channels[a_ref])
+        Uy_q = eigen_y.vectors             # n_y × n_y
+        dy_q = eigen_y.values              # length n_y
+        Uy_q_inv = inv(Uy_q)
+
+        # Precompute Kronecker blocks for fast application
+        U_blocks[q] = kron(Ux_q, Uy_q)                                     # (n_q n_x n_y) × (n_q n_x n_y)
+        # I_{n_q} ⊗ N_x⁻¹ ⊗ N_y⁻¹ as block-diag of n_q copies of N_inv_xy
+        N_inv_block_q = zeros(DataType_T, n_q * nx * ny, n_q * nx * ny)
+        for i_a in 1:n_q
+            row = (i_a - 1) * nx * ny + 1 : i_a * nx * ny
+            N_inv_block_q[row, row] = N_inv_xy
+        end
+        Ux_Uy_inv = kron(Ux_q_inv, Uy_q_inv)
+        U_inv_N_inv_blocks[q] = Ux_Uy_inv * N_inv_block_q
+        dx_arrays[q] = dx_q
+        dy_arrays[q] = dy_q
+    end
+
+    return MInverseCacheVSector{DataType_T}(sector_channels, U_blocks, U_inv_N_inv_blocks,
+                                            dx_arrays, dy_arrays, nx, ny, α.nchmax)
+end
+
+"""
+    M_inverse_operator_cached_vsector(E, cache::MInverseCacheVSector)
+
+Return a function `v -> M(E)⁻¹ * v` using a precomputed V-sector cache.
+Only the diagonal D^{(q)}(E)⁻¹ is recomputed for each E.
+"""
+function M_inverse_operator_cached_vsector(E::Float64, cache::MInverseCacheVSector{T}) where T
+    n_sec = length(cache.sector_channels)::Int
+    nx = cache.nx::Int
+    ny = cache.ny::Int
+    block_len = nx * ny
+
+    # Recompute energy-dependent diagonal per sector. Storage order matches
+    # kron(Ux_q, Uy_q): outer index μ ∈ 1..n_q*nx, inner index μ_y ∈ 1..ny.
+    D_inv_blocks = Vector{Vector{T}}(undef, n_sec)
+    @inbounds for q in 1:n_sec
+        dx_q = cache.dx_arrays[q]::Vector{T}
+        dy_q = cache.dy_arrays[q]::Vector{T}
+        len = length(dx_q) * ny
+        D_inv = Vector{T}(undef, len)
+        idx = 1
+        for μ in eachindex(dx_q)
+            base = E - dx_q[μ]
+            for μ_y in 1:ny
+                D_inv[idx] = one(T) / (base - dy_q[μ_y])
+                idx += 1
+            end
+        end
+        D_inv_blocks[q] = D_inv
+    end
+
+    # Extract typed local references so closure type inference is clean
+    sector_channels::Vector{Vector{Int}} = cache.sector_channels
+    U_blocks::Vector{Matrix{T}} = cache.U_blocks
+    U_inv_N_inv_blocks::Vector{Matrix{T}} = cache.U_inv_N_inv_blocks
+
+    return function(v::AbstractVector)
+        # Use eltype(v) for output and buffers so complex Arnoldi vectors flow through
+        # without expensive per-element type promotion against the Float64 cache buffers.
+        T_v = eltype(v)
+        result = similar(v)
+        @inbounds for q in 1:n_sec
+            chans = sector_channels[q]
+            n_q = length(chans)
+            len_q = n_q * block_len
+
+            # Gather: pack the sector's channel blocks contiguously
+            v_q = Vector{T_v}(undef, len_q)
+            for i_a in 1:n_q
+                a = chans[i_a]
+                src_off = (a - 1) * block_len
+                dst_off = (i_a - 1) * block_len
+                @simd for k in 1:block_len
+                    v_q[dst_off + k] = v[src_off + k]
+                end
+            end
+
+            t1 = U_inv_N_inv_blocks[q] * v_q
+            t2 = D_inv_blocks[q] .* t1
+            w_q = U_blocks[q] * t2
+
+            # Scatter back
+            for i_a in 1:n_q
+                a = chans[i_a]
+                src_off = (i_a - 1) * block_len
+                dst_off = (a - 1) * block_len
+                @simd for k in 1:block_len
+                    result[dst_off + k] = w_q[src_off + k]
+                end
+            end
         end
         return result
     end

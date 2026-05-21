@@ -31,7 +31,7 @@ lmin = 0
 j2bmax = 1.0  # J12=1 for deuteron
 s1 = 0.5; s2 = 0.5; s3 = 0.5
 t1 = 0.5; t2 = 0.5; t3 = 0.5
-nθ = 12; nx = 24; ny = 24; xmax = 20; ymax = 20; alpha = 1
+nθ = 12; nx = 30; ny = 70; xmax = 30; ymax = 60; alpha = 1
 
 α = α3b(fermion, Jtot, T, Parity, lmax, lmin, λmax, λmin, s1, s2, s3, t1, t2, t3, MT, j2bmax)
 grid = initialmesh(nθ, nx, ny, Float64(xmax), Float64(ymax), Float64(alpha))
@@ -43,10 +43,10 @@ println()
 # Scattering energy and charges
 E = 1.0   # MeV
 z1z2 = 0.0 # Charge product for n+d (no Coulomb interaction)
-θ_deg = 0.0    # Complex scaling angle in degrees
+θ_deg = 8.0    # Complex scaling angle in degrees
 
 println("Computing matrices...")
-V = V_matrix_optimized(α, grid, "AV18")
+V = V_matrix_optimized(α, grid, "MT")
 Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
 println("  Matrices computed")
 println()
@@ -54,7 +54,7 @@ println()
 # Compute deuteron bound state using bound2b with same complex scaling angle
 println("Computing deuteron bound state with bound2b...")
 println("  Complex scaling angle: θ = $(θ_deg)°")
-bound_energies, bound_wavefunctions = bound2b(grid, "AV18", θ_deg=θ_deg)
+bound_energies, bound_wavefunctions = bound2b(grid, "MT", θ_deg=θ_deg)
 
 # Extract the ground state (deuteron)
 if isempty(bound_energies)
@@ -90,7 +90,7 @@ println()
 
 # Solve scattering equation to get ψ_sc
 # Solves: [E*B - T - V*(I + Rxy)] ψ_sc = 2*V*Rxy_31*φ
-ψ_sc, A_matrix, b_vector = solve_scattering_equation(E, α, grid, "AV18", ψ_in,
+ψ_sc, A_matrix, b_vector = solve_scattering_equation(E, α, grid, "MT", ψ_in,
                                                        θ_deg=θ_deg, method=:lu)
 println("  Scattering solution ψ_sc computed via LU factorization")
 println("  Residual norm: ||A*ψ_sc - b|| = $(norm(A_matrix * ψ_sc - b_vector))")

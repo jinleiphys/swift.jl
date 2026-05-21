@@ -80,7 +80,9 @@ time_optimized = @elapsed begin
                                tolerance=1e-6,
                                max_iterations=30,
                                verbose=true,
-                               include_uix=false)  # θ_deg=0.0 by default (standard calculation)
+                               include_uix=false)
+                               # Pass use_vsector=true to enable V-sector block-diagonal M⁻¹ (Lazauskas split,
+                               # ~10-20% faster on AV18 by absorbing ³S₁-³D₁ tensor coupling into the preconditioner).
 end
 print_convergence_summary(result_opt)
 

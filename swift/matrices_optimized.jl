@@ -23,7 +23,7 @@ const amu = 931.49432 # MeV
 const m = 1.0079713395678829 # amu
 const ħ = 197.3269718 # MeV. fm
 
-export T_matrix_optimized, Rxy_matrix_optimized, Rxy_13_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, Rxy_matrix_with_caching, compute_initial_state_vector, compute_VRxy_phi
+export T_matrix_optimized, Rxy_matrix_optimized, Rxy_13_matrix_optimized, V_matrix_optimized, V_matrix_optimized_scaled, V_x_pair_blocks, Rxy_matrix_with_caching, compute_initial_state_vector, compute_VRxy_phi
 
 # Coulomb potential function (matches matrices.jl implementation)
 function VCOUL_point(R, z12)
@@ -607,6 +607,55 @@ function V_matrix_optimized(α, grid, potname; return_components=false)
     else
         return Vmatrix
     end
+end
+
+
+"""
+    V_x_pair_blocks(α, grid, potname) -> Matrix{Matrix{Float64}}
+
+Return all per-channel-pair V_x blocks `V_x[i, j]` (size n_x × n_x each),
+including off-diagonal coupling within the same V-sector (e.g. ³S₁–³D₁
+tensor coupling).  Uncoupled (i, j) pairs are returned as the zero matrix
+of size n_x × n_x.
+
+Used by the V-sector preconditioner `precompute_M_inverse_cache_vsector` in
+`matrices.jl`.  Selection rules match `V_matrix_optimized` exactly:
+coupling requires equal `(T12, λ, J3, s12, J12)`.
+"""
+function V_x_pair_blocks(α, grid, potname)
+    v12 = pot_nucl(α, grid, potname)
+    nx = grid.nx
+    V_x_full = Matrix{Matrix{Float64}}(undef, α.nchmax, α.nchmax)
+    for j in 1:α.nchmax
+        for i in 1:α.nchmax
+            V_x_full[i, j] = zeros(nx, nx)
+            if α.T12[i] != α.T12[j]; continue; end
+            if α.λ[i]   != α.λ[j];   continue; end
+            if α.J3[i]  != α.J3[j];  continue; end
+            if α.s12[i] != α.s12[j]; continue; end
+            if α.J12[i] != α.J12[j]; continue; end
+
+            V_x_ij = zeros(nx, nx)
+            T12 = α.T12[i]
+            nmt12_max = Int(2 * T12)
+            for nmt12 in -nmt12_max:2:nmt12_max
+                mt12 = nmt12 / 2.0
+                mt3 = α.MT - mt12
+                if abs(mt3) > α.t3; continue; end
+                cg1 = clebschgordan(T12, mt12, α.t3, mt3, α.T[i], α.MT)
+                cg2 = clebschgordan(T12, mt12, α.t3, mt3, α.T[j], α.MT)
+                cg_coefficient = cg1 * cg2
+                if abs(cg_coefficient) < 1e-10; continue; end
+                if mt12 == 0
+                    V_x_ij += v12[:, :, α.α2bindex[i], α.α2bindex[j], 1] * cg_coefficient
+                else
+                    V_x_ij += v12[:, :, α.α2bindex[i], α.α2bindex[j], 2] * cg_coefficient
+                end
+            end
+            V_x_full[i, j] = V_x_ij
+        end
+    end
+    return V_x_full
 end
 
 

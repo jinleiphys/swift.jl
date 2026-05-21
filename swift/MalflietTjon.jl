@@ -102,7 +102,7 @@ Precompute energy-independent RHS matrix: RHS = (V - V_αα) + V*R (+ UIX).
 # Returns
 - `RHSCache`: Cached RHS matrix for reuse at multiple energies
 """
-function precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing)
+function precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing, use_vsector::Bool=false)
     nα = α.nchmax
     nx = grid.nx
     ny = grid.ny
@@ -126,6 +126,19 @@ function precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing)
     # Step 1: Compute V*Rxy using sparse matrix multiplication
     # Sparse-Dense multiplication is MUCH faster than Dense-Dense!
     VRxy = V_compute * Rxy
+
+    if use_vsector
+        # V-sector mode: M absorbs the full V (block-diagonal in V-sectors).
+        # RHS = V*Rxy + V_UIX  (no V residual, no V_αα subtraction).
+        RHS_matrix = Matrix(VRxy)  # ensure dense for downstream usage
+        if V_UIX !== nothing
+            RHS_matrix .+= V_UIX
+        end
+        return RHSCache(RHS_matrix, n_total)
+    end
+
+    # Strict channel-diagonal mode (current default):
+    # RHS = (V - V_αα) + V*Rxy + V_UIX
 
     # Step 2: Start with RHS = V + V*Rxy (single allocation + in-place addition)
     RHS_matrix = V + VRxy  # Allocate once and compute sum
@@ -565,21 +578,31 @@ function compute_lambda_eigenvalue_optimized(E0::Float64, T, V, B, Rxy, α, grid
                                             krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                             previous_eigenvector::Union{Nothing, Vector}=nothing,
                                             V_UIX=nothing,
-                                            M_cache::Union{Nothing, matrices.MInverseCache}=nothing,
+                                            M_cache::Union{Nothing, matrices.MInverseCache, matrices.MInverseCacheVSector}=nothing,
                                             RHS_cache::Union{Nothing, RHSCache}=nothing)
 
-    # Compute M⁻¹ = [E0*B - T - V_αα]⁻¹ using the efficient implementation
-    # Note: V_x_diag_ch contains the diagonal potential components V_αα
+    # Compute M⁻¹ using the efficient implementation. Two cache flavours:
+    #   - MInverseCache:        strict channel-diagonal M = E·B − T − V_αα
+    #   - MInverseCacheVSector: V-sector block-diagonal M = E·B − T − V (full V)
     if M_cache !== nothing
         # Use cached version (FAST!)
-        if verbose
-            print("  Computing M⁻¹ preconditioner (cached)... ")
-            @time M_inv_op = matrices.M_inverse_operator_cached(E0, M_cache)
+        if M_cache isa matrices.MInverseCacheVSector
+            if verbose
+                print("  Computing M⁻¹ preconditioner (V-sector cached)... ")
+                @time M_inv_op = matrices.M_inverse_operator_cached_vsector(E0, M_cache)
+            else
+                M_inv_op = matrices.M_inverse_operator_cached_vsector(E0, M_cache)
+            end
         else
-            M_inv_op = matrices.M_inverse_operator_cached(E0, M_cache)
+            if verbose
+                print("  Computing M⁻¹ preconditioner (cached)... ")
+                @time M_inv_op = matrices.M_inverse_operator_cached(E0, M_cache)
+            else
+                M_inv_op = matrices.M_inverse_operator_cached(E0, M_cache)
+            end
         end
     else
-        # Fallback to non-cached version (SLOW)
+        # Fallback to non-cached version (SLOW). Only strict-channel non-cached path exists.
         if verbose
             print("  Computing M⁻¹ preconditioner (non-cached)... ")
             @time M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
@@ -1463,7 +1486,8 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
                                      verbose::Bool=true, use_arnoldi::Bool=true,
                                      krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                      include_uix::Bool=true,
-                                     θ_deg::Float64=0.0, n_gauss=nothing)
+                                     θ_deg::Float64=0.0, n_gauss=nothing,
+                                     use_vsector::Bool=false)
 
     # Timing dictionary to track performance
     timings = Dict{String, Float64}()
@@ -1590,27 +1614,54 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
     end
 
     # Precompute M⁻¹ cache (ONE-TIME COST, huge speedup!)
-    if verbose
-        print("  Precomputing M⁻¹ cache (one-time)... ")
-        cache_start = time()
-        @time M_cache = matrices.precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-        cache_time = time() - cache_start
-        timings["M_cache_precompute"] = cache_time
+    # Two flavours:
+    #   - strict channel-diagonal (default, n_q = 1): M = E·B − T − V_αα
+    #   - V-sector block-diagonal (use_vsector=true):  M = E·B − T − V (full)
+    if use_vsector
+        # Need per-pair V_x blocks (including off-diagonal coupling within each V-sector)
+        if verbose
+            print("  Building V_x pair blocks (V-sector mode)... ")
+            t0 = time()
+            V_x_full = matrices_optimized.V_x_pair_blocks(α, grid, potname)
+            @printf("%.3f s\n", time() - t0)
+        else
+            V_x_full = matrices_optimized.V_x_pair_blocks(α, grid, potname)
+        end
+
+        if verbose
+            print("  Precomputing M⁻¹ V-sector cache (one-time)... ")
+            cache_start = time()
+            @time M_cache = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
+            cache_time = time() - cache_start
+            timings["M_cache_precompute"] = cache_time
+        else
+            M_cache = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
+            timings["M_cache_precompute"] = 0.0
+        end
     else
-        M_cache = matrices.precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-        timings["M_cache_precompute"] = 0.0
+        if verbose
+            print("  Precomputing M⁻¹ cache (one-time)... ")
+            cache_start = time()
+            @time M_cache = matrices.precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+            cache_time = time() - cache_start
+            timings["M_cache_precompute"] = cache_time
+        else
+            M_cache = matrices.precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
+            timings["M_cache_precompute"] = 0.0
+        end
     end
 
     # Precompute RHS matrix cache (ONE-TIME COST, another huge speedup!)
-    # RHS = (V - V_αα) + V*Rxy + UIX is completely energy-independent!
+    # Strict mode: RHS = (V - V_αα) + V*Rxy + UIX
+    # V-sector:    RHS = V*Rxy + UIX (V fully absorbed into M)
     if verbose
         print("  Precomputing RHS matrix cache (one-time)... ")
         rhs_cache_start = time()
-        @time RHS_cache = precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=V_UIX)
+        @time RHS_cache = precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=V_UIX, use_vsector=use_vsector)
         rhs_cache_time = time() - rhs_cache_start
         timings["RHS_cache_precompute"] = rhs_cache_time
     else
-        RHS_cache = precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=V_UIX)
+        RHS_cache = precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=V_UIX, use_vsector=use_vsector)
         timings["RHS_cache_precompute"] = 0.0
     end
 
