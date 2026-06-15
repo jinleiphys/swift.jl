@@ -1,0 +1,271 @@
+{
+  "stance": "methodologist",
+  "primary_optimization": "info_gain_per_hour with explicit kill switches",
+  "candidates": [
+    {
+      "id": "B1",
+      "one_line": "Test whether a complex-scaled L2 Faddeev basis gives a stationary Kohn amplitude above breakup.",
+      "prl_handle": "If the Kohn functional stays stationary above three-body breakup, bound-state variational machinery becomes a controlled continuum solver for few-body reactions.",
+      "disambiguator_test": "In swift.jl, use the existing MT n+d complex-scaling run at E_rel = 1.0 MeV above breakup, theta_deg = 8, for J = 1/2+ and J = 3/2+. Evaluate the Kohn variational functional on the same L2 solution and compare with the current direct amplitude extraction and the Lazauskas-Carbonell MT benchmark where the tabulated point exists. Repeat with five 2 percent basis-scale perturbations and one doubled-basis reference run. Proceed only if the Kohn-direct eigenphase difference is below 0.05 deg, inelasticity difference below 5e-4, and the perturbation residual has log-log slope above 1.6.",
+      "stop_condition": "Kill within 2 weeks if any tested partial wave has eigenphase error greater than 0.10 deg, inelasticity error greater than 1e-3, or stationarity slope below 1.3 under the 2 percent basis perturbations.",
+      "first_concrete_step": "Today, add a throwaway analysis script outside source control that loads one saved MT n+d solution, evaluates the surface Kohn bilinear once, and prints direct versus Kohn S-matrix elements for J = 1/2+.",
+      "cost_estimate": {
+        "months_0_to_2": "1 week disambiguator on MT; month 2 go/no-go requires three energies, E_rel = 1, 5, 10 MeV, with all tested channels below 0.05 deg phase error.",
+        "months_2_to_6": "Extend to charged p+d Coulomb-off and Coulomb-on checks with the existing COULCC wrapper; month 6 go/no-go requires no Coulomb-specific loss of stationarity and at least one realistic-NN n+d channel matching a benchmark within 0.2 deg.",
+        "months_6_to_12": "Write PRL around the validity criterion, error estimator, and realistic-NN demonstration; fallback PRC maps where KVP fails above breakup."
+      },
+      "info_gain": {
+        "if_succeeds": "The user learns that the key formal objection to KVP-on-bound-state-basis above breakup is numerically false, at least in the R-space complex-scaled Faddeev setting. The PRL claim is a validity theorem-by-computation: continuum scattering can inherit bound-state variational control.",
+        "if_fails": "The failed stationarity map is still a PRC-level negative result because it identifies the energy, channel, or basis condition where KVP ceases to be trustworthy above breakup."
+      },
+      "risk": {
+        "dominant_failure_mode": "The Kohn functional is not stationary once breakup channels are open because the outgoing breakup sector contaminates the surface term.",
+        "probability": 0.45
+      },
+      "orthogonality_to_tried": {
+        "T1": "Not P-space AGS, not EST, and not the 6Li d+alpha universality problem.",
+        "T2": "Uses bound-state-style basis technology, but the target observable is an above-breakup S matrix, not 3H or 3He binding.",
+        "T3": "Starts from the existing MT n+d run, but asks a new variational-validity question rather than reproducing the scattering benchmark.",
+        "T4": "No IAV inclusive-breakup source or DWBA/CDCC approximation is involved.",
+        "T5": "No Phillips-line or 6Li halo universality content.",
+        "T6": "No Trojan Horse spectral reduction and no sub-Coulomb resonant extraction.",
+        "T7": "Not the DBMM CDCC elastic emulator; this is a Faddeev Kohn stationarity test above breakup.",
+        "T8": "No generalized optical theorem or absorption decomposition.",
+        "T9": "No knockout, spectroscopic quenching, or Feshbach non-additivity.",
+        "T10": "No DPP channel-importance metric and no CDCC bin deletion.",
+        "T11": "Does not build a 4N Yakubovsky or Borromean 4-body code line."
+      },
+      "orthogonality_to_already_read": {
+        "Lazauskas_Carbonell_2011": "Uses their MT result only as a benchmark; the new point is Kohn stationarity above breakup, not reproducing CS Faddeev-Merkuriev.",
+        "Lazauskas_Carbonell_2012": "No 4N Yakubovsky calculation and no MT n-3H benchmark target.",
+        "Lazauskas_Carbonell_2013": "Directly attacks the review's open question on KVP validity above 3N breakup.",
+        "Deltuva_Fonseca": "Configuration-space and variational; not momentum-space AGS, not complex-energy spline weights.",
+        "Zhang_Furnstahl_2022": "Tests the missing above-breakup validity premise behind KVP emulation, not a one-parameter emulator.",
+        "Kato_CSGF": "No 6He or 11Li E1 response.",
+        "Konig_EC": "Not bound-state eigenvector continuation.",
+        "Viviani_HH": "Not HH precision bound/scattering machinery; different representation and above-breakup target.",
+        "Wiringa_2003": "No AV18pq off-shell wave-function comparison.",
+        "NuPECC_2024": "Relevant to few-body reaction priorities but not the 4b-IAV or 4-body CDCC item.",
+        "Carlson_2015": "No QMC benchmark program; QMC would be a later external validation only."
+      },
+      "dependencies": "Existing swift.jl MT n+d solution, complex-scaled amplitude extraction, COULCC wrapper for later p+d, Lazauskas-Carbonell tables, and one compact Kohn-functional evaluator.",
+      "competitor_scoop_window": "Zhang-Furnstahl-style emulator groups and the Lazauskas/Carbonell lineage are closest; head-start is about 6 to 12 months because swift.jl already has the R-space complex-scaled solution.",
+      "info_gain_per_hour": {
+        "score": 9,
+        "justification": "The first week tests the core formal implication directly using an already-running MT case, so a failure is cheap and decisive."
+      }
+    },
+    {
+      "id": "B2",
+      "one_line": "Use A=3 short-range response to ask whether phase-equivalent NN forces leave an observable footprint.",
+      "prl_handle": "A measurable A=3 short-range observable that separates AV18 from AV18pq would turn off-shell wave-function ambiguity into an experimental physics question.",
+      "disambiguator_test": "In swift.jl, implement only the AV18pq radial operator replacement needed for the 3H bound state, then run AV18+UIX and AV18pq+retuned-UIX with E(3H) matched within 50 keV. Compute the normalized pair contact C_NN(Rc = 0.7 fm), one-body charge form factor F_C(q = 4.0 fm^-1), and rms radius. Use Wiringa 2003 as the reference for the expected short-range wave-function difference. Proceed only if either C_NN differs by at least 15 percent or F_C differs by at least 10 percent while the rms radii differ by less than 1 percent.",
+      "stop_condition": "Kill within 1 week if the AV18pq implementation cannot reproduce the published 3H binding within 100 keV, if numerical quadrature noise in C_NN exceeds 2 percent, or if both C_NN and F_C differences are below 5 percent after the binding and radius are matched.",
+      "first_concrete_step": "Today, locate the public AV18pq parameter table, map its operator terms to the existing AV18 potential interface, and run a single 3H Hamiltonian-matrix smoke test with the AV18pq central terms enabled.",
+      "cost_estimate": {
+        "months_0_to_2": "1 week AV18pq and contact test; month 2 go/no-go requires a stable contact/form-factor separation and a UIX retune that keeps E(3H) within 50 keV and radius within 1 percent.",
+        "months_2_to_6": "Add 3He, mirror comparison, uncertainty from basis truncation, and at least one reaction-relevant high-q or transfer-source kernel; month 6 go/no-go requires an observable-level separation above 10 percent after operator and basis uncertainties.",
+        "months_6_to_12": "Write PRL if the separation survives operator checks; otherwise write a PRC on AV18pq implementation, short-range diagnostics, and why common low-energy observables are blind."
+      },
+      "info_gain": {
+        "if_succeeds": "The user learns which A=3 observable sees the short-range wave function rather than just phase shifts and binding. The PRL claim is that phase-equivalent nuclear forces are experimentally distinguishable through a controlled few-body short-range response.",
+        "if_fails": "A null result is a useful PRC: after binding and radius matching, common A=3 observables are effectively invariant, which strengthens the case that operator renormalization hides short-range wave-function differences."
+      },
+      "risk": {
+        "dominant_failure_mode": "The apparent AV18 versus AV18pq difference is either too small after refitting UIX or too operator-dependent to support a Letter.",
+        "probability": 0.55
+      },
+      "orthogonality_to_tried": {
+        "T1": "No P-space AGS, no EST separable expansion, and no 6Li d+alpha Phillips-line physics.",
+        "T2": "Uses the existing 3H bound-state solver, but the question is phase-equivalent off-shell discrimination, not another binding benchmark.",
+        "T3": "Does not use the MT n+d above-breakup path.",
+        "T4": "No IAV inclusive breakup or CDCC source term.",
+        "T5": "No 6Li universality or a_dalpha-E6Li correlation.",
+        "T6": "No THM/IAV spectral framework.",
+        "T7": "No DBMM or scattering emulator.",
+        "T8": "No absorption-flux decomposition.",
+        "T9": "No knockout quenching or effective three-body Hamiltonian.",
+        "T10": "No DPP decomposition or continuum-channel importance metric.",
+        "T11": "Stays in A=3 bound-state physics and does not require 4N Yakubovsky or Borromean infrastructure."
+      },
+      "orthogonality_to_already_read": {
+        "Lazauskas_Carbonell_2011": "Not an n+d CS benchmark and not MT.",
+        "Lazauskas_Carbonell_2012": "Not 4N n-3H scattering.",
+        "Lazauskas_Carbonell_2013": "Uses a different open issue, off-shell wave-function observability, not the review's boundary-condition taxonomy.",
+        "Deltuva_Fonseca": "No P-space scattering and no above-breakup AGS calculation.",
+        "Zhang_Furnstahl_2022": "No KVP/EC scattering emulator.",
+        "Kato_CSGF": "No halo E1 strength or complex-scaling Green's function response.",
+        "Konig_EC": "Not an EC bound-state speedup; direct bound-state solves are cheap enough.",
+        "Viviani_HH": "Different basis and target, short-range off-shell discriminator rather than precision HH benchmarking.",
+        "Wiringa_2003": "Builds on their AV18pq observation but asks the next question: which controlled observable exposes it.",
+        "NuPECC_2024": "Not a NuPECC-priority 4-body reaction calculation.",
+        "Carlson_2015": "QMC results are external comparison only; the proposed swift.jl calculation is independent."
+      },
+      "dependencies": "AV18pq parameterization, existing AV18/UIX swift.jl bound-state machinery, pair-density and charge-form-factor postprocessing, and optionally a QMC collaborator only after the kill switch passes.",
+      "competitor_scoop_window": "GFMC and Norfolk/chiral-EFT groups are closest; head-start is 12 to 24 months because they own higher-precision wave functions but may not be asking the PRL off-shell-discriminator question.",
+      "info_gain_per_hour": {
+        "score": 8,
+        "justification": "The calculation is mostly postprocessing on an already-working A=3 bound-state solver; the only nontrivial first-week cost is AV18pq."
+      }
+    },
+    {
+      "id": "B3",
+      "one_line": "Decide whether configuration-space complex-energy continuation can replace explicit breakup boundary conditions for realistic n+d.",
+      "prl_handle": "If complex-energy continuation works in configuration space, momentum-space AGS no longer has a monopoly on fully realistic few-body scattering above breakup.",
+      "disambiguator_test": "In swift.jl, modify only the energy argument of the existing MT n+d linear system to E + i epsilon at E_rel = 1.0 and 5.0 MeV. Use epsilon = 1, 2, 4, 8 MeV, continue to epsilon = 0 with a Schlessinger point fit, and compare eigenphases and inelasticities with the current complex-scaling result and Lazauskas-Carbonell MT benchmarks. Proceed only if phase errors are below 0.10 deg, inelasticity errors below 1e-3, and dropping any one epsilon point changes phases by less than 0.05 deg.",
+      "stop_condition": "Kill within 2 weeks if analytic continuation is unstable under one-point deletion, if any benchmark phase error exceeds 0.20 deg, or if memory/time cost is more than 3 times the current complex-scaling solve for the same basis.",
+      "first_concrete_step": "Today, run the MT n+d solver at one complex energy E_rel = 1.0 + 2.0i MeV and verify that the linear solve, preconditioner, and amplitude extractor accept complex E without touching source architecture.",
+      "cost_estimate": {
+        "months_0_to_2": "2 week MT continuation map; month 2 go/no-go requires two energies and two J sectors passing the 0.10 deg and 1e-3 thresholds.",
+        "months_2_to_6": "Move to realistic AV18 n+d in a reduced partial-wave set, then add channels until convergence; month 6 go/no-go requires at least one realistic-NN above-breakup point within 0.2 deg of Deltuva-Fonseca or another accepted benchmark.",
+        "months_6_to_12": "Complete a compact realistic-NN demonstration and write PRL around the configuration-space complex-energy route; fallback PRC documents the continuation radius and failure modes."
+      },
+      "info_gain": {
+        "if_succeeds": "The user learns that the cheapest route to realistic R-space continuum scattering is complex energy, not a new Yakubovsky or boundary-condition code line. The PRL claim is a new practical path to realistic few-body continuum calculations.",
+        "if_fails": "The user salvages a PRC-level negative result that quantifies why configuration-space complex-energy continuation fails for nuclear breakup, saving months of infrastructure work."
+      },
+      "risk": {
+        "dominant_failure_mode": "The epsilon-to-zero continuation is ill-conditioned near breakup cuts and produces attractive but non-reproducible phase shifts.",
+        "probability": 0.60
+      },
+      "orthogonality_to_tried": {
+        "T1": "No P-space AGS or EST expansion.",
+        "T2": "Not a 3H/3He bound-state calculation.",
+        "T3": "Uses the same MT n+d target system, but tests a different analytic-continuation method instead of the existing complex-scaling benchmark.",
+        "T4": "No IAV or inclusive non-elastic breakup.",
+        "T5": "No 6Li universality.",
+        "T6": "No THM or IAV spectral pole reduction.",
+        "T7": "No DBMM or reduced-basis CDCC emulator.",
+        "T8": "No absorption mechanism or optical theorem decomposition.",
+        "T9": "No spectroscopic quenching.",
+        "T10": "No DPP decomposition.",
+        "T11": "Avoids the 4N Yakubovsky branch; the whole point is to test a cheaper 3N route first."
+      },
+      "orthogonality_to_already_read": {
+        "Lazauskas_Carbonell_2011": "Benchmarks against their CS result but does not reproduce their CS/Faddeev-Merkuriev method.",
+        "Lazauskas_Carbonell_2012": "No 4N n-3H calculation.",
+        "Lazauskas_Carbonell_2013": "Directly targets the review's underdeveloped configuration-space complex-energy option.",
+        "Deltuva_Fonseca": "Takes the complex-energy idea out of momentum-space AGS and asks whether R-space can use it.",
+        "Zhang_Furnstahl_2022": "No emulator; this is a direct solver/continuation test.",
+        "Kato_CSGF": "Complex energy is used for scattering continuation, not for 6He E1 strength.",
+        "Konig_EC": "No eigenvector continuation.",
+        "Viviani_HH": "Not HH/KVP precision scattering.",
+        "Wiringa_2003": "No AV18pq off-shell comparison.",
+        "NuPECC_2024": "Relevant to few-body continuum capability but not a direct 4b-IAV or Borromean CDCC implementation.",
+        "Carlson_2015": "No QMC method or benchmark dependence."
+      },
+      "dependencies": "Existing swift.jl complex arithmetic path, block preconditioner, Schlessinger point implementation, MT benchmark tables, and later Deltuva-Fonseca realistic-NN reference values.",
+      "competitor_scoop_window": "Deltuva-Fonseca already own the momentum-space solution; R-space groups could move if they choose. Head-start is about 3 to 9 months because swift.jl already solves the MT R-space problem.",
+      "info_gain_per_hour": {
+        "score": 8,
+        "justification": "Changing E to E + i epsilon is a tiny first experiment that directly decides whether a whole realistic-NN path is worth pursuing."
+      }
+    },
+    {
+      "id": "B4",
+      "one_line": "Build a two-parameter 3NF continuum emulator and test whether scattering constrains the 3NF differently from binding energies.",
+      "prl_handle": "A fast A=3 continuum emulator with visible 3NF sensitivity would turn few-nucleon scattering into a practical Bayesian constraint, not a benchmark afterthought.",
+      "disambiguator_test": "Use swift.jl with the existing MT n+d above-breakup case plus a schematic hypercentral 3NF knob and one NN-strength knob. Train a 3x3 eigenvector-continuation/reduced-basis emulator on nine direct solves at E_rel = 1.0 MeV and validate on ten random parameter points. Observable: J = 1/2+ and J = 3/2+ eigenphases and inelasticities. Proceed only if max phase error is below 0.05 deg, max inelasticity error below 5e-4, and wall-clock speedup exceeds 50x.",
+      "stop_condition": "Kill within 2 weeks if the two-parameter emulator misses any validation phase by more than 0.10 deg, misses inelasticity by more than 1e-3, or gives less than 20x speedup after basis construction.",
+      "first_concrete_step": "Today, wrap the existing MT n+d input in a two-parameter driver, run four corner points, and check whether the S-matrix varies smoothly enough for interpolation before building the full nine-point basis.",
+      "cost_estimate": {
+        "months_0_to_2": "2 week schematic-3NF emulator; month 2 go/no-go requires the 0.05 deg and 50x thresholds plus a demonstrated parameter direction that changes a scattering observable by more than five times the emulator error.",
+        "months_2_to_6": "Replace the schematic knobs with AV18+UIX strength variations already present in swift.jl; month 6 go/no-go requires a continuum observable whose 3NF sensitivity is not parallel to the triton binding constraint.",
+        "months_6_to_12": "Add Bayesian calibration and one realistic data comparison if the signal survives; fallback PRC is a controlled study of when EC fails for breakup scattering."
+      },
+      "info_gain": {
+        "if_succeeds": "The user learns that Line E's emulator philosophy transfers from CDCC to genuine three-body scattering. The PRL claim is that continuum few-body observables can enter Bayesian 3NF inference at realistic cost.",
+        "if_fails": "The user still gets a PRC-level method paper or negative result on why above-breakup Faddeev amplitudes are harder to emulate than bound states and elastic CDCC."
+      },
+      "risk": {
+        "dominant_failure_mode": "The S matrix is too nonanalytic across the breakup branch structure for a small reduced basis to emulate robustly.",
+        "probability": 0.50
+      },
+      "orthogonality_to_tried": {
+        "T1": "Not P-space AGS, not EST, and not 6Li universality.",
+        "T2": "Uses A=3 infrastructure but targets continuum scattering dependence on force parameters, not bound-state energies.",
+        "T3": "Starts from the existing MT n+d case but asks emulator and parameter-identifiability questions, not whether the direct solver works.",
+        "T4": "No IAV or CDCC inclusive breakup.",
+        "T5": "No Phillips-line relation.",
+        "T6": "No THM/IAV bridge.",
+        "T7": "Builds on the emulator culture but changes problem class from CDCC elastic scattering to Faddeev three-body breakup.",
+        "T8": "No absorption decomposition.",
+        "T9": "No knockout quenching.",
+        "T10": "No channel-importance or DPP metric.",
+        "T11": "Does not require 4N or Borromean infrastructure."
+      },
+      "orthogonality_to_already_read": {
+        "Lazauskas_Carbonell_2011": "Uses the MT case as a cheap emulator testbed, not as a benchmark reproduction.",
+        "Lazauskas_Carbonell_2012": "No 4N above-breakup calculation.",
+        "Lazauskas_Carbonell_2013": "Addresses the review's variational-parameter/adaptation gap from an emulator angle.",
+        "Deltuva_Fonseca": "Not momentum-space AGS and not a direct benchmark race.",
+        "Zhang_Furnstahl_2022": "Extends their one-parameter KVP/EC idea to a multi-parameter above-breakup stress test in R-space.",
+        "Kato_CSGF": "No halo E1 response.",
+        "Konig_EC": "Takes EC from bound states into continuum scattering, so it is not another 3H/4He bound-state EC application.",
+        "Viviani_HH": "No HH/KVP precision calculation.",
+        "Wiringa_2003": "No AV18pq short-range wave-function comparison.",
+        "NuPECC_2024": "Aligned with emulator/UQ priorities, but not the 4b-IAV or 4-body CDCC priority item.",
+        "Carlson_2015": "No QMC method; QMC data may later provide priors or validation."
+      },
+      "dependencies": "Existing swift.jl MT scattering driver, a lightweight parameter wrapper, reduced-basis/EC linear algebra from SLAM.jl practice, later AV18+UIX strength knobs, and optional Bayesian fitting scripts.",
+      "competitor_scoop_window": "Furnstahl/Zhang and Konig-style EC groups are closest; head-start is about 6 to 12 months because they have EC expertise, while swift.jl has the R-space Faddeev target.",
+      "info_gain_per_hour": {
+        "score": 9,
+        "justification": "Nine direct MT solves and ten validation points are enough to decide whether a 12-month Bayesian-continuum PRL is plausible."
+      }
+    },
+    {
+      "id": "B5",
+      "one_line": "Use three-body halo wave functions as a microscopic doorway for IAV non-elastic breakup of Borromean projectiles.",
+      "prl_handle": "If the absorptive source selects different 6He configurations than E1 dissociation, Borromean breakup needs 4b-IAV physics, not only Coulomb-strength functions.",
+      "disambiguator_test": "In a disposable swift.jl/SMOOTHIE bridge, tune a minimal alpha+n+n Gaussian basis with Minnesota nn and a single alpha-n Woods-Saxon to S_2n(6He) = 0.975 MeV, generate about 20 pseudostates below 8 MeV, and evaluate two weights on the same states: B(E1) and an IAV-like neutron-absorption source norm using a standard n+208Pb absorptive Woods-Saxon from SMOOTHIE at E_lab(6He) = 22.5 MeV. Proceed only if the fraction of strength below 2 MeV differs by at least 25 percentage points between B(E1) and the absorption source, and the difference remains above 15 points when the n-target absorption radius and diffuseness vary by 20 percent.",
+      "stop_condition": "Kill within 2 weeks if the minimal 6He basis cannot reproduce S_2n within 100 keV, if the B(E1)-source correlation coefficient exceeds 0.85, or if the low-energy fraction difference is below 15 percentage points after the 20 percent absorption-geometry variation.",
+      "first_concrete_step": "Today, make a one-page parameter table for the minimal alpha+n+n Hamiltonian and choose the SMOOTHIE n+208Pb optical potential already used in IAV tests, without editing source code.",
+      "cost_estimate": {
+        "months_0_to_2": "1 to 2 week doorway-source test; month 2 go/no-go requires robust separation between E1 and absorptive source weights and a stable S_2n-tuned halo basis.",
+        "months_2_to_6": "Upgrade from doorway weights to a first differential cross-section proxy using existing SMOOTHIE distorted waves; month 6 go/no-go requires a qualitative observable change above 20 percent relative to an E1-only model.",
+        "months_6_to_12": "If the source selectivity survives, write a PRL arguing for the missing physics in Borromean breakup; fallback PRC is a compact doorway formalism and feasibility study for 4b-IAV."
+      },
+      "info_gain": {
+        "if_succeeds": "The user learns that NuPECC's 4b-IAV priority has a sharp, cheap physics handle: absorptive breakup samples halo configurations differently from Coulomb E1. The PRL claim is an implication about what current Borromean breakup extractions miss.",
+        "if_fails": "A failure says the IAV source is nearly E1-like for this first system, so a full 4b-IAV build is not urgent. The salvage is a PRC doorway diagnostic and a clear no-go criterion."
+      },
+      "risk": {
+        "dominant_failure_mode": "The doorway approximation may be too crude for PRL reviewers, or the absorptive source may track E1 too closely to produce a distinct message.",
+        "probability": 0.65
+      },
+      "orthogonality_to_tried": {
+        "T1": "Not P-space AGS, not EST, and not 6Li d+alpha universality.",
+        "T2": "Uses three-body bound/pseudostate machinery, but for a halo projectile doorway, not 3H/3He benchmarking.",
+        "T3": "No n+d MT scattering.",
+        "T4": "Builds on the IAV philosophy but moves to Borromean source selectivity; it is not another two-body-projectile IAV calculation.",
+        "T5": "No 6Li Phillips-line observable.",
+        "T6": "No THM spectral framework and no 19F(p,alpha gamma) application.",
+        "T7": "No DBMM elastic CDCC emulator.",
+        "T8": "No Liu Hao absorption-trilogy CDCC flux decomposition.",
+        "T9": "No spectroscopic quenching.",
+        "T10": "No DPP channel deletion or channel-importance metric.",
+        "T11": "Addresses the 4b-IAV/Borromean direction with a doorway kill switch rather than committing to a new full 4-body code line."
+      },
+      "orthogonality_to_already_read": {
+        "Lazauskas_Carbonell_2011": "No MT n+d CS benchmark.",
+        "Lazauskas_Carbonell_2012": "No 4N Yakubovsky n-3H calculation.",
+        "Lazauskas_Carbonell_2013": "Uses the review's few-body taxonomy only as context; the physics is Borromean absorption source selectivity.",
+        "Deltuva_Fonseca": "No P-space AGS and no realistic 4N scattering.",
+        "Zhang_Furnstahl_2022": "No KVP/EC emulator.",
+        "Kato_CSGF": "Uses B(E1) only as a comparator; the candidate is killed unless the IAV-like absorptive source is demonstrably different from the CSGF E1 story.",
+        "Konig_EC": "No bound-state EC.",
+        "Viviani_HH": "No HH precision calculation.",
+        "Wiringa_2003": "No AV18pq or short-range NN ambiguity.",
+        "NuPECC_2024": "Targets the listed 4b-IAV/Borromean priority but avoids a full 4-body infrastructure bet until the source-selectivity signal is proven.",
+        "Carlson_2015": "No QMC benchmark dependence."
+      },
+      "dependencies": "Minimal alpha+n+n Hamiltonian parameters, existing swift.jl pseudostate machinery, SMOOTHIE neutron-target absorptive optical potentials, and later Moro/Nunes input only if the source-selectivity test passes.",
+      "competitor_scoop_window": "Kato/Aoyama/Myo own CSGF E1; Moro/Nunes/Descouvemont-style breakup groups own reaction modeling. Head-start is 12 to 18 months if swift.jl and SMOOTHIE can be bridged quickly.",
+      "info_gain_per_hour": {
+        "score": 7,
+        "justification": "The first test is cheap compared with full 4b-IAV, but it still needs a minimal 6He pseudostate setup, so the first-month information rate is lower than B1 or B4."
+      }
+    }
+  ]
+}

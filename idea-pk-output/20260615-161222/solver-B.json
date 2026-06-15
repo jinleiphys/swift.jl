@@ -1,0 +1,223 @@
+{
+  "solver": "B",
+  "stance_summary": "Do not pick a winner yet. The cheapest path is to split the failure into extraction-only, projection-only, kinematics-only, and wavefunction-content tests, with the two-body Lazauskas Table I check first because it removes every three-body ambiguity.",
+  "anchored_assumption": "The disambiguation question is: does the complex-scaled wavefunction already contain the information that should make the elastic S-matrix non-unitary, or is eta near 1 created only when swift maps that wavefunction to S through normalization, kinematics, or elastic-channel projection?",
+  "candidates": [
+    {
+      "id": "B1",
+      "one_line": "Implement the Lazauskas Table I two-body MT 1S0 E_cm=1 MeV check as the pure amplitude-normalization test.",
+      "first_concrete_step": "Add a temporary diagnostic function in swift/matrices_optimized.jl using the existing one-coordinate kinetic helper Tx at line 64 and the scaled-potential quadrature pattern in V_matrix_optimized_scaled at lines 683-859 to build a one-coordinate complex-scaled two-body l=0 operator for MT I-III 1S0, theta=10 deg, rmax=100, no Coulomb; extract delta through the same S=1+2ikf convention used by compute_collision_matrix at swift/scattering.jl:384-387 and compare to the wiki benchmark delta=63.512 deg.",
+      "cost_estimate": "Half day to one day; memory is O(nx^2), below 100 MB for nx around 80-120; difficulty is low to medium because it reuses existing basis, potential, and S-matrix conventions but needs a small 2-body harness.",
+      "info_gain": "If delta misses 63.512 deg, H1 is confirmed in the simplest possible setting: prefactor, CS Jacobian, C_n-like normalization, or S=1+2ikf is wrong before any deuteron, recoupling, or breakup enters. If it agrees, the scalar two-body extraction convention is not the primary bug and the next tests should move to the three-body deuteron projection and breakup content.",
+      "risk": "The one-dimensional diagnostic must call the MT 1S0 potential channel correctly; at 1 MeV the wiki itself says large rmax is needed, so a too-small mesh can create a false H1 signal.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "No Wigner 6j or channel-spin recoupling is present in a two-body 1S0 scalar test."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "No deuteron 3S1 or 3D1 component exists, so it cannot be a repeat of the deuteron-component double-counting fix."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "There is only one two-body E_cm, not a three-body E_total versus E_cm operator choice."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "This is not toggling scaled versus unscaled V inside the existing three-body amplitude; it builds the reference two-body CS normalization problem from scratch."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "It does not retest conjugated versus c-product inside the current three-body matrix element; it tests the whole two-body integral-relation normalization."
+        },
+        {
+          "tried_item": "T6",
+          "difference": "It does not decide whether to insert the three-body B metric in <phi|V Rxy|psi>; the two-body benchmark judges the complete extracted phase directly."
+        },
+        {
+          "tried_item": "T7",
+          "difference": "There are no three-body channels to converge."
+        },
+        {
+          "tried_item": "T8",
+          "difference": "The system is tiny and direct-solvable if desired; it is not a GMRES convergence investigation."
+        }
+      ],
+      "dependencies": "Only the MT I-III 1S0 potential call and the existing Laguerre grid helpers; do this before any new full three-body run."
+    },
+    {
+      "id": "B2",
+      "one_line": "Postprocess one existing reduced-mesh three-body solution with Lazauskas Eq.17 scalar factors missing from the current lines 325-353.",
+      "first_concrete_step": "In compute_scattering_amplitude at swift/scattering.jl:325-353, add a debug-only path that returns the raw M_out_in = transpose(psi_out_component) * V_Rxy_psi_component before multiplying by prefactor; then form S for a scalar sweep with current prefactor at line 326, current*C_n^{-1}, current*exp(3im*theta), current*exp(6im*theta), current*C_n^{-1}*exp(6im*theta), and Eq.17-like -(m*amu/hbar^2)*C_n^{-1}*exp(6im*theta), where C_n is computed from the wiki formula integral phi_d*(x exp(-i theta))*phi_d(x exp(i theta))*exp(3i theta) over x using the same grid and deuteron coefficients.",
+      "cost_estimate": "Two to four hours if a reduced solution c,V,Rxy_31,psi_in is already available; otherwise one reduced solve, tens of seconds plus coding time; memory is the existing reduced three-body memory footprint.",
+      "info_gain": "If one scalar choice moves the doublet S element from eta near 1 to eta near 0.4649 without changing psi_sc, H1 is the leading diagnosis and the missing C_n/Jacobian/prefactor can be isolated. If all scalar choices leave eta near 1 or only rotate delta, then the failure is not a simple overall Eq.17 scalar and the next suspect is projection, source structure, or absence of breakup content.",
+      "risk": "C_n from basis coefficients may need the same complex-rotated basis evaluation used in V_matrix_optimized_scaled rather than a plain coefficient dot; a scalar sweep can also accidentally fit eta while leaving the wrong operator [V_j+V_k] projection unfixed.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "The recoupling matrix is left untouched; the sweep is applied before or after recoupling to the same raw amplitude element."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "The deuteron channel list remains the already-filtered list from lines 287-296; no 3D1 channel is reintroduced."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "The solved wavefunction and operator energy are frozen; only the amplitude normalization constants are varied."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "The same complex-scaled V passed into compute_scattering_amplitude is used; the test adds C_n and Jacobian factors, not a scaled-V toggle."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "It is not a bare c-product retry; transpose versus adjoint can be held fixed while scalar Eq.17 factors are swept."
+        },
+        {
+          "tried_item": "T6",
+          "difference": "It does not insert a B metric in the three-body matrix element; it tests the explicit C_n and exp(3i theta)/exp(6i theta) factors cited in the wiki."
+        },
+        {
+          "tried_item": "T7",
+          "difference": "No channel set changes; the reduced-mesh channel basis is postprocessed as-is."
+        },
+        {
+          "tried_item": "T8",
+          "difference": "No linear solve accuracy is being tested because the same converged c vector is reused."
+        }
+      ],
+      "dependencies": "Needs one saved or freshly produced reduced-mesh three-body solution with psi_in, psi_sc, V, Rxy_31, grid, alpha, phi_d_matrix, theta, and E_rel available."
+    },
+    {
+      "id": "B3",
+      "one_line": "Implement Lazauskas Eq.16 y-asymptotic projection from psi_sc as an extraction path independent of the current V*Rxy integral.",
+      "first_concrete_step": "Add compute_amplitude_by_y_projection(psi_sc, grid, alpha, phi_d_matrix, E_rel; theta) next to compute_scattering_amplitude in swift/scattering.jl: for each deuteron channel selected by the same logic as lines 263-296, evaluate C_n^{-1}*y*exp(-im*q*y*exp(im*theta))*integral phi_d*(x exp(-i theta))*psi_sc_channel(x,y)*exp(3im*theta) dx on the last 10-15 y mesh points, then report the plateau mean and scatter for the elastic lambda=0, channel-spin doublet after the existing recoupling step.",
+      "cost_estimate": "Half day; no new solve if psi_sc is available; memory is O(nx*ny*nch) plus small diagnostic arrays; difficulty is medium because the x-projection must use the same channel indexing as compute_scattering_amplitude.",
+      "info_gain": "A stable y-plateau with eta near the benchmark would show that the CS solution has the outgoing elastic coefficient and the current Eq.17-like implementation at lines 316-353 is the wrong projection or normalization. A stable plateau with eta near 1 points toward H2, namely the solved wavefunction itself lacks breakup absorption. No plateau is also useful: it says the present grid/asymptotic window cannot support Eq.16, so Eq.17 or an interior relation is mandatory.",
+      "risk": "Eq.16 is noted in the wiki as less accurate than the Green-theorem integral, and a reduced grid with ymax=50 may not have a clean plateau even when the method is correct.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "The test reads the outgoing coefficient before relying on the 6j recoupling result; recoupling can be applied afterward only to label the doublet element."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "It uses the same occupied-deuteron filter and does not treat 3S1 and 3D1 as independent scattering channels."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "The solved psi_sc is fixed; Eq.16 only changes how the asymptotic coefficient is read."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "No V matrix appears in Eq.16, so this is independent of the scaled versus unscaled V question."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "It is not the current inner product with V_Rxy_psi; it projects the wavefunction onto bound-pair times outgoing-y behavior."
+        },
+        {
+          "tried_item": "T6",
+          "difference": "It does not add a B metric to <phi|V Rxy|psi>; the only normalization is the explicit C_n^{-1} and exp(3i theta) from Eq.16."
+        },
+        {
+          "tried_item": "T7",
+          "difference": "The channel basis is unchanged; the new information is whether the existing psi_sc has an outgoing-y plateau."
+        },
+        {
+          "tried_item": "T8",
+          "difference": "It is a postprocessing extraction test and does not measure GMRES residuals."
+        }
+      ],
+      "dependencies": "Best done after B2 defines a consistent C_n computation; needs psi_sc from at least the reduced 14.1 MeV run and the theta value used in the solve."
+    },
+    {
+      "id": "B4",
+      "one_line": "Split the ambiguous energy argument into E_operator, E_source, and E_amp to test the kinematics convention without mixing it with normalization.",
+      "first_concrete_step": "Add diagnostic keywords only: compute_initial_state_vector at swift/matrices_optimized.jl:1165 should log and use E_source for k in lines 1176-1180; solve_scattering_equation at swift/scattering.jl:156 should log E_operator for A; compute_scattering_amplitude at swift/scattering.jl:230 should log and use E_amp for k in lines 239-241 and prefactor line 326. On a reduced run or saved solution, compare the legal triplets (E_operator=E_total, E_source=E_cm, E_amp=E_cm), (E_operator=E_total, E_source=E_cm, E_amp=E_total), and (E_operator=E_cm, E_source=E_cm, E_amp=E_cm), with E_cm=(2/3)E_lab and E_total=E_cm+E_d.",
+      "cost_estimate": "Two to six hours; postprocessing E_amp costs seconds, changing E_source or E_operator costs one reduced solve per triplet; memory is the reduced three-body matrix memory; difficulty is low if the caller is already organized around E_cm and E_total.",
+      "info_gain": "If only E_amp changes eta or delta substantially, the bug is in the S conversion and prefactor k, not the CS solution. If E_source changes the answer while E_amp does not, the incoming Coulomb/free wave in compute_initial_state_vector is using the wrong kinetic energy. If only E_operator matters, T3 was incomplete or applied inconsistently. If none of these moves eta below about 1, H3 is not the main cause.",
+      "risk": "The eta=0.4649 discrepancy is too large for a simple sqrt(E) prefactor error in many cases, so this is a rule-out test more than a likely fix; it also requires knowing which E was actually passed by the external driver.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "No angular-momentum recoupling formula is altered."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "No deuteron-channel occupancy or 3S1/3D1 filtering is changed."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "T3 changed the operator energy; this separates operator, source-wave, and amplitude-k energies so the convention error can be localized."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "The potential scaling choice is unchanged."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "The amplitude inner-product convention is unchanged."
+        },
+        {
+          "tried_item": "T6",
+          "difference": "No B metric is added or removed."
+        },
+        {
+          "tried_item": "T7",
+          "difference": "The channel space is fixed; only the three energy arguments are audited."
+        },
+        {
+          "tried_item": "T8",
+          "difference": "It does not reinterpret residual convergence; any new solves are reduced-size convention checks."
+        }
+      ],
+      "dependencies": "Requires the driver to expose E_lab, E_cm, E_d, and the actual E values currently passed into compute_initial_state_vector, solve_scattering_equation, and compute_scattering_amplitude."
+    },
+    {
+      "id": "B5",
+      "one_line": "Measure directly whether psi_sc contains breakup-continuum content by projecting out the deuteron bound-state component in x.",
+      "first_concrete_step": "Add diagnose_breakup_content(psi_sc, psi_in, V, Rxy_31, grid, alpha, phi_d_matrix; theta) in swift/scattering.jl after compute_scattering_amplitude: for each channel block indexed as (i_alpha-1)*nx*ny+(ix-1)*ny+iy, compute c_d(iy)=sum_x phi_d^*(x)*psi_sc(x,iy) using the same x-overlap and CS normalization convention chosen for C_n, reconstruct phi_d(x)*c_d(iy), and report ||psi_sc-P_d psi_sc||/||psi_sc|| by channel; repeat the same projection on Rxy_31*psi_total and V*(Rxy_31*psi_total), the two vectors built at lines 316-317.",
+      "cost_estimate": "Half day; no new solve if psi_sc,V,Rxy_31 are available; memory is linear in the solution vector plus a few channel diagnostics; difficulty is medium because the projection norm under CS must be used consistently but the result is qualitative.",
+      "info_gain": "If the residual continuum fraction is sizable in psi_sc but eta remains near 1, H2 is disfavored and the extraction or elastic projection is losing breakup absorption. If the residual is tiny already in psi_sc, the CS basis/source/operator is not generating breakup flux. If residual appears after Rxy_31*psi_total but disappears after V*(Rxy_31*psi_total), the wrong pair-potential or slice in the Eq.17-like operator is implicated.",
+      "risk": "A bad projection metric can mislabel deuteron-bound strength as continuum strength; use this as a branch test, not a final observable. It also will not by itself give the correct phase shift.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "It inspects wavefunction content before channel-spin recoupling."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "It projects onto the occupied deuteron bound state rather than changing which deuteron components are counted as channels."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "The energy convention is not varied; the existing solved psi_sc is analyzed."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "It does not toggle scaled or unscaled V; it checks whether the chosen V*Rxy vector contains continuum strength."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "It is not an amplitude inner-product convention test."
+        },
+        {
+          "tried_item": "T6",
+          "difference": "It does not claim a B metric belongs in the amplitude; it uses a projection norm only as a diagnostic of bound versus continuum content."
+        },
+        {
+          "tried_item": "T7",
+          "difference": "Instead of adding channels and observing no change, it measures whether the existing channel wavefunctions actually have non-deuteron x-space content."
+        },
+        {
+          "tried_item": "T8",
+          "difference": "It assumes the converged solve and asks what physical content the converged vector has."
+        }
+      ],
+      "dependencies": "Best after B2 defines the C_n and x-overlap convention; needs psi_sc, psi_in, V, Rxy_31, grid, alpha, and phi_d_matrix from a reduced or full run."
+    }
+  ],
+  "convergence_note": "Run B1 first because a failure there ends the debate at H1. If B1 passes, B2 and B3 are pure postprocessing on one reduced three-body solution and should precede any full-mesh job. B4 is the cheap H3 rule-out. B5 decides whether to spend effort on extraction/projection or on the CS source and continuum representation."
+}

@@ -345,9 +345,9 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
             V_Rxy_ψ_component = temp2[idx_in_start:idx_in_end]
 
             # Compute inner product ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩_{α₀_in}.
-            # Complex-scaling c-product: NO complex conjugation (the operator is non-Hermitian
-            # under r → r e^{iθ}; same convention as V_matrix_optimized_scaled / COLOSS).
-            inner_product = transpose(ψ_out_component) * V_Rxy_ψ_component
+            # Same convention as the bound state: conjugated bra (dot = a'·b); V is the
+            # operator matrix element so no separate B metric (cf. ψ'·V_UIX·ψ in MalflietTjon).
+            inner_product = dot(ψ_out_component, V_Rxy_ψ_component)
 
             # Apply prefactor
             f_matrix[i_out, i_in] = prefactor * inner_product

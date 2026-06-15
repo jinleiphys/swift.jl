@@ -1,0 +1,145 @@
+{
+  "candidates": [
+    {
+      "candidate_id": "A1",
+      "verdict": "redundant",
+      "rationale": "A1 reads the outgoing coefficient from the y-tail of psi_sc after projecting onto the deuteron, which is the same physical extraction target as the wiki's Lazauskas Eq.16 orthogonal-channel projection. It is not a T1-T8 reinvention because it bypasses recoupling, V-scaling, c-product, B-metric, channel-count, and GMRES residual checks. It is redundant with B3, which gives the sharper version with C_n^{-1}, exp(3i theta), the last 10-15 y points, and plateau scatter.",
+      "redundant_with": "B3",
+      "info_gain_correction": null,
+      "first_step_correction": "Replace the x_deuteron_peak/tail-ratio shortcut with the full Eq.16 projection and plateau diagnostic described in B3."
+    },
+    {
+      "candidate_id": "A2",
+      "verdict": "redundant",
+      "rationale": "A2 is a valid non-reinvention because the wiki-context explicitly lists Lazauskas Eq.16 with C_n^{-1}, phi_n*(x exp(-i theta)), and exp(3i theta), and the prompt notes that implementing Eq.16/17 verbatim is feasible. However, A2 and B3 test the same Eq.16 y-asymptotic projection on the same psi_sc. B3 is kept because it is more concrete about where to add the function, which y-window to test, and how to report plateau stability.",
+      "redundant_with": "B3",
+      "info_gain_correction": null,
+      "first_step_correction": null
+    },
+    {
+      "candidate_id": "A3",
+      "verdict": "infeasible",
+      "rationale": "A3 explicitly says to drop complex scaling and run a theta=0 Kievsky-Viviani integral-relation cross-check. The stuck-card constraint says the work must stay inside the existing R-space Faddeev plus complex-scaling framework because that is the method under test. Its own cost estimate is 2-3 days, and the first single-channel step would mainly test delta, while eta above breakup needs the harder multichannel extension.",
+      "redundant_with": null,
+      "info_gain_correction": "This is a useful later independent method, but it is outside the present 1-day CS-framework contract.",
+      "first_step_correction": "If used later, scope it as an out-of-framework validation and separate the delta-only single-channel test from the eta calculation."
+    },
+    {
+      "candidate_id": "A4",
+      "verdict": "redundant",
+      "rationale": "A4 and B1 propose the same Lazauskas Table I two-body MT 1S0 E_cm=1 MeV, rmax=100, theta=10 deg normalization check with target delta=63.512 deg and eta=1. This is not covered by T1-T8, which were all three-body extraction, recoupling, channel, energy, or residual checks. B1 is kept because it gives the sharper first implementation path using existing one-coordinate kinetic and scaled-potential matrix patterns.",
+      "redundant_with": "B1",
+      "info_gain_correction": null,
+      "first_step_correction": null
+    },
+    {
+      "candidate_id": "B1",
+      "verdict": "kept",
+      "rationale": "The wiki-context gives a clean two-body benchmark: NN 1S0 at E_cm=1 MeV with MT only should reproduce delta=63.512 deg to five digits at rmax=100 and theta=10 deg. This removes deuteron projection, Wigner recoupling, breakup, channel convergence, and the E_cm versus E_total ambiguity, so it is not any of T1-T8. The first step is feasible in one day because the matrix is O(nx^2) and B1 identifies existing Tx and scaled-V construction patterns.",
+      "redundant_with": null,
+      "info_gain_correction": null,
+      "first_step_correction": "Run at least a small mesh convergence around rmax=100 before declaring a normalization failure, since the wiki notes the 1 MeV CS test needs a large asymptotic box."
+    },
+    {
+      "candidate_id": "B2",
+      "verdict": "downgrade_info_gain",
+      "rationale": "B2 is not a simple repeat of T4-T6 because the wiki-context specifically flags missing C_n^{-1}, exp(3i theta), exp(6i theta), and Eq.17-like prefactors as unresolved. It is cheap and feasible as a scalar sweep on an existing reduced solution. The information gain is limited because it keeps the current single-component raw matrix element rather than implementing Eq.17 with [V_j+V_k] or Eq.16 projection, so a hit could be an accidental fit and a miss would not rule out the benchmark extraction formulas.",
+      "redundant_with": null,
+      "info_gain_correction": "Treat B2 only as a quick scalar-prefactor sanity check; do not use it to accept or reject Eq.16/17 until B3 or a full Eq.17 implementation is tested.",
+      "first_step_correction": "Require any scalar candidate to improve both eta and delta, not eta alone, and report the unchanged raw matrix element before applying scalars."
+    },
+    {
+      "candidate_id": "B3",
+      "verdict": "kept",
+      "rationale": "B3 implements the wiki's Lazauskas Eq.16 extraction directly: C_n^{-1}, y exp(-i q y exp(i theta)), phi_d*(x exp(-i theta)), and exp(3i theta), using the existing psi_sc. This is orthogonal to T4-T6 because Eq.16 contains no V matrix element and no disputed inner-product metric, and it is also separate from T1-T2 because recoupling is only a labeling step after the channel coefficient is read. Its branches are informative: eta near 0.4649 confirms the current estimator is wrong, eta near 1 or no plateau points to missing breakup content or inadequate asymptotic window.",
+      "redundant_with": null,
+      "info_gain_correction": null,
+      "first_step_correction": "Always report the y-plateau scatter; if the reduced mesh has no plateau, repeat the projection on the production theta=10 solution before rejecting Eq.16."
+    },
+    {
+      "candidate_id": "B4",
+      "verdict": "refine_first_step",
+      "rationale": "B4 extends T3 by separating E_operator, E_source, and E_amp, but as written it still includes the already-tried E_operator=E_cm versus E_total comparison from T3. The source-wave and amplitude-k parts are new and feasible, while the operator-energy rerun is reinvention unless used only as a logged control. The eta discrepancy is large compared with a likely sqrt(E) prefactor effect, so this is a rule-out diagnostic rather than a leading candidate.",
+      "redundant_with": null,
+      "info_gain_correction": "The useful branch is localization of an energy-convention error, not solving the main eta problem by itself.",
+      "first_step_correction": "Freeze E_operator at the post-T3 value E_total, first log the current E_source and E_amp values, postprocess E_amp if possible, and only run source-energy variants if the log shows a real mismatch."
+    },
+    {
+      "candidate_id": "B5",
+      "verdict": "kept",
+      "rationale": "B5 directly tests the stuck-card's core symptom, eta near 1 meaning no breakup flux loss, by projecting psi_sc into deuteron-bound and non-deuteron-x components instead of forming an amplitude. It is not T7, because T7 only added partial-wave channels and found unchanged delta and eta, while B5 measures whether the converged vector and the Rxy_31 and V Rxy_31 vectors contain continuum content. It is feasible in one day as postprocessing, and both branches are useful: sizable residual content indicts extraction, tiny residual content indicts source/operator generation.",
+      "redundant_with": null,
+      "info_gain_correction": null,
+      "first_step_correction": "Define the x-projection with the same C_n and CS overlap convention used for Eq.16, and treat the resulting norm as a branch diagnostic rather than a final observable."
+    },
+    {
+      "candidate_id": "A5",
+      "verdict": "refine_first_step",
+      "rationale": "A5 fairly targets generation rather than extraction: it uses the wiki's theta-plateau statement for n-d above breakup and the stuck-card's theta_max=14.2 deg at 14.1 MeV. The weak point is the proposed W_brk as a sum over 'NON-deuteron channels'; the files describe channel scans in lmax, lambdamax, and j2b, and T2 says only occupied deuteron components are retained, so channel labels are not a clean breakup projector. The theta scan is useful, but the extraction-free weight must be defined through a deuteron projection like B5.",
+      "redundant_with": null,
+      "info_gain_correction": "A flat reduced-mesh scan is only suggestive because the wiki also says 30-40 splines per direction are needed for three digits.",
+      "first_step_correction": "Replace the non-deuteron-channel sum with ||(1-P_d) psi_sc||/||psi_sc|| from B5 at each theta, and include at least one production-mesh theta=10 value if the reduced scan is flat."
+    },
+    {
+      "candidate_id": "A6",
+      "verdict": "kept",
+      "rationale": "A6 tests the RHS source construction, not the S-matrix readout: it focuses on compute_initial_state_vector using y_scaled=yi exp(i theta) and COULCC at the complex argument. This is orthogonal to T1-T6 and T8, and it extends beyond T3 because T3 changed the operator energy while A6 changes the incoming free-wave argument in b. It is feasible in one day with a flag and reduced runs, and the no-change branch is informative because it clears the source argument and redirects to operator coupling or mesh resolution.",
+      "redundant_with": null,
+      "info_gain_correction": null,
+      "first_step_correction": "Before treating an eta drop as a fix, check the Lazauskas source convention in the archived benchmark formula; an unrotated incoming wave may be only a diagnostic if the formal CS inhomogeneous equation requires the rotated one."
+    },
+    {
+      "candidate_id": "A7",
+      "verdict": "refine_first_step",
+      "rationale": "A7 is properly aimed at operator-side generation and uses file content that Rxy_matrix_optimized takes no theta while V_matrix_optimized_scaled does. The proposed block-norm ratio is under-specified because Rxy can be theta-independent as a geometric permutation, and complex rotation can change phases without changing a block norm. The candidate becomes actionable only if the product V_scaled Rxy or the source V Rxy phi is compared against a direct rotated-coordinate reference, not just theta=10 versus theta=0 norms.",
+      "redundant_with": null,
+      "info_gain_correction": "A frozen norm alone is not enough to diagnose absent breakup coupling, so both branches need a reference expectation for the rotated product.",
+      "first_step_correction": "Compare entries, phases, and block norms of V_scaled Rxy against a direct small-grid quadrature of the same rotated rearrangement operator; do not judge Rxy(theta-free) by itself."
+    }
+  ],
+  "synthesis": {
+    "diagonal": [
+      {
+        "candidate_id": "B5",
+        "rationale": "Highest priority because it is postprocessing on the existing solution and directly splits the main ambiguity: does psi_sc and V Rxy psi contain continuum content, or is eta near 1 already present before extraction?"
+      },
+      {
+        "candidate_id": "B3",
+        "rationale": "Best benchmark-faithful extraction test, since it implements Lazauskas Eq.16 with the C_n and CS Jacobian factors named in the wiki and avoids the current V Rxy matrix element."
+      },
+      {
+        "candidate_id": "B1",
+        "rationale": "Cleanest isolated normalization benchmark, using Lazauskas Table I to test the two-body CS amplitude convention before deuteron, recoupling, or breakup physics enters."
+      },
+      {
+        "candidate_id": "A6",
+        "rationale": "Kept as the source-generation branch if B5 shows little continuum content; it tests the RHS incoming-wave construction that T1-T8 did not touch."
+      }
+    ],
+    "cheapest_disambiguator": {
+      "candidate_id": "B5",
+      "rationale": "It needs no new solve if psi_sc and the intermediate Rxy/V vectors are available, and it directly decides whether to spend the next day on extraction formulas or on source/operator generation."
+    },
+    "incompatible_pairs": [
+      {
+        "a": "B5",
+        "b": "B3",
+        "reason": "If B5 finds a genuinely tiny non-deuteron-x residual in psi_sc, B3 should not be able to find a stable Eq.16 plateau with eta near 0.4649 on the same solution; if it does, the projection metric in one of the tests is wrong."
+      },
+      {
+        "a": "B3",
+        "b": "A6",
+        "reason": "If B3 already recovers eta near 0.4649 from the existing rotated-source psi_sc, then changing the source argument is not needed for the benchmark failure, although it could still expose a separate convention issue."
+      }
+    ],
+    "groupthink_flag": {
+      "raised": false,
+      "shared_anchor": null,
+      "recommended_re_prompt_target": null
+    },
+    "all_filtered": {
+      "raised": false,
+      "minimum_info_needed": null
+    }
+  }
+}

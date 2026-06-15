@@ -69,6 +69,7 @@ function run_point(; Jtot, E_lab, θ_deg, potname="MT",
     ψ_sc, A, b = solve_scattering_equation(E_total, α, grid, potname, ψ_in,
                                            θ_deg=θ_deg)
     res_norm = norm(A*ψ_sc - b)
+    rel_res  = res_norm / norm(b)
 
     f, dch, labels = compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α,
                                                   φ_d_matrix, z1z2, θ=θ_rad, σ_l=0.0)
@@ -79,7 +80,8 @@ function run_point(; Jtot, E_lab, θ_deg, potname="MT",
     # collision matrix -> channel-spin basis ; pull elastic (λ,𝕊) diagonal element
     U          = compute_collision_matrix(f, k)
     U_cs, lab  = Scattering.recouple_to_channel_spin(U, α, dch)
-    return (E=E, E_d=E_d, k=k, res_norm=res_norm, U_cs=U_cs, lab=lab)
+    return (E=E, E_d=E_d, k=k, res_norm=res_norm, rel_res=rel_res, nch=α.nchmax,
+            U_cs=U_cs, lab=lab)
 end
 
 "From the channel-spin U block, get (delta_deg, eta) for the elastic entrance channel label."
@@ -100,17 +102,19 @@ println("="^78)
 println("  n-d elastic scattering  vs  Lazauskas-Carbonell PRC 84, 034002 (2011) Tab.III")
 println("="^78)
 
-# First decisive test: DOUBLET @ E_lab=14.1 MeV, single theta=10 deg
-Jtot = 0.5
-E_lab = 14.1
-θ = 10.0
-@printf("\nDOUBLET  Jtot=1/2  E_lab=%.1f MeV (E_cm=%.3f)  theta=%.1f deg\n", E_lab, (2/3)*E_lab, θ)
-@time r = run_point(Jtot=Jtot, E_lab=E_lab, θ_deg=θ)
-@printf("  deuteron E_d   = %.4f MeV  (MT I-III ref ~ -2.23)\n", r.E_d)
-@printf("  k              = %.5f fm^-1\n", r.k)
-@printf("  solve residual = %.2e\n", r.res_norm)
-δ, η, L = elastic_delta_eta(r.U_cs, r.lab, Jtot, 1, "λ=0, 𝕊=0.5")
-println("  channel-spin labels: ", L)
-@printf("  --> Re(delta) = %8.3f deg   (benchmark 105.49)\n", δ)
-@printf("  --> eta       = %8.4f       (benchmark 0.4649)\n", η)
+# Channel-convergence scan, DOUBLET @ E_lab=14.1 MeV, theta=10 deg.
+# Reduced mesh (dense A is nch·nx·ny squared) so we can grow the channel space and
+# watch whether δ → 105.49 and η → 0.4649 (≤1). If η stays > 1 as channels grow,
+# the unitarity violation is NOT just truncation.
+Jtot = 0.5; E_lab = 14.1; θ = 10.0
+println("\nDOUBLET  Jtot=1/2  E_lab=$(E_lab) MeV (E_cm=$(round((2/3)*E_lab,digits=3)))  θ=$(θ)°")
+println("benchmark: Re(δ)=105.49°, η=0.4649")
+@printf("\n%-6s %-6s %-6s %5s %10s %10s %10s\n", "lmax","λmax","j2b","nch","Re(δ)","η","rel_res")
+for (lmax, λmax, j2b) in [(2,2,1.0), (3,4,2.0), (4,6,2.0)]
+    r = run_point(Jtot=Jtot, E_lab=E_lab, θ_deg=θ, lmax=lmax, λmax=λmax, j2bmax=j2b,
+                  nx=12, ny=30, xmax=24.0, ymax=50.0)
+    δ, η, _ = elastic_delta_eta(r.U_cs, r.lab, Jtot, 1, "λ=0, 𝕊=0.5")
+    @printf("%-6d %-6d %-6.0f %5d %10.3f %10.4f %10.1e\n", lmax, λmax, j2b, r.nch, δ, η, r.rel_res)
+    flush(stdout)
+end
 println("="^78)

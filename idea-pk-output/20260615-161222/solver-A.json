@@ -1,0 +1,85 @@
+{
+  "solver": "A",
+  "stance_summary": "Contrarian/diagonal. The user has spent T1-T8 patching the SAME amplitude estimator (-4u/h2k2 * <phi|V Rxy|psi>) by flipping conventions inside it. That estimator may be the wrong tool, not a mis-tuned one. The eta~1 symptom (no flux loss) is structural, not a sign error: a c-product bilinear form between a complex-scaled outgoing solution and a real-bra source CANNOT lose modulus the way a true asymptotic projection does. I propose paths that abandon or bypass the current estimator rather than tune it.",
+  "anchored_assumption": "That the elastic S-matrix / inelasticity eta is correctly obtained from the volume matrix element f = -4u/(h2 k2) * <phi | V Rxy_31 | psi_total> with the right prefactor/conjugation, so the remaining error is a convention bug INSIDE that formula. The hidden assumption is that this single-component volume integral is even the same object as Lazauskas Eq.16/17. It is not: Eq.16 reads the COEFFICIENT of the outgoing wave at the y-asymptote (a surface/projection extraction with C_n^-1 and e^{3i theta}), and Eq.17 is a DOUBLE volume integral with [V_j+V_k] and e^{6i theta}. swift's bra is psi_in (which already carries F_lambda(qy)), not the bound-pair phi_n projected against the asymptotic outgoing wave. eta~1 is exactly what a mismatched/un-normalized bilinear gives.",
+  "candidates": [
+    {
+      "id": "A1",
+      "one_line": "Stop trusting the volume amplitude entirely; extract eta and delta DIRECTLY from the asymptotic radial behavior of psi_sc in the elastic channel (read S off the wavefunction tail, not off a matrix element).",
+      "first_concrete_step": "In the doublet (lambda=0, S=1/2) elastic channel, pull the radial slice psi_sc(x_deuteron-peak, y) along y at the full mesh. Project the x-dependence onto the deuteron phi_d(x) to get the y-channel function g(y). Above breakup with CS, g(y) ~ (S-1)/2 * C * exp(-i q y e^{i theta}) / y for large y (only the outgoing piece survives because the incoming F is in psi_in). Fit the complex coefficient of exp(-i q y e^{i theta})/y over the plateau region of y, divide out the same coefficient computed analytically from psi_in's incoming F_lambda normalization, and read S = 1 + 2*(that ratio). Report |S| and arg(S)/2. One afternoon: it reuses psi_sc you already compute, adds only a 1-D complex fit.",
+      "cost_estimate": "0.5-1 day. No new solve (reuse existing psi_sc arrays from one full-mesh run, ~220s). Pure post-processing fit in Julia.",
+      "info_gain": "If eta comes out ~0.46: PROVES the solve and physics are right and the entire volume-integral estimator (and its prefactor/C_n/Jacobian) was the bug -> retire it. If eta still ~1 from the raw tail: PROVES the breakup flux is genuinely absent from psi_sc itself (a source-term, energy, or CS-rotation problem upstream of extraction), redirecting all effort away from the amplitude formula. Either branch collapses a huge ambiguity the user cannot currently resolve.",
+      "risk": "The CS tail at y_max=60 with q at 14.1 MeV may be too short/noisy to fit cleanly; mitigated because Lazauskas says 14.1 MeV plateaus in theta in [4,12.5] so the tail should be clean (unlike his 1 MeV warning).",
+      "orthogonality_to_tried": [
+        {"tried_item": "T1", "difference": "T1 fixed the 6j recoupling INSIDE the U-matrix path; A1 never forms U from f at all, it reads S from the wavefunction tail, so no recoupling enters."},
+        {"tried_item": "T2", "difference": "T2 deduplicated S/D deuteron channels in the recoupling; A1 projects on phi_d(x) directly so S/D mixing is handled by the projection, not by channel bookkeeping."},
+        {"tried_item": "T3", "difference": "T3 changed the OPERATOR energy E_cm->E_total; A1 uses q from the asymptotic momentum in the exp factor and does not depend on which energy enters the operator matrix."},
+        {"tried_item": "T4", "difference": "T4 swapped unscaled->scaled V in the amplitude; A1 uses no V at all in extraction."},
+        {"tried_item": "T5", "difference": "T5 toggled c-product vs conjugate in the inner product; A1 fits a complex coefficient of a known exp, no inner product."},
+        {"tried_item": "T6", "difference": "T6 debated the B metric in the matrix element; A1 has no matrix element."},
+        {"tried_item": "T7", "difference": "T7 scanned channel count for the f/U observable; A1 reads the same single elastic channel's tail, a different observable definition entirely."},
+        {"tried_item": "T8", "difference": "T8 checked solver residual; A1 uses the converged psi_sc T8 validated, then extracts differently."}
+      ],
+      "dependencies": "One stored full-mesh psi_sc (already producible). Knowledge of q = sqrt(2 mu E_cm)/hbar and the deuteron channel index. No new solves."
+    },
+    {
+      "id": "A2",
+      "one_line": "Mirror-image the failure: implement Lazauskas Eq.16 ORTHOGONAL-CHANNEL PROJECTION verbatim (C_n^-1, e^{3i theta} Jacobian, |y| exp(-i q_n y e^{i theta}), phi_n*(x e^{-i theta})) as a SEPARATE function and diff it against the current estimator.",
+      "first_concrete_step": "Write compute_amplitude_eq16(psi_sc, phi_d, grid, alpha, q; theta) that does NOT reuse the current path: (a) compute C_n = integral phi_n*(x e^{-i theta}) phi_n(x e^{i theta}) e^{3i theta} d3x on the x-mesh; (b) for the elastic channel, at the largest few y nodes form |y| exp(-i q_n y e^{i theta}) * integral_x phi_n*(x e^{-i theta}) psi_sc(x,y) e^{3i theta} d3x, divide by C_n; (c) that coefficient is f_nm; build S=1+2 i q f. Run on the SAME psi_sc as the current code and print both eta side by side.",
+      "first_concrete_step_note": "Implement as a fresh function per anti-reinvention rule it is a NEW physics object (Eq.16), not a duplicate of the buggy estimator.",
+      "cost_estimate": "1 day. Post-processing only on an existing psi_sc; the x-integrals are small (nx points).",
+      "info_gain": "Direct measurement of how much of the eta error is the missing C_n^-1 normalization and e^{3i theta} Jacobian vs something deeper. If Eq.16 gives eta~0.46: the wiki's exact suspicion (missing C_n / Jacobian) is confirmed and the fix is mechanical. If Eq.16 ALSO gives eta~1 on the same psi_sc: rules out the extraction-normalization hypothesis and proves psi_sc lacks breakup flux (converges with A1's failure branch), a strong joint signal.",
+      "risk": "Getting C_n and the e^{3i theta} measure consistent with swift's existing CS quadrature weights is fiddly; mismatch in the radial measure could fake a normalization error. Mitigate by checking C_n -> 1 when the bound state is normalized at theta=0.",
+      "orthogonality_to_tried": [
+        {"tried_item": "T1", "difference": "Eq.16 projection bypasses the U-matrix 6j recoupling; it reads f directly per channel before any channel-spin transform."},
+        {"tried_item": "T2", "difference": "Eq.16 projects each deuteron channel against its own phi_n with explicit C_n; the S/D double-count question is moot because each n has its own normalization."},
+        {"tried_item": "T3", "difference": "Eq.16 uses asymptotic q_n in the exp, not the operator energy; orthogonal to the E_cm/E_total choice."},
+        {"tried_item": "T4", "difference": "Eq.16 contains NO V matrix element (it is the projection route, not the Green's route); T4's scaled-V question does not arise."},
+        {"tried_item": "T5", "difference": "Eq.16 fixes the conjugation analytically (phi_n*(x e^{-i theta}) with e^{3i theta}), it is not a guessed c-product toggle."},
+        {"tried_item": "T6", "difference": "Eq.16 carries an explicit CS measure e^{3i theta} and C_n, which is precisely the metric question T6 left unresolved, but now imported verbatim from the benchmark not argued from analogy."},
+        {"tried_item": "T7", "difference": "Eq.16 is a different estimator on the same channels, not a channel-count scan."},
+        {"tried_item": "T8", "difference": "Eq.8 is solver-side; A2 is a new extraction on the validated psi_sc."}
+      ],
+      "dependencies": "Existing psi_sc, phi_d on the x-mesh, the CS quadrature weights, q at E_cm. Independent of A3."
+    },
+    {
+      "id": "A3",
+      "one_line": "Change the objective: drop CS for the cross-check and get eta via the Kievsky-Viviani INTEGRAL RELATIONS (tan delta = B/A from interior square-integrable Psi, multichannel K-matrix -> eta), a second independent extraction that never touches swift's <phi|V Rxy|psi> form.",
+      "first_concrete_step": "On a REAL (theta=0), bound-state-style truncated Psi from the same Faddeev machinery, build the two integral-relation functionals B = -(m/h2) <Psi | H-E | F> and A = (m/h2) <Psi | H-E | G_reg>, with F the regular free n-d channel function and G_reg = G(1 - exp(-gamma r)) the regularized irregular one, evaluated in the elastic deuteron channel (project x on phi_d, build F/G in y with the n-d momentum q). For a single channel first reproduce delta; then extend to the 2x2 (elastic + breakup-proxy) block to get a complex/multichannel K and read eta. Start with the single-channel real run to see if delta lands near 105 without CS at all.",
+      "cost_estimate": "2-3 days (most of any candidate). Needs F/G free functions in y (COULCC already available with z1z2=0) and the H-E action on Psi, but no dense CS solve, and runs can be at theta=0 so memory/grid pressure drops.",
+      "info_gain": "Provides a delta/eta that is METHODOLOGICALLY independent of complex scaling AND of the volume amplitude. If KV gives 105/0.46: it both validates the bound-state-trusted machinery for scattering and isolates the entire CS-amplitude pipeline as the fault. If KV gives the SAME wrong eta~1: that is the most informative outcome of all, it implies the truncated model space itself does not contain the breakup configurations (a basis-completeness problem, not an extraction problem) -> redirects to mesh/channel space in y, not formulas.",
+      "risk": "Above breakup the KV integral relations need the multichannel/complex extension (Garrido PRA 2012) which is more involved; the single-channel version may only give delta cleanly and eta needs the harder multichannel block. Higher implementation cost than A1/A2.",
+      "orthogonality_to_tried": [
+        {"tried_item": "T1", "difference": "KV produces K -> S without any 6j collision-matrix recoupling; delta = atan(B/A) directly."},
+        {"tried_item": "T2", "difference": "KV projects Psi on phi_d for the elastic channel; deuteron S/D internal structure enters via the projection, not via separate scattering channels."},
+        {"tried_item": "T3", "difference": "KV uses H-E as an operator inside a bracket with free F/G; there is no separate E_cm-vs-E_total operator-energy knob to mis-set."},
+        {"tried_item": "T4", "difference": "KV has no V Rxy amplitude; the scaled/unscaled V question is absent."},
+        {"tried_item": "T5", "difference": "KV uses real Psi and real F/G (theta=0), no CS c-product conjugation question."},
+        {"tried_item": "T6", "difference": "KV's bracket is <Psi|H-E|F>, a defined functional with its own measure, not the ambiguous <phi|V Rxy|psi> metric T6 debated."},
+        {"tried_item": "T7", "difference": "KV is a different extraction principle; convergence is studied in F/G regularization gamma and channel block size, not the f/U channel count."},
+        {"tried_item": "T8", "difference": "KV at theta=0 changes the whole linear problem; not a residual recheck of the CS solve."}
+      ],
+      "dependencies": "Real-axis (theta=0) Faddeev Psi from existing machinery, COULCC F/G with z1z2=0, the H-E action (T+V+VRxy already assembled). Wiki has the canonical Kievsky PRC 81 (2010) + Garrido PRA 2012 derivations."
+    },
+    {
+      "id": "A4",
+      "one_line": "Invert the test: prove the extraction in the ISOLATED two-body warm-up (Lazauskas Table I) where there is NO deuteron, NO recoupling, NO breakup, so any eta!=1 / delta mismatch can ONLY be the CS amplitude normalization, before touching n-d again.",
+      "first_concrete_step": "Set up the 2-body NN 1S0 CS problem at E_cm=1 MeV with MT-only (r_max=100, theta=10, ~30-40 mesh pts) using swift's existing twobody/CS matrix builders, and extract delta with the SAME amplitude code path swift uses for n-d (the analog volume estimator and prefactor). Target is the exact delta=63.512 deg from Table I. A pure elastic 2-body case MUST give |S|=1 by unitarity; if swift's estimator returns |S|!=1 here, the normalization/Jacobian bug is proven in the simplest possible setting and can be fixed against a 5-digit reference with seconds-long runs.",
+      "cost_estimate": "0.5-1 day. Runs are tiny (2-body, seconds each), fast iteration, exact analytic/tabulated reference.",
+      "info_gain": "Isolates whether the bug is in the AMPLITUDE NORMALIZATION (will show as wrong delta and/or |S|!=1 in the 2-body case) or specifically in the THREE-BODY breakup capture (2-body would be perfect, n-d still broken). If 2-body delta matches to 5 digits AND |S|=1: the entire estimator-normalization hypothesis is killed and the n-d eta problem is genuinely 3-body breakup flux missing from psi_sc (points to A1/A3 failure branch). If 2-body delta is off: gives a 5-digit-reference debugging target orders of magnitude cheaper than the 220s n-d runs.",
+      "risk": "swift's amplitude code is written for the deuteron-channel n-d structure; adapting it to a bare 2-body channel needs a small harness. Low physics risk, the 2-body MT 1S0 is textbook.",
+      "orthogonality_to_tried": [
+        {"tried_item": "T1", "difference": "2-body has no recoupling at all, so it tests the prefactor/normalization in isolation from the 6j that T1 fixed."},
+        {"tried_item": "T2", "difference": "No deuteron S/D channels exist in 2-body NN; the double-count question T2 addressed cannot occur, cleanly separating it out."},
+        {"tried_item": "T3", "difference": "2-body has a single trivial energy (no bound-pair binding to add), so the E_cm/E_total ambiguity T3 hit is removed and any residual error is purely extraction."},
+        {"tried_item": "T4", "difference": "Still uses scaled V but in a setting where the exact answer is known to 5 digits, turning T4's guess into a verifiable measurement."},
+        {"tried_item": "T5", "difference": "2-body unitarity forces |S|=1, giving an absolute check on the c-product/conjugation choice T5 could only compare relatively."},
+        {"tried_item": "T6", "difference": "The B-metric question becomes decidable: only the metric that yields |S|=1 and delta=63.512 is correct, vs T6's analogy argument."},
+        {"tried_item": "T7", "difference": "Single 2-body channel, not a 3-body channel-count scan."},
+        {"tried_item": "T8", "difference": "Tiny well-conditioned 2-body solve, a different (simpler) linear system, not a residual recheck of the big n-d solve."}
+      ],
+      "dependencies": "swift twobody.jl + CS matrix builders (exist), COULCC F/G z1z2=0 (exist), a small 2-body amplitude harness reusing the n-d prefactor logic. Wiki Table I gives the 5-digit target."
+    }
+  ],
+  "convergence_note": "The methodologist co-solver will very likely also propose A4 (the 2-body Table I warm-up is the textbook cheapest-decisive isolation test and is explicitly flagged in the wiki). They may also reach A2 (implement Eq.16/17 verbatim) since the wiki spells out the exact missing C_n / e^{3i theta} factors. Less likely to independently propose A1 (read S off the raw psi_sc tail, bypassing every estimator) or A3 (Kievsky-Viviani at theta=0, dropping CS), which are the more contrarian diagonal moves."
+}

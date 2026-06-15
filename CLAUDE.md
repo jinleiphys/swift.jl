@@ -2,6 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ 2026-06-15 UPDATE — read [TODO.md](TODO.md) for the current state.** The code was cleaned to a
+> single fastest path; several descriptions below are now stale. Key changes:
+> - **M⁻¹ preconditioner is V-sector-only.** `matrices.jl` no longer has `M_inverse_operator`,
+>   `M_inverse_operator_cached`, `precompute_M_inverse_cache`, `MInverseCache` — only the V-sector trio
+>   (`MInverseCacheVSector`, `precompute_M_inverse_cache_vsector`, `M_inverse_operator_cached_vsector`)
+>   + `group_channels_by_v_sector`. The `use_vsector` and `use_arnoldi` toggles are gone (always V-sector
+>   + Arnoldi). `malfiet_tjon_solve_optimized` / `compute_lambda_eigenvalue_optimized` signatures slimmed.
+> - **Scattering `solve_scattering_equation` is GMRES-only** with the V-sector M⁻¹ preconditioner; the
+>   dense `:lu` method and the `method=` kwarg were REMOVED (LU is intractable at production size).
+> - **ħ²/m_N = 41.471 MeV·fm² uniformly** (`twobody.jl` now uses equal nucleon masses; matches rimas).
+> - **Deleted files**: `compare_solvers.jl`, `threebodybound.jl`, `Rxy_matrix_cached.jl`, `spline.jl`,
+>   `3Npot/UIX.jl` (non-optimized UIX; `UIX_optimized.jl` is the only UIX now).
+> - **New files**: `benchmark_rimas.jl` (AV18 3H/3He jx scan vs rimas), `benchmark_nd_scatt.jl` (n-d MT
+>   vs Lazauskas PRC 84 Tab.III), `test_scatt_diag.jl` / `test_scatt_diag2.jl` (scattering diagnostics).
+> - **Open bug**: n-d elastic scattering extracts η≈1 instead of the benchmark η=0.4649. Localized to the
+>   S-matrix EXTRACTION (ψ_sc correctly carries ~21% breakup flux; the amplitude formula is missing the
+>   deuteron CS c-norm C_n⁻¹ + CS Jacobians from Lazauskas Eq.16/17). See TODO.md "▶ NEXT".
+
 ## Project Overview
 
 This is a Julia-based nuclear physics framework implementing the Faddeev method in coordinate (R-) space for three-body quantum mechanical bound-state and scattering calculations. Specializes in nuclear three-body problems (³H, ³He, n+d) on a Laguerre + Gauss-Legendre basis with multi-channel coupling, realistic NN potentials (AV18, AV14, Nijmegen, Minnesota), the Urbana IX three-nucleon force, and complex scaling for scattering above breakup threshold.
