@@ -51,7 +51,8 @@ function run_point(; Jtot, E_lab, θ_deg, potname="MT",
                s1,s2,s3, t1,t2,t3, MT, j2bmax)
     grid = initialmesh(nθ, nx, ny, xmax, ymax, alpha)
 
-    V              = V_matrix_optimized(α, grid, potname)
+    # Scaled V for the amplitude matrix element (must match the complex-scaled solve).
+    V              = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg)
     Rxy, Rxy_31    = Rxy_matrix_optimized(α, grid)
 
     bE, bψ = bound2b(grid, potname, θ_deg=θ_deg)
@@ -60,8 +61,12 @@ function run_point(; Jtot, E_lab, θ_deg, potname="MT",
     E_d        = real(bE[1])
 
     θ_rad = θ_deg * π / 180.0
+    # E = E_cm = n-d relative kinetic energy (sets the incoming momentum q and the
+    # amplitude k). The Faddeev OPERATOR uses the total 3-body energy E_total = E_cm + E_d
+    # (E_d < 0), i.e. the deuteron binding must enter the energy balance.
+    E_total = E + E_d
     ψ_in  = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2, θ=θ_rad)
-    ψ_sc, A, b = solve_scattering_equation(E, α, grid, potname, ψ_in,
+    ψ_sc, A, b = solve_scattering_equation(E_total, α, grid, potname, ψ_in,
                                            θ_deg=θ_deg)
     res_norm = norm(A*ψ_sc - b)
 

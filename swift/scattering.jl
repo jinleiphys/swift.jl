@@ -284,7 +284,12 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
                 label = "³D₁, λ=$(Int(round(λ_channel)))"
             end
 
-            if matched_2b_channel > 0
+            # Only keep deuteron components the bound state actually occupies. The (l₁₂)
+            # split (³S₁ vs ³D₁) is INTERNAL to the deuteron, not a separate scattering
+            # channel: components with the same (λ, J₃) would otherwise be double-counted in
+            # the channel-spin recoupling. For a central S-wave potential (e.g. MT) the ³D₁
+            # amplitude is zero, so only ³S₁ survives.
+            if matched_2b_channel > 0 && norm(φ_d_matrix[:, matched_2b_channel]) > 1e-8
                 push!(deuteron_channels, iα)
                 push!(deuteron_2b_channels, matched_2b_channel)
                 push!(channel_labels, label)
@@ -339,8 +344,10 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
             # Get V × Rxy_31 × ψ_total for the incoming channel
             V_Rxy_ψ_component = temp2[idx_in_start:idx_in_end]
 
-            # Compute inner product ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩_{α₀_in}
-            inner_product = dot(ψ_out_component, V_Rxy_ψ_component)
+            # Compute inner product ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩_{α₀_in}.
+            # Complex-scaling c-product: NO complex conjugation (the operator is non-Hermitian
+            # under r → r e^{iθ}; same convention as V_matrix_optimized_scaled / COLOSS).
+            inner_product = transpose(ψ_out_component) * V_Rxy_ψ_component
 
             # Apply prefactor
             f_matrix[i_out, i_in] = prefactor * inner_product
@@ -482,24 +489,15 @@ function recouple_to_channel_spin(U_matrix, α, deuteron_channels)
                     continue
                 end
 
-                # Dimension factor: √(ĵ₃𝕊̂) = √((2J₃+1)(2𝕊+1))
+                # Unitary recoupling coefficient
+                #   ⟨(λ s₃)J₃, J₁₂; J | (J₁₂ s₃)𝕊, λ; J⟩
+                #     = (-1)^{λ+s₃+J₁₂+J} √((2J₃+1)(2𝕊+1)) {λ s₃ J₃; J₁₂ J 𝕊}
+                # NOTE: WignerSymbols.wigner6j takes PHYSICAL angular momenta, NOT 2j.
+                s₃ = 0.5
                 dim_factor = sqrt((2*J₃ + 1) * (2*𝕊 + 1))
-
-                # Phase: (-)^{2J-J₃}
-                # Note: For recoupling we don't square J₃ here
-                phase = (-1)^Int(round(2*J_val - J₃))
-
-                # 6-j symbol: {λ s₃ J₃; J₁₂ J 𝕊}
-                # Convert to twice-j representation
-                λ_2j = Int(round(2 * λ))
-                s₃_2j = 1  # s₃ = 1/2, so 2*s₃ = 1
-                J₃_2j = Int(round(2 * J₃))
-                J₁₂_2j = Int(round(2 * J₁₂))
-                J_2j = Int(round(2 * J_val))
-                𝕊_2j = Int(round(2 * 𝕊))
-
+                phase = (-1)^Int(round(λ + s₃ + J₁₂ + J_val))
                 try
-                    sixj = wigner6j(λ_2j, s₃_2j, J₃_2j, J₁₂_2j, J_2j, 𝕊_2j)
+                    sixj = wigner6j(λ, s₃, J₃, J₁₂, J_val, 𝕊)
                     T[i, j] = dim_factor * phase * sixj
                 catch e
                     T[i, j] = 0.0
