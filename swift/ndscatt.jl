@@ -131,18 +131,12 @@ println()
 # STEP 5: SOLVE SCATTERING EQUATION
 # ============================================================================
 
-println("Step 5: Solving inhomogeneous scattering equation...")
-
-# Choose solution method
-method = :lu      # Options: :lu (direct) or :gmres (iterative with preconditioner)
-
-println("  Solution method: $method")
+println("Step 5: Solving inhomogeneous scattering equation (preconditioned GMRES)...")
 println()
 
 # Solve: [E*B - T - V*(I + Rxy)] c = 2*V*Rxy_31*φ
 c, A, b = solve_scattering_equation(E_scatt, α, grid, potname, φ_θ,
-                                     θ_deg=θ_deg,
-                                     method=method)
+                                     θ_deg=θ_deg)
 
 println("\nSolution obtained:")
 println("  Solution vector size: $(length(c))")

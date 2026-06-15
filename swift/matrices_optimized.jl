@@ -680,7 +680,7 @@ For θ=0, automatically falls back to standard V_matrix_optimized (faster).
 V = V_matrix_optimized_scaled(α, grid, "AV18", θ_deg=10.0)
 ```
 """
-function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothing, return_components=false)
+function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothing, return_components=false, return_vsector_blocks=false)
     # For θ=0, fall back to standard implementation (no complex scaling, faster and exact)
     if θ_deg == 0.0
         return V_matrix_optimized(α, grid, potname, return_components=return_components)
@@ -729,6 +729,14 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
     V_x_diag_channels = Vector{Matrix{Complex{Float64}}}(undef, α.nchmax)
     for iα in 1:α.nchmax
         V_x_diag_channels[iα] = zeros(Complex{Float64}, grid.nx, grid.nx)
+    end
+
+    # Per-pair within-x V blocks for the V-sector preconditioner (Lazauskas split).
+    # Same selection rules as the assembly loop populate the within-sector entries;
+    # cross-sector entries stay zero and are never read by the preconditioner.
+    V_x_full = Matrix{Matrix{Complex{Float64}}}(undef, α.nchmax, α.nchmax)
+    for j in 1:α.nchmax, i in 1:α.nchmax
+        V_x_full[i, j] = zeros(Complex{Float64}, grid.nx, grid.nx)
     end
 
     println("Computing matrix elements with backward-rotated basis functions...")
@@ -857,6 +865,8 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
             if i == j
                 V_x_diag_channels[i] = copy(V_x_ij)
             end
+            # Store the full within-x block for the V-sector preconditioner
+            V_x_full[i, j] = copy(V_x_ij)
 
             # Compute block Kronecker product
             V_block = kron(V_x_ij, Ny)
@@ -873,7 +883,9 @@ function V_matrix_optimized_scaled(α, grid, potname; θ_deg=0.0, n_gauss=nothin
 
     println("Complex-scaled potential matrix computed successfully.")
 
-    if return_components
+    if return_components && return_vsector_blocks
+        return Vmatrix, V_x_diag_channels, V_x_full
+    elseif return_components
         return Vmatrix, V_x_diag_channels
     else
         return Vmatrix

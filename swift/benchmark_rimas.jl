@@ -1,8 +1,9 @@
 #!/usr/bin/env julia
 # Cross-validation scan vs Lazauskas (rimas) benchmark tables, AV18 no 3NF, T=1/2.
 # Scans jx_max (= j2bmax) = 1..6 for 3H (MT=-1/2) and 3He (MT=+1/2, point Coulomb).
-# Convention note: swift.jl uses hbar^2/m_N = 41.468 MeV fm^2 vs rimas 41.471
-# => expect a systematic ~5-6 keV under-binding, NOT a bug.
+# Convention: swift.jl uses hbar^2/m_N = 41.471 MeV fm^2 (= rimas, equal nucleon masses,
+# m_N = 1.0079713395678829 amu in both the 2-body and 3-body kinetic terms).
+# Residual ~5-6 keV under-binding is from the nx=ny=20 mesh truncation, NOT the m_N convention.
 
 using LinearAlgebra
 using Printf

@@ -70,7 +70,9 @@ Compute the left-hand side matrix A = E*B - T - V*(I + Rxy) for scattering equat
 - `V`: Potential matrix
 - `Rxy`: Total rearrangement matrix (Rxy_31 + Rxy_32)
 - `Rxy_31`: Rearrangement matrix from coordinate set 1 to 3
-- `Tx_ch`, `Ty_ch`, `V_x_diag_ch`, `Nx`, `Ny`: Component matrices for M_inverse_operator
+- `Tx_ch`, `Ty_ch`, `Nx`, `Ny`: Component matrices for the V-sector M⁻¹ preconditioner
+- `V_x_diag_ch`: Per-channel diagonal V blocks (kept for diagnostics)
+- `V_x_full`: Per-pair within-x V blocks for the V-sector M⁻¹ cache
 """
 function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
     N = α.nchmax * grid.nx * grid.ny
@@ -83,12 +85,15 @@ function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
     println("  Computing kinetic energy matrix T...")
     T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true, θ_deg=θ_deg)
 
-    # Compute potential matrix V with components
+    # Compute potential matrix V with components.
+    # V_x_full = per-pair within-x V blocks, needed by the V-sector M⁻¹ preconditioner.
     println("  Computing potential matrix V...")
     if θ_deg == 0.0
         V, V_x_diag_ch = V_matrix_optimized(α, grid, potname, return_components=true)
+        V_x_full = V_x_pair_blocks(α, grid, potname)
     else
-        V, V_x_diag_ch = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, return_components=true)
+        V, V_x_diag_ch, V_x_full = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg,
+                                                             return_components=true, return_vsector_blocks=true)
     end
 
     # Compute overlap matrix B
@@ -113,16 +118,16 @@ function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
 
     println("  Scattering matrix computed successfully.")
 
-    return A, B, T, V, Rxy, Rxy_31, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny
+    return A, B, T, V, Rxy, Rxy_31, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny, V_x_full
 end
 
 """
-    solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, method=:lu)
+    solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0)
 
-Solve the inhomogeneous scattering equation: [E*B - T - V*(I + Rxy)] c = b
-
-For GMRES method, uses M^{-1} = [E*B - T - V_αα]^{-1} as left preconditioner,
-where V_αα is the diagonal potential (within-channel coupling only).
+Solve the inhomogeneous scattering equation [E*B - T - V*(I + Rxy)] c = b by
+preconditioned GMRES. The left preconditioner is the V-sector block-diagonal
+M^{-1} (Lazauskas split): M = E*B - T - V (full within-sector V), the same fast
+cache used by the bound-state solver. Dense LU is intractable at production size.
 
 # Arguments
 - `E`: Scattering energy (MeV)
@@ -131,7 +136,6 @@ where V_αα is the diagonal potential (within-channel coupling only).
 - `potname`: Nuclear potential name (e.g., "AV18")
 - `φ_θ`: Initial state vector (from compute_initial_state_vector)
 - `θ_deg`: Complex scaling angle in degrees (default 0)
-- `method`: Solution method (:lu for LU factorization, :gmres for preconditioned GMRES)
 
 # Returns
 - `c`: Solution vector
@@ -140,58 +144,41 @@ where V_αα is the diagonal potential (within-channel coupling only).
 
 # Example
 ```julia
-# Setup
 α = α3b(J=1/2, T=1/2, parity=1)
 grid = initialmesh(nx=20, ny=20, xmax=16, ymax=16, nθ=12)
-
-# Compute initial state
 bound_energies, bound_wavefunctions = bound2b(grid, "AV18")
 φ_d = ComplexF64.(bound_wavefunctions[1])
 E = 10.0  # MeV
 φ_θ = compute_initial_state_vector(grid, α, φ_d, E, z1z2=1.0)
-
-# Solve scattering equation with GMRES and M^{-1} preconditioner
-c, A, b = solve_scattering_equation(E, α, grid, "AV18", φ_θ, method=:gmres)
+c, A, b = solve_scattering_equation(E, α, grid, "AV18", φ_θ)
 ```
 """
-function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0, method=:lu)
+function solve_scattering_equation(E, α, grid, potname, φ_θ; θ_deg=0.0)
     println("\n" * "="^70)
     println("SOLVING INHOMOGENEOUS SCATTERING EQUATION")
     println("="^70)
 
     # Compute scattering matrix and component matrices
-    A, B, T, V, Rxy, Rxy_31, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny = compute_scattering_matrix(E, α, grid, potname, θ_deg=θ_deg)
+    A, B, T, V, Rxy, Rxy_31, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny, V_x_full = compute_scattering_matrix(E, α, grid, potname, θ_deg=θ_deg)
 
     # Compute right-hand side: b = 2 * V * Rxy_31 * φ
     # Factor of 2 from Faddeev symmetry (two equivalent rearrangement channels)
     println("\nComputing right-hand side b = 2 * V * Rxy_31 * φ...")
     b = compute_VRxy_phi(V, Rxy_31, φ_θ)
 
-    # Solve linear system A*c = b
-    println("\nSolving linear system A*c = b...")
-    println("  Method: $method")
+    # Solve A*c = b by GMRES with the V-sector block-diagonal M^{-1} preconditioner
+    # (Lazauskas split): M = E*B - T - V (full within-sector V), block-diagonal over
+    # V-sectors. Same cache as the bound-state solver. Dense LU is intractable here.
+    println("\nSolving linear system A*c = b (preconditioned GMRES)...")
     println("  System size: $(length(b))")
+    println("  Building V-sector M^{-1} cache...")
+    M_cache    = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
+    M_inv_func = matrices.M_inverse_operator_cached_vsector(E, M_cache)
+    M_inv_op   = PreconditionerOperator{ComplexF64}(M_inv_func, length(b))
 
-    if method == :lu
-        println("  Using LU factorization...")
-        c = A \ b
-    elseif method == :gmres
-        println("  Using GMRES iterative solver with M^{-1} preconditioner...")
-
-        # Compute M^{-1} preconditioner: M = E*B - T - V_αα (diagonal potential only)
-        println("  Computing M^{-1} preconditioner...")
-        M_inv_func = matrices.M_inverse_operator(α, grid, E, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-
-        # Wrap function in PreconditionerOperator for GMRES
-        M_inv_op = PreconditionerOperator{ComplexF64}(M_inv_func, length(b))
-
-        # Solve with left preconditioner: M^{-1} * A * c = M^{-1} * b
-        println("  Running GMRES with preconditioner...")
-        c, history = gmres(A, b, Pl=M_inv_op, log=true, verbose=true, maxiter=200, reltol=1e-6)
-        println("  GMRES converged in $(history.iters) iterations")
-    else
-        error("Unknown method: $method. Use :lu or :gmres")
-    end
+    println("  Running GMRES with preconditioner...")
+    c, history = gmres(A, b, Pl=M_inv_op, log=true, verbose=true, maxiter=200, reltol=1e-6)
+    println("  GMRES converged in $(history.iters) iterations")
 
     println("\nSolution computed successfully.")
     println("="^70)

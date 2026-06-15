@@ -91,8 +91,8 @@ println()
 # Solve scattering equation to get ψ_sc
 # Solves: [E*B - T - V*(I + Rxy)] ψ_sc = 2*V*Rxy_31*φ
 ψ_sc, A_matrix, b_vector = solve_scattering_equation(E, α, grid, "MT", ψ_in,
-                                                       θ_deg=θ_deg, method=:lu)
-println("  Scattering solution ψ_sc computed via LU factorization")
+                                                       θ_deg=θ_deg)
+println("  Scattering solution ψ_sc computed via preconditioned GMRES")
 println("  Residual norm: ||A*ψ_sc - b|| = $(norm(A_matrix * ψ_sc - b_vector))")
 println()
 

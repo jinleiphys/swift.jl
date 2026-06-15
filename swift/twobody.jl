@@ -13,9 +13,11 @@ export bound2b
 
 
 const amu= 931.49432 # MeV
-const mn=1.008665 # amu
-const mp=1.007276 # amu 
-const μ=mn*mp/(mn+mp) # amu
+# Equal nucleon masses fixed by ħ²/m_N = 41.471 MeV·fm² (rimas convention; matches the
+# 3-body kinetic in matrices.jl). m_N = ħ²/(41.471·amu) = 1.0079713395678829 amu.
+const mn=1.0079713395678829 # amu
+const mp=1.0079713395678829 # amu
+const μ=mn*mp/(mn+mp) # amu  (= m_N/2, so ħ²/(2μ) = ħ²/m_N = 41.471)
 const ħ=197.3269718 # MeV. fm
 
 

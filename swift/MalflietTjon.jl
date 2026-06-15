@@ -77,13 +77,14 @@ struct RHSCache
 end
 
 """
-    precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing)
+    precompute_RHS_cache(V, Rxy, α, grid; V_UIX=nothing)
 
-Precompute energy-independent RHS matrix: RHS = (V - V_αα) + V*R (+ UIX).
+Precompute the energy-independent RHS matrix for the V-sector split:
+RHS = V*Rxy (+ UIX). The full V is absorbed into the V-sector preconditioner M,
+so no V residual or V_αα subtraction appears here.
 
 # Arguments
 - `V`: Full potential matrix
-- `V_x_diag_ch`: Vector of diagonal potential matrices per channel
 - `Rxy`: Rearrangement matrix
 - `α`: Channel structure
 - `grid`: Mesh structure
@@ -92,69 +93,26 @@ Precompute energy-independent RHS matrix: RHS = (V - V_αα) + V*R (+ UIX).
 # Returns
 - `RHSCache`: Cached RHS matrix for reuse at multiple energies
 """
-function precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=nothing, use_vsector::Bool=false)
+function precompute_RHS_cache(V, Rxy, α, grid; V_UIX=nothing)
     nα = α.nchmax
     nx = grid.nx
     ny = grid.ny
     n_total = nα * nx * ny
 
-    # SPARSE OPTIMIZATION: V is 99.7% sparse! Convert to sparse format for massive speedup
-    # Check sparsity and convert if beneficial
-    n_elements = n_total * n_total
+    # SPARSE OPTIMIZATION: V is ~99.7% sparse → sparse-dense product is much faster.
     n_nonzero = count(!iszero, V)
-    sparsity = 100 * (1 - n_nonzero / n_elements)
-
+    sparsity = 100 * (1 - n_nonzero / (n_total * n_total))
     if sparsity > 90.0
-        # Convert to sparse matrix (V is 99.7% sparse → huge speedup!)
-        V_sparse = sparse(V)
+        V_compute = sparse(V)
         println("  V matrix converted to sparse ($(round(sparsity, digits=1))% zeros, $(n_nonzero) nonzeros)")
-        V_compute = V_sparse
     else
         V_compute = V
     end
 
-    # Step 1: Compute V*Rxy using sparse matrix multiplication
-    # Sparse-Dense multiplication is MUCH faster than Dense-Dense!
-    VRxy = V_compute * Rxy
-
-    if use_vsector
-        # V-sector mode: M absorbs the full V (block-diagonal in V-sectors).
-        # RHS = V*Rxy + V_UIX  (no V residual, no V_αα subtraction).
-        RHS_matrix = Matrix(VRxy)  # ensure dense for downstream usage
-        if V_UIX !== nothing
-            RHS_matrix .+= V_UIX
-        end
-        return RHSCache(RHS_matrix, n_total)
-    end
-
-    # Strict channel-diagonal mode (current default):
-    # RHS = (V - V_αα) + V*Rxy + V_UIX
-
-    # Step 2: Start with RHS = V + V*Rxy (single allocation + in-place addition)
-    RHS_matrix = V + VRxy  # Allocate once and compute sum
-
-    # Step 3: Add UIX if provided (in-place)
+    # RHS = V*Rxy (+ UIX). V is fully absorbed into the V-sector preconditioner M.
+    RHS_matrix = Matrix(V_compute * Rxy)
     if V_UIX !== nothing
         RHS_matrix .+= V_UIX
-    end
-
-    # Step 4: Subtract V_αα WITHOUT kron (avoid massive temporary allocations!)
-    # V_αα[iα, iα] = V_x_diag_ch[iα] ⊗ I_y means:
-    # Element (i,j) in channel block iα = V_x[ix, jx] * δ_{iy, jy}
-    for iα in 1:nα
-        block_start = (iα-1) * nx * ny
-
-        # Subtract V_αα elements directly without building the full block
-        for ix in 1:nx, jx in 1:nx
-            V_x_val = V_x_diag_ch[iα][ix, jx]
-            i_base = block_start + (ix-1)*ny
-            j_base = block_start + (jx-1)*ny
-
-            # Kronecker product with I_y: only subtract on y-diagonal
-            @simd for iy in 1:ny
-                @inbounds RHS_matrix[i_base + iy, j_base + iy] -= V_x_val
-            end
-        end
     end
 
     return RHSCache(RHS_matrix, n_total)
@@ -375,249 +333,95 @@ function arnoldi_eigenvalue(A, v0, m; tol=1e-6, maxiter=300, verbose_arnoldi=fal
 end
 
 """
-    compute_lambda_eigenvalue_optimized(E0, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                       verbose=false, use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-6,
-                                       previous_eigenvector=nothing, V_UIX=nothing)
+    compute_lambda_eigenvalue_optimized(E0, α, grid; verbose=false,
+                                       krylov_dim=50, arnoldi_tol=1e-6,
+                                       previous_eigenvector=nothing, M_cache, RHS_cache)
 
-Optimized version using M⁻¹ preconditioner: λ(E0) [c] = M⁻¹(E0) * (V - V_αα + V*R + UIX) [c]
-
-Uses M⁻¹ = [E0*B - T - V_αα]⁻¹ with diagonal potential only for faster computation.
+Compute the dominant eigenvalue λ(E0) of the Malfiet-Tjon kernel using the
+precomputed V-sector M⁻¹ cache and RHS cache: λ(E0) [c] = M⁻¹(E0) * RHS [c],
+with M = E0*B − T − V (V-sector block-diagonal) and RHS = V*Rxy (+ UIX).
 
 # Returns
 - `λ`: Dominant eigenvalue
 - `eigenvec`: Corresponding eigenvector
 - `arnoldi_iters`: Number of Arnoldi iterations
 """
-function compute_lambda_eigenvalue_optimized(E0::Float64, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                            verbose::Bool=false, use_arnoldi::Bool=true,
+function compute_lambda_eigenvalue_optimized(E0::Float64, α, grid;
+                                            verbose::Bool=false,
                                             krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                             previous_eigenvector::Union{Nothing, Vector}=nothing,
-                                            V_UIX=nothing,
-                                            M_cache::Union{Nothing, matrices.MInverseCache, matrices.MInverseCacheVSector}=nothing,
-                                            RHS_cache::Union{Nothing, RHSCache}=nothing)
+                                            M_cache::matrices.MInverseCacheVSector,
+                                            RHS_cache::RHSCache)
 
-    # Compute M⁻¹ using the efficient implementation. Two cache flavours:
-    #   - MInverseCache:        strict channel-diagonal M = E·B − T − V_αα
-    #   - MInverseCacheVSector: V-sector block-diagonal M = E·B − T − V (full V)
-    if M_cache !== nothing
-        # Use cached version (FAST!)
-        if M_cache isa matrices.MInverseCacheVSector
-            if verbose
-                print("  Computing M⁻¹ preconditioner (V-sector cached)... ")
-                @time M_inv_op = matrices.M_inverse_operator_cached_vsector(E0, M_cache)
-            else
-                M_inv_op = matrices.M_inverse_operator_cached_vsector(E0, M_cache)
-            end
-        else
-            if verbose
-                print("  Computing M⁻¹ preconditioner (cached)... ")
-                @time M_inv_op = matrices.M_inverse_operator_cached(E0, M_cache)
-            else
-                M_inv_op = matrices.M_inverse_operator_cached(E0, M_cache)
-            end
-        end
+    # V-sector block-diagonal M⁻¹ preconditioner (Lazauskas split): M = E·B − T − V
+    # (full V, block-diagonal across V-sectors). The only flavour.
+    if verbose
+        print("  Computing M⁻¹ preconditioner (V-sector cached)... ")
+        @time M_inv_op = matrices.M_inverse_operator_cached_vsector(E0, M_cache)
     else
-        # Fallback to non-cached version (SLOW). Only strict-channel non-cached path exists.
-        if verbose
-            print("  Computing M⁻¹ preconditioner (non-cached)... ")
-            @time M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-        else
-            M_inv_op = M_inverse_operator(α, grid, E0, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-        end
+        M_inv_op = matrices.M_inverse_operator_cached_vsector(E0, M_cache)
     end
 
-    # Compute RHS matrix: (V - V_αα) + V*R + UIX
-    # This is energy-independent and can be cached!
-    nα = α.nchmax
-    nx = grid.nx
-    ny = grid.ny
-    n_total = nα * nx * ny
-
-    if RHS_cache !== nothing
-        # Use cached RHS matrix (FAST!)
-        if verbose
-            println("  Using cached RHS matrix (energy-independent)")
-        end
-        RHS_matrix = RHS_cache.RHS_matrix
-    else
-        # Build RHS matrix from scratch (SLOW - includes expensive V*Rxy multiplication)
-        if verbose
-            print("  Building RHS matrix from scratch... ")
-            build_time = @elapsed begin
-                # Build V_αα as block-diagonal matrix
-                V_diag = zeros(n_total, n_total)
-                for iα in 1:nα
-                    idx_start = (iα-1) * nx * ny + 1
-                    idx_end = iα * nx * ny
-
-                    # V_αα for this channel is V_x_diag_ch[iα] ⊗ I_y
-                    V_diag_block = kron(V_x_diag_ch[iα], Matrix{Float64}(I, ny, ny))
-                    V_diag[idx_start:idx_end, idx_start:idx_end] = V_diag_block
-                end
-
-                # Compute the RHS: V - V_αα + V*R + UIX
-                V_off_diag = V - V_diag  # Off-diagonal channel coupling
-                VRxy = V * Rxy           # Expensive 3600×3600 matrix multiplication!
-
-                # Build the full RHS
-                RHS_matrix = V_off_diag + VRxy
-
-                # Add UIX three-body force if provided
-                if V_UIX !== nothing
-                    RHS_matrix = RHS_matrix + V_UIX
-                end
-            end
-            println("$(round(build_time, digits=3))s")
-        else
-            # Non-verbose version
-            V_diag = zeros(n_total, n_total)
-            for iα in 1:nα
-                idx_start = (iα-1) * nx * ny + 1
-                idx_end = iα * nx * ny
-                V_diag_block = kron(V_x_diag_ch[iα], Matrix{Float64}(I, ny, ny))
-                V_diag[idx_start:idx_end, idx_start:idx_end] = V_diag_block
-            end
-
-            V_off_diag = V - V_diag
-            VRxy = V * Rxy
-            RHS_matrix = V_off_diag + VRxy
-
-            if V_UIX !== nothing
-                RHS_matrix = RHS_matrix + V_UIX
-            end
-        end
+    # Energy-independent RHS matrix (RHS = V*Rxy + UIX), always supplied via the cache.
+    n_total = α.nchmax * grid.nx * grid.ny
+    if verbose
+        println("  Using cached RHS matrix (energy-independent)")
     end
+    RHS_matrix = RHS_cache.RHS_matrix
 
     try
-        if use_arnoldi
-            # MATRIX-FREE APPROACH: Don't precompute M⁻¹ * RHS matrix
-            # Instead, define K as a composition of operators for memory efficiency
-            # K(x) = M⁻¹ * RHS_matrix * x (apply operations sequentially)
+        # Matrix-free operator K(E) = M⁻¹ * RHS (RHS = V*Rxy + UIX), applied sequentially
+        # so the dense (n_total × n_total) preconditioned matrix is never formed (it is
+        # intractable to diagonalise at production size).
+        K = x -> M_inv_op(RHS_matrix * x)
+        if verbose
+            println("  Using matrix-free operator K(E) = M⁻¹ * RHS  (RHS = V*Rxy + UIX)")
+        end
 
-            # Define the linear operator K(E) as a matrix-free function
-            K = function(x)
-                # Step 1: Apply RHS matrix to vector
-                temp = RHS_matrix * x
-                # Step 2: Apply M⁻¹ to the result
-                return M_inv_op(temp)
-            end
+        n = n_total
 
-            if verbose
-                println("  Using matrix-free operator K(E) = M⁻¹ * (V - V_αα + V*R + UIX)")
-            end
-
-            # Generate initial vector
-            n = n_total
-
-            # Use multiple strategies for initial vector
-            v0_strategies = []
-
-            # Strategy 1: Use previous eigenvector if available
-            if previous_eigenvector !== nothing && length(previous_eigenvector) == n
-                push!(v0_strategies, () -> begin
-                    v = ComplexF64.(previous_eigenvector)
-                    v / norm(v)
-                end)
-            end
-
-            # Strategy 2: Random Gaussian vector
+        # Initial-vector strategies: reuse the previous eigenvector, then random Gaussian.
+        v0_strategies = []
+        if previous_eigenvector !== nothing && length(previous_eigenvector) == n
             push!(v0_strategies, () -> begin
-                Random.seed!(42)
-                v = randn(ComplexF64, n)
+                v = ComplexF64.(previous_eigenvector)
                 v / norm(v)
             end)
+        end
+        push!(v0_strategies, () -> begin
+            Random.seed!(42)
+            v = randn(ComplexF64, n)
+            v / norm(v)
+        end)
 
-            λ, eigenvec, converged, iterations = NaN, nothing, false, 0
-
-            # Try different initial vectors if first attempt fails
-            for (i, strategy) in enumerate(v0_strategies)
-                v0 = strategy()
-                strategy_name = if i == 1 && previous_eigenvector !== nothing
-                    "previous eigenvector"
-                else
-                    "random Gaussian"
+        λ, eigenvec = NaN, nothing
+        for (i, strategy) in enumerate(v0_strategies)
+            v0 = strategy()
+            adaptive_krylov_dim = (i == 1 && previous_eigenvector !== nothing) ? min(15, krylov_dim) : krylov_dim
+            try
+                λ, eigenvec, _, iterations = arnoldi_eigenvalue(K, v0, adaptive_krylov_dim;
+                                                                tol=arnoldi_tol, maxiter=10,
+                                                                verbose_arnoldi=false)
+                if !isnan(λ) && isfinite(λ)
+                    verbose && println("  Arnoldi: $iterations iterations")
+                    break
                 end
-
-                # Adaptive Krylov dimension
-                adaptive_krylov_dim = if i == 1 && previous_eigenvector !== nothing
-                    min(15, krylov_dim)
-                else
-                    krylov_dim
+            catch e
+                if verbose && i == length(v0_strategies)
+                    @warn "Arnoldi failed with all strategies: $e"
                 end
-
-                try
-                    # Use Arnoldi method
-                    λ, eigenvec, converged, iterations = arnoldi_eigenvalue(K, v0, adaptive_krylov_dim;
-                                                                           tol=arnoldi_tol, maxiter=10,
-                                                                           verbose_arnoldi=false)
-
-                    # Check if result is reasonable
-                    if !isnan(λ) && isfinite(λ)
-                        if verbose
-                            if iterations == 0
-                                println("  Arnoldi (optimized): instant convergence")
-                            elseif iterations <= 5
-                                println("  Arnoldi (optimized): $iterations iterations (very fast)")
-                            elseif iterations <= 15
-                                println("  Arnoldi (optimized): $iterations iterations (fast)")
-                            else
-                                println("  Arnoldi (optimized): $iterations iterations")
-                            end
-                        end
-                        break
-                    end
-                catch e
-                    if verbose && i == length(v0_strategies)
-                        @warn "Arnoldi method failed with all strategies: $e"
-                    end
-                    continue
-                end
-            end
-
-            if !converged && verbose
-                @warn "Arnoldi method (optimized) did not converge"
-            end
-
-            # Fallback to direct method if Arnoldi fails
-            if isnan(λ) || !isfinite(λ)
-                if verbose
-                    @warn "Arnoldi failed, falling back to direct method"
-                end
-                use_arnoldi = false
-            else
-                return λ, eigenvec
+                continue
             end
         end
 
-        # Fallback: Direct eigenvalue computation
-        if !use_arnoldi
-            # Compute M⁻¹ * RHS directly
-            RHS_preconditioned = zeros(ComplexF64, n_total, n_total)
-            for j in 1:n_total
-                RHS_preconditioned[:, j] = M_inv_op(RHS_matrix[:, j])
-            end
-
-            # Find eigenvalues
-            eigenvals, eigenvecs = eigen(RHS_preconditioned)
-
-            # Get largest eigenvalue
-            eigenvals_real = real.(eigenvals)
-            largest_idx = argmax(eigenvals_real)
-            λ_largest = eigenvals[largest_idx]
-            eigenvec = eigenvecs[:, largest_idx]
-
-            if verbose
-                println("  Direct method (optimized) used")
-                eigenvals_sorted = sort(eigenvals_real, rev=true)
-                println("  Top 5 eigenvalues: ", eigenvals_sorted[1:min(5, length(eigenvals_sorted))])
-                println("  Largest eigenvalue: ", real(λ_largest))
-            end
-
-            return real(λ_largest), eigenvec
+        if isnan(λ) || !isfinite(λ)
+            verbose && @warn "Arnoldi did not converge at E0 = $E0"
+            return NaN, nothing
         end
+        return λ, eigenvec
 
     catch e
-        @warn "Failed to solve optimized eigenvalue problem at E0 = $E0: $e"
+        @warn "Failed to solve eigenvalue problem at E0 = $E0: $e"
         return NaN, nothing
     end
 end
@@ -1003,7 +807,7 @@ end
 """
     malfiet_tjon_solve_optimized(α, grid, potname, e2b; E0=-8.0, E1=-7.0,
                                  tolerance=1e-6, max_iterations=100, verbose=true,
-                                 use_arnoldi=true, krylov_dim=50, arnoldi_tol=1e-6,
+                                 krylov_dim=50, arnoldi_tol=1e-6,
                                  include_uix=false)
 
 Optimized Malfiet-Tjon solver using optimized T, V, and Rxy matrix functions.
@@ -1021,11 +825,10 @@ See `malfiet_tjon_solve()` for detailed argument descriptions.
 function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
                                      E0::Float64=-8.0, E1::Float64=-7.0,
                                      tolerance::Float64=1e-6, max_iterations::Int=100,
-                                     verbose::Bool=true, use_arnoldi::Bool=true,
+                                     verbose::Bool=true,
                                      krylov_dim::Int=50, arnoldi_tol::Float64=1e-6,
                                      include_uix::Bool=true,
-                                     θ_deg::Float64=0.0, n_gauss=nothing,
-                                     use_vsector::Bool=false)
+                                     θ_deg::Float64=0.0, n_gauss=nothing)
 
     # Timing dictionary to track performance
     timings = Dict{String, Float64}()
@@ -1053,11 +856,8 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         println("Initial energy guesses: E0 = $E0 MeV, E1 = $E1 MeV")
         println("Convergence tolerance: $tolerance")
         println("Maximum iterations: $max_iterations")
-        method_str = use_arnoldi ? "Arnoldi (Krylov dim: $krylov_dim)" : "Direct diagonalization"
-        println("Eigenvalue method: $method_str")
-        if use_arnoldi
-            println("Arnoldi tolerance: $arnoldi_tol")
-        end
+        println("Eigenvalue method: Arnoldi (Krylov dim: $krylov_dim)")
+        println("Arnoldi tolerance: $arnoldi_tol")
         if include_uix
             println("Three-body force: UIX (Urbana IX)")
         end
@@ -1088,7 +888,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         print("    - V matrix: ")
         v_start = time()
         # V_matrix_optimized_scaled automatically uses V_matrix_optimized when θ=0
-        V, V_x_diag_ch = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss, return_components=true)
+        V = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss)
         v_time = time() - v_start
         timings["V_matrix"] = v_time
         @printf("%.3f s\n", v_time)
@@ -1135,7 +935,7 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         T, Tx_ch, Ty_ch, Nx, Ny = T_matrix_optimized(α, grid, return_components=true, θ_deg=θ_deg)
 
         # V_matrix_optimized_scaled automatically uses V_matrix_optimized when θ=0
-        V, V_x_diag_ch = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss, return_components=true)
+        V = V_matrix_optimized_scaled(α, grid, potname, θ_deg=θ_deg, n_gauss=n_gauss)
 
         B = Bmatrix(α, grid)
         Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
@@ -1151,55 +951,31 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
         timings["total_matrix_construction"] = time() - matrix_time_start
     end
 
-    # Precompute M⁻¹ cache (ONE-TIME COST, huge speedup!)
-    # Two flavours:
-    #   - strict channel-diagonal (default, n_q = 1): M = E·B − T − V_αα
-    #   - V-sector block-diagonal (use_vsector=true):  M = E·B − T − V (full)
-    if use_vsector
-        # Need per-pair V_x blocks (including off-diagonal coupling within each V-sector)
-        if verbose
-            print("  Building V_x pair blocks (V-sector mode)... ")
-            t0 = time()
-            V_x_full = matrices_optimized.V_x_pair_blocks(α, grid, potname)
-            @printf("%.3f s\n", time() - t0)
-        else
-            V_x_full = matrices_optimized.V_x_pair_blocks(α, grid, potname)
-        end
-
-        if verbose
-            print("  Precomputing M⁻¹ V-sector cache (one-time)... ")
-            cache_start = time()
-            @time M_cache = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
-            cache_time = time() - cache_start
-            timings["M_cache_precompute"] = cache_time
-        else
-            M_cache = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
-            timings["M_cache_precompute"] = 0.0
-        end
+    # Precompute the V-sector block-diagonal M⁻¹ cache (Lazauskas split, one-time cost):
+    # M = E·B − T − V (full V, block-diagonal across V-sectors).
+    if verbose
+        print("  Building V_x pair blocks... ")
+        t0 = time()
+        V_x_full = matrices_optimized.V_x_pair_blocks(α, grid, potname)
+        @printf("%.3f s\n", time() - t0)
+        print("  Precomputing M⁻¹ V-sector cache (one-time)... ")
+        cache_start = time()
+        @time M_cache = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
+        timings["M_cache_precompute"] = time() - cache_start
     else
-        if verbose
-            print("  Precomputing M⁻¹ cache (one-time)... ")
-            cache_start = time()
-            @time M_cache = matrices.precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-            cache_time = time() - cache_start
-            timings["M_cache_precompute"] = cache_time
-        else
-            M_cache = matrices.precompute_M_inverse_cache(α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny)
-            timings["M_cache_precompute"] = 0.0
-        end
+        V_x_full = matrices_optimized.V_x_pair_blocks(α, grid, potname)
+        M_cache = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
+        timings["M_cache_precompute"] = 0.0
     end
 
-    # Precompute RHS matrix cache (ONE-TIME COST, another huge speedup!)
-    # Strict mode: RHS = (V - V_αα) + V*Rxy + UIX
-    # V-sector:    RHS = V*Rxy + UIX (V fully absorbed into M)
+    # Precompute the RHS matrix cache (one-time): RHS = V*Rxy + UIX (V fully absorbed into M).
     if verbose
         print("  Precomputing RHS matrix cache (one-time)... ")
         rhs_cache_start = time()
-        @time RHS_cache = precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=V_UIX, use_vsector=use_vsector)
-        rhs_cache_time = time() - rhs_cache_start
-        timings["RHS_cache_precompute"] = rhs_cache_time
+        @time RHS_cache = precompute_RHS_cache(V, Rxy, α, grid; V_UIX=V_UIX)
+        timings["RHS_cache_precompute"] = time() - rhs_cache_start
     else
-        RHS_cache = precompute_RHS_cache(V, V_x_diag_ch, Rxy, α, grid; V_UIX=V_UIX, use_vsector=use_vsector)
+        RHS_cache = precompute_RHS_cache(V, Rxy, α, grid; V_UIX=V_UIX)
         timings["RHS_cache_precompute"] = 0.0
     end
 
@@ -1216,10 +992,10 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
 
     # Compute initial eigenvalues (no previous eigenvector for first iteration) - USE CACHES!
     eigen_start = time()
-    λ_prev, eigenvec_prev = compute_lambda_eigenvalue_optimized(E_prev, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                                     verbose=false, use_arnoldi=use_arnoldi,
+    λ_prev, eigenvec_prev = compute_lambda_eigenvalue_optimized(E_prev, α, grid;
+                                                     verbose=false,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
-                                                     V_UIX=V_UIX, M_cache=M_cache, RHS_cache=RHS_cache)
+                                                     M_cache=M_cache, RHS_cache=RHS_cache)
     eigen1_time = time() - eigen_start
     push!(eigenval_times, eigen1_time)
     if verbose
@@ -1228,11 +1004,11 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
 
     # Use previous eigenvector for second initial guess - USE CACHES!
     eigen_start = time()
-    λ_curr, eigenvec_curr = compute_lambda_eigenvalue_optimized(E_curr, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                                     verbose=false, use_arnoldi=use_arnoldi,
+    λ_curr, eigenvec_curr = compute_lambda_eigenvalue_optimized(E_curr, α, grid;
+                                                     verbose=false,
                                                      krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                      previous_eigenvector=eigenvec_prev,
-                                                     V_UIX=V_UIX, M_cache=M_cache, RHS_cache=RHS_cache)
+                                                     M_cache=M_cache, RHS_cache=RHS_cache)
     eigen2_time = time() - eigen_start
     push!(eigenval_times, eigen2_time)
     if verbose
@@ -1285,11 +1061,11 @@ function malfiet_tjon_solve_optimized(α, grid, potname, e2b;
 
         # Time eigenvalue computation for this iteration - USE CACHES!
         iter_eigen_start = time()
-        λ_next, eigenvec_next = compute_lambda_eigenvalue_optimized(E_next, T, V, B, Rxy, α, grid, Tx_ch, Ty_ch, V_x_diag_ch, Nx, Ny;
-                                                         verbose=false, use_arnoldi=use_arnoldi,
+        λ_next, eigenvec_next = compute_lambda_eigenvalue_optimized(E_next, α, grid;
+                                                         verbose=false,
                                                          krylov_dim=krylov_dim, arnoldi_tol=arnoldi_tol,
                                                          previous_eigenvector=eigenvec_curr,
-                                                         V_UIX=V_UIX, M_cache=M_cache, RHS_cache=RHS_cache)
+                                                         M_cache=M_cache, RHS_cache=RHS_cache)
         iter_eigen_time = time() - iter_eigen_start
         push!(eigenval_times, iter_eigen_time)
 
