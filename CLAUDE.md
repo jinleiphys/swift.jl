@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **⚠️ 2026-06-15 UPDATE — read [TODO.md](TODO.md) for the current state.** The code was cleaned to a
+> **⚠️ 2026-06-16 UPDATE — read [TODO.md](TODO.md) for the current state.** The code was cleaned to a
 > single fastest path; several descriptions below are now stale. Key changes:
 > - **M⁻¹ preconditioner is V-sector-only.** `matrices.jl` no longer has `M_inverse_operator`,
 >   `M_inverse_operator_cached`, `precompute_M_inverse_cache`, `MInverseCache` — only the V-sector trio
@@ -15,10 +15,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > - **Deleted files**: `compare_solvers.jl`, `threebodybound.jl`, `Rxy_matrix_cached.jl`, `spline.jl`,
 >   `3Npot/UIX.jl` (non-optimized UIX; `UIX_optimized.jl` is the only UIX now).
 > - **New files**: `benchmark_rimas.jl` (AV18 3H/3He jx scan vs rimas), `benchmark_nd_scatt.jl` (n-d MT
->   vs Lazauskas PRC 84 Tab.III), `test_scatt_diag.jl` / `test_scatt_diag2.jl` (scattering diagnostics).
-> - **Open bug**: n-d elastic scattering extracts η≈1 instead of the benchmark η=0.4649. Localized to the
->   S-matrix EXTRACTION (ψ_sc correctly carries ~21% breakup flux; the amplitude formula is missing the
->   deuteron CS c-norm C_n⁻¹ + CS Jacobians from Lazauskas Eq.16/17). See TODO.md "▶ NEXT".
+>   vs Lazauskas PRC 84 Tab.III), `test_scatt_diag.jl` / `test_scatt_diag2.jl` (scattering diagnostics),
+>   `test_cnorm_extraction.jl` (c-product / C_n extraction diagnostic, 2026-06-16).
+> - **Open bug (2026-06-16, two layers)**: n-d elastic η was extracted ≈1 (unphysical) instead of the
+>   benchmark η=0.4649. LAYER 1 (understood): the CS amplitude must use the **bilinear c-product**
+>   (`transpose`, not Hermitian `dot`) + the **deuteron c-norm 1/C_n** (C_n = φ_dᵀBφ_d removes the
+>   eigenvector's arbitrary global phase); this turns η≥1 into a physical η<1 (0.27) and is
+>   gauge-invariant. LAYER 2 (localized, open): a residual (η 0.27 vs 0.46, δ 77° vs 105°) is
+>   independent of mesh AND normalization → the `⟨φ_d F|V·Rxy_31|ψ⟩` projection OPERATOR differs from
+>   Lazauskas Eq.16/17. `compute_scattering_amplitude` gained a `conj_bra` kwarg (default `true` = old
+>   `dot`, since the bilinear path is not yet benchmark-complete). See TODO.md "▶ NEXT". The earlier
+>   note "line 350 should be `dot` not `transpose`" was BACKWARDS.
 
 ## Project Overview
 

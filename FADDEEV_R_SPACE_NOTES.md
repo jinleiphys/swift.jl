@@ -433,9 +433,9 @@ If $E_0$ is exactly the ground-state energy, then $\lambda(E_0)=1$; if it is bel
 > - **Strict channel-diagonal** ($V \to V_{\alpha_3\alpha_3}$): $M$ is block-diagonal in the channel index $\alpha_3$ itself; RHS = $(V - V_{\alpha_3\alpha_3}) + V\cdot\mathcal{R} + V_{\mathrm{UIX}}$. Cheapest cache build (each block of $M$ is a single channel, $n_x\cdot n_y$ in size) but RHS still carries the tensor coupling.
 > - **V-sector block-diagonal** ($V \to V$, the full V, exploiting that $V$ is block-diagonal in $q$): $M$ is block-diagonal in $q$ with blocks of size $n_q\cdot n_x\cdot n_y$; RHS = $V\cdot\mathcal{R} + V_{\mathrm{UIX}}$. Strictly better Faddeev kernel (RHS is smaller, $K(E)$ has smaller spectral radius → fewer Arnoldi steps to converge).
 >
-> **Current `swift/matrices.jl`** implements the strict channel-diagonal special case; the V-sector approach (Lazauskas' choice) is the natural upgrade target. Both algorithms share the same Kronecker-product machinery developed in the next subsection — the only difference is the block size.
+> **Current `swift/matrices.jl`** implements the **V-sector** special case (the 2026-06-15 cleanup deleted the strict channel-diagonal path); the strict channel-diagonal case is kept above only as the $n_q=1$ pedagogical limit. Both share the same Kronecker-product machinery developed in the next subsection — the only difference is the block size.
 
-**Code reference:** the assembly of $\mathcal{S}$ is `precompute_RHS_cache` in `swift/MalflietTjon.jl` (currently constructs $V + V\cdot\mathcal{R} + V_{\mathrm{UIX}} - V_{\alpha_3\alpha_3}$; in the V-sector variant the $V$ and $-V_{\alpha_3\alpha_3}$ terms would both disappear, leaving $V\cdot\mathcal{R} + V_{\mathrm{UIX}}$), and the analytical $M^{-1}$ is `M_inverse_operator` / `M_inverse_operator_cached` in `swift/matrices.jl` (see the next subsection for the construction).
+**Code reference:** the assembly of $\mathcal{S}$ is `precompute_RHS_cache` in `swift/MalflietTjon.jl` (V-sector variant: $\mathcal{S} = V\cdot\mathcal{R} + V_{\mathrm{UIX}}$, since the full $V$ is absorbed into $M$), and the analytical $M^{-1}$ is `M_inverse_operator_cached_vsector` (with `precompute_M_inverse_cache_vsector` / `MInverseCacheVSector` / `group_channels_by_v_sector`) in `swift/matrices.jl` (see the next subsection for the construction).
 
 To find the ground state energy, one starts with an initial guess $E_0$ and uses the secant method to iteratively refine the energy. The secant method requires two initial points, $E_0$ and $E_1$, with their corresponding eigenvalues $\lambda(E_0)$ and $\lambda(E_1)$. The iterative formula for the secant method is:
 
@@ -700,7 +700,7 @@ $$
 
 ## Tensor-product construction of $M^{-1}$
 
-We work in the V-sector decomposition (the algorithm reduces to the strict channel-diagonal case when each sector contains a single channel — that is what `swift/matrices.jl` currently implements; the algebra below is written for general sector size and reduces correctly to $n_q = 1$).
+We work in the V-sector decomposition (this is what `swift/matrices.jl` implements; the algorithm reduces to the strict channel-diagonal case when each sector contains a single channel, and the algebra below is written for general sector size and reduces correctly to $n_q = 1$).
 
 Group the three-body channels by their V-sector index $q$ defined above, $\mathcal{J}_q = \{\alpha_3 : q(\alpha_3) = q\}$, with $n_q = |\mathcal{J}_q|$. Then $M(E) = E\,B - H_0 - V$ is **block-diagonal across the sectors $q$**:
 $$
@@ -751,7 +751,7 @@ $$
 \boxed{\;\;M(E)^{-1}\big|_{q} \;=\; U^{(q)}\;D^{(q)}(E)^{-1}\;(U^{(q)})^{-1}\;(N^{(q)})^{-1} \;=\; \big(\mathcal{U}^{(q)}_{x}\otimes U_{y}\big)\;D^{(q)}(E)^{-1}\;\big(\mathcal{U}^{(q)}_{x}\otimes U_{y}\big)^{-1}\;\big(I_{n_q}\otimes N_{k_x}^{-1}\otimes N_{k_y}^{-1}\big).\;\;}
 $$
 
-> **Reduction to the strict channel-diagonal case.** Setting $n_q = 1$ (each sector contains a single channel $\alpha_3$) collapses $\mathcal{H}^{(q)}_x \to T_{k_x}^{\alpha_3} + V_{\alpha_3\alpha_3}$ and $\mathcal{U}^{(q)}_x \to U_{\alpha_3}^x$, recovering exactly the formula used by the current `swift/matrices.jl`. Setting $n_q > 1$ for sectors with tensor coupling (e.g. the $J_{12}=1, T_{12}=0$ deuteron sector) is the V-sector upgrade.
+> **Reduction to the strict channel-diagonal case.** Setting $n_q = 1$ (each sector contains a single channel $\alpha_3$) collapses $\mathcal{H}^{(q)}_x \to T_{k_x}^{\alpha_3} + V_{\alpha_3\alpha_3}$ and $\mathcal{U}^{(q)}_x \to U_{\alpha_3}^x$, recovering the old strict channel-diagonal formula. The implemented code keeps the general $n_q \ge 1$ V-sector form, so sectors with tensor coupling (e.g. the $J_{12}=1, T_{12}=0$ deuteron sector) are handled exactly.
 
 ### Application to a vector (algorithm)
 
@@ -769,7 +769,7 @@ In the current `swift/matrices.jl` ($n_q=1$ for every sector) this collapses to 
 
 ### Caching strategy
 
-The decomposition cleanly separates energy-independent and energy-dependent work, which is exploited by `precompute_M_inverse_cache` / `M_inverse_operator_cached` in `swift/matrices.jl:519-610`. The same table applies to both the channel-diagonal and V-sector variants, with $\alpha_3 \to q$ and per-channel size $n_x\times n_x \to$ per-sector size $n_q n_x \times n_q n_x$ in the $x$-direction:
+The decomposition cleanly separates energy-independent and energy-dependent work, which is exploited by `precompute_M_inverse_cache_vsector` / `M_inverse_operator_cached_vsector` in `swift/matrices.jl`. The table is written for the V-sector variant, with $\alpha_3 \to q$ and per-channel size $n_x\times n_x \to$ per-sector size $n_q n_x \times n_q n_x$ in the $x$-direction (the $n_q=1$ limit recovers the old channel-diagonal form):
 
 | Quantity | Depends on $E$? | Stored in (current code, $n_q{=}1$) | Recomputed when |
 |---|---|---|---|
@@ -783,7 +783,7 @@ The energy update step is therefore $\mathcal{O}\big(\sum_q n_q n_x n_y\big) = \
 
 ### Generalisation to complex scaling
 
-Under the rotation $r \to r\,e^{i\theta}$ the kinetic matrices and potential become complex; $T_x$, $T_y$, $V$ and therefore $N^{-1}\mathcal{H}^{(q)}_x$, $N^{-1}T_y$ all live in $\mathbb{C}^{n\times n}$, but their eigendecomposition is structurally identical. The cache type is generic: `MInverseCache{T}` with `T ∈ {Float64, ComplexF64}` (`matrices.jl:525, 533-538`); the same algorithm runs for $\theta=0$ (real) and $\theta\neq 0$ (complex) without code changes, in both the channel-diagonal and the V-sector variants.
+Under the rotation $r \to r\,e^{i\theta}$ the kinetic matrices and potential become complex; $T_x$, $T_y$, $V$ and therefore $N^{-1}\mathcal{H}^{(q)}_x$, $N^{-1}T_y$ all live in $\mathbb{C}^{n\times n}$, but their eigendecomposition is structurally identical. The cache type is generic: `MInverseCacheVSector{T}` with `T ∈ {Float64, ComplexF64}` (`matrices.jl`); the same algorithm runs for $\theta=0$ (real) and $\theta\neq 0$ (complex) without code changes.
 
 
 
@@ -887,6 +887,63 @@ f(k)& = -\frac{2\mu_3}{\hbar^2 k_d^2} e^{-i\sigma_l} \langle \phi_d F | V_{23} +
 & \quad \times \langle f_{k_x} f_{k_y} \alpha_3 |  \psi_3^{in} + \psi_{3}^{sc} \rangle
 \end{aligned}
 $$
+
+> **Implementation note — complex-scaling inner product (2026-06-16).**
+> Under complex scaling the rotated Hamiltonian is **complex-symmetric, not Hermitian**, so every
+> bracket $\langle\,\cdot\,|\,\cdot\,\rangle$ in the amplitude above is the **bilinear c-product**
+> $\int \phi(re^{i\theta})\,\hat O\,\psi(re^{i\theta})\,dr$ with **no complex conjugation** of the bra
+> (analytic continuation, same rotation branch). Projecting with the Hermitian product (conjugated bra)
+> restores an artificial Hermiticity, which forces single-channel elastic unitarity $|S|=1$ ($\eta\to1$)
+> and erases the breakup loss carried by $\psi_3^{sc}$.
+>
+> A subtlety specific to the bilinear product: the deuteron bound state $\phi_d$ obtained from the
+> complex-scaled generalized eigenproblem carries an **arbitrary global complex phase** $e^{i\gamma}$
+> (the eigensolver fixes only $|\phi_d|$ via the Hermitian norm $\phi_d^\dagger B\phi_d=1$, not the
+> phase). Since $f$ is quadratic in $\phi_d$, the bilinear extraction picks up a spurious $e^{2i\gamma}$.
+> This is removed by dividing by the **deuteron c-norm**
+> $$ C_n \;=\; \phi_d^{\mathsf T} B\, \phi_d \;=\; e^{2i\gamma}\,|C_n|, \qquad |C_n|\approx 1 \ (\theta\text{-stable}), $$
+> i.e. the physically correct amplitude is $f \to f/C_n$. The Hermitian product hides $e^{2i\gamma}$
+> automatically ($e^{-i\gamma}e^{+i\gamma}$) but at the cost of also hiding the absorption.
+>
+> **Status (swift.jl):** the bilinear + $1/C_n$ correction turns the unphysical $\eta\ge1$ into a
+> physical $\eta<1$ and is gauge-invariant, but it left a residual ($\eta\approx0.27$ vs $0.4649$).
+> A **2-body isolation test** (`swift/test_2body_cs_1S0.jl`, CS MT $^1S_0$) then pinned the remaining
+> piece: with $f=-\tfrac{2\mu}{\hbar^2k^2}\langle F_0|V|u\rangle$ the *magnitude* of $f$ matches the
+> exact value to 4 digits, but the *phase* is off by exactly $\theta$. The fix is an explicit
+> **complex-scaling contour Jacobian** $e^{+i\theta}$ (one factor per rotated radial integration; the
+> backward-rotation $V$ matrix carries the Hamiltonian's $e^{-i\theta}$, but the amplitude integral over
+> $d(re^{i\theta})$ needs the forward $e^{+i\theta}$):
+> $$ f \;=\; -\frac{2\mu}{\hbar^2 k^2}\, e^{+i\theta}\,\langle F_0 | V | u_{tot}\rangle_{\text{bilinear}}. $$
+> With it the 2-body gives $\eta\to1$ (unitarity restored) and $\delta=63.512^\circ$ to CS convergence.
+>
+> **Extraction method — Green's theorem (Eq. 17), NOT asymptotic projection (Eq. 16).** Lazauskas
+> (personal comm. to Lei) and the paper itself (§II.A: Eq. 7 is ~1 digit more accurate; HDR §5.5) state
+> the Green's-theorem integral relation is the reliable extraction; the asymptotic projection does not
+> give a stable plateau (confirmed numerically here — `f_λ(y)` did not plateau). The neutral 3-body
+> Green's-theorem amplitude is
+> $$ f_{nm}(\hat y) = -C_n^{-1}\frac{m}{\hbar^2}\iint \phi_n^*(x e^{-i\theta})\,\frac{e^{-i q_n y e^{i\theta}}}{y}\,[V_{23}+V_{31}]\,\bar\Psi_m(x,y)\,e^{6i\theta}\,d^3x\,d^3y, $$
+> with $C_n=\int\phi_n^*(xe^{-i\theta})\phi_n(xe^{i\theta})e^{3i\theta}d^3x$. The 2-body Wronskian/integral
+> form (thesis Eq. 1.42, $\sin\delta_l=-\tfrac{2\mu}{\hbar^2 k}\int \hat\jmath_l V\psi\,dr$) uses the
+> **regular** $\hat\jmath_l$ in the bra — relevant when reconciling the 3-body bra convention.
+>
+> **Operator identity (derived + validated, 2026-06-16, `swift/test_V23V31_operator.jl`):**
+> $$ [V_{23}+V_{31}]\,\bar\Psi \;=\; \mathcal{R}\,V\,\bar\Psi \qquad (\mathcal{R}=\text{Rxy}=P^++P^-,\; V=V_{12}), $$
+> i.e. apply the pair potential $V_{12}$ first, then the rearrangement, on the FULL $\bar\Psi=(1+\mathcal R)\psi$.
+> Derivation: $V_{23}=P^+V_{12}P^-$, $V_{31}=P^-V_{12}P^+$, and $P^\pm\bar\Psi=\bar\Psi$ (a cyclic
+> permutation is even, so $+1$ on the antisymmetric state), hence $[V_{23}+V_{31}]\bar\Psi=(P^++P^-)V_{12}\bar\Psi$.
+> NOT $V\cdot\mathcal R$, NOT $\mathcal R V\mathcal R$. Validated T-free (never apply the kinetic $T$ to
+> $\bar\Psi$ — the $\mathcal R\psi$ part is non-smooth in a single Jacobi frame and $T$ amplifies the
+> truncation noise; this is the same reason Faddeev uses the $3\langle\Psi|\psi_3\rangle$ norm):
+> $\langle\bar\Psi|\mathcal R V\bar\Psi\rangle = 2\langle V_{12}\rangle$ and $\|\mathcal R\bar\Psi-2\bar\Psi\|/\|2\bar\Psi\|$
+> both hold to the basis-truncation level.
+>
+> **Open task (2026-06-16):** assemble the full 3-body Eq. 17 amplitude. Operator part `Rxy·V·Ψ̄`
+> validated; the remaining unknown is the amplitude MAGNITUDE/normalization — first 3-body attempts gave
+> $\eta\approx19$ (Hankel bra) and $\eta\approx82$ (regular-$F$ bra), i.e. $\sim150\times$ too large, a
+> normalization (not phase) error. Unresolved: object ($\bar\Psi=(1+\mathcal R)\psi$ vs Faddeev component;
+> possible double-count from $\mathcal R V(1+\mathcal R)$), the exact $f\to S$ normalization for 3-body, and
+> regular-$F$ vs Hankel bra (+ $y$-convergence). To be derived from thesis §2.3 (3-body scattering),
+> cross-checked against the working 2-body, not by trial. Target: 14.1 MeV doublet $\eta=0.4649$, $\delta=105.49^\circ$.
 
 The scattering amplitude can also be written as $f^{\alpha_0,\alpha_0'}(k)$, where $\alpha_0$ indexes the channel in which the deuteron remains in its ground state. The scattering matrix can then be computed through 
 $$

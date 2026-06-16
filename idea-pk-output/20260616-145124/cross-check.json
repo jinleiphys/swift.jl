@@ -1,0 +1,139 @@
+{
+  "verdicts": [
+    {
+      "candidate_id": "A1",
+      "verdict": "downgrade_info_gain",
+      "rationale": "Specific and feasible inside swift: the candidate says \"Abandon direct quadrature\" and proposes \"f = f_born + f_sc\" using \"eigen(H, B)\" with the T4 vertex \"(Rxy*bra)^T * V * v_n\". It is not a T1-T5 reinvention, but the claimed failure interpretation is too strong because this first step changes the Green-theorem vehicle before deriving its exact equivalence to Lazauskas Eq.17 in the three-body reduced representation.",
+      "redundant_with": null,
+      "info_gain_correction": "If the spectral sum works, it supports a missing-resolvent or Born-split diagnosis. If it fails, it does not isolate the bra alone, because failure can also come from spectral completeness, B-orthonormalization, the reused Rxy/V vertex, or the 2-body COLOSS prefactor being transcribed before the Eq.17 reduced-rep derivation is fixed.",
+      "first_step_correction": "Before treating this as a kept production path, add the derivation that the proposed COLOSS-style spectral expression is the same Lazauskas Eq.17 functional in swift's F(x,y)/(xy) basis, including C_n, angular factors, and the y-kernel."
+    },
+    {
+      "candidate_id": "A2",
+      "verdict": "redundant",
+      "rationale": "A2 is the same diagnostic family as B4. A2 says to \"split it: build Psibar_in\" and \"compute and print THREE numbers separately\" to locate the imaginary part; B4 says to print \"Mp_in\" and \"Mp_sc\" and repeat with a \"COLOSS-style split\". B4 is the sharper version because it ties the split to the locked two-body COLOSS reference.",
+      "redundant_with": "B4",
+      "info_gain_correction": "Near-real pieces would falsify this current T4 projection, not every possible Eq.17 direct quadrature. A phase-bearing scattered piece would indicate a Born/scattered cancellation or subtraction issue rather than prove the operator is correct.",
+      "first_step_correction": "Use a strictly linear decomposition first: Rbra^T V Psibar_in and Rbra^T V Psibar_sc. The A2 wording \"psi_in x psi_in / psi_in x psi_sc / psi_sc x psi_sc\" is underspecified unless the bra is also decomposed."
+    },
+    {
+      "candidate_id": "A3",
+      "verdict": "redundant",
+      "rationale": "A3 and B2 both test the same V23+V31 operator identity. A3 proposes a \"new swift/test_op_identity.jl\" and the identity \"V23+V31\" against \"2<V12>\"; B2 already says to extend \"swift/test_V23V31_operator.jl\" and gives the pass condition \"one pair equals 1 and the two-pair sum equals 2\".",
+      "redundant_with": "B2",
+      "info_gain_correction": "A mismatch beyond truncation would implicate the whole Rxy/V/B operator ledger, not just the symmetric-Rxy shortcut. A few-percent mismatch is not decisive unless it fails to converge with mesh.",
+      "first_step_correction": "Do not create a parallel harness. Extend the existing test_V23V31_operator.jl path described in B2, then add A3's separate Rxy_31 and Rxy_32 side checks there."
+    },
+    {
+      "candidate_id": "A4",
+      "verdict": "orthogonality_underspecified",
+      "rationale": "The idea is useful as a later diagnostic, but it fails the kept-candidate path-B constraint as stated. A4 advertises an extractor with \"no asymptotic projection and no Rxy operator mapping\" and its first step is only \"schematically I_S\" and \"I_C\". That is not the requested Eq.17 to swift Rxy mapping.",
+      "redundant_with": null,
+      "info_gain_correction": "A Kohn success would show psi_sc carries the physical phase, but it would not by itself fix Lazauskas Eq.17. A Kohn failure would be ambiguous until the exact n-d partial-wave normalization and channel-spin formula are fixed.",
+      "first_step_correction": "If used later, first write the exact Garrido/Barletta n-d integral-relation formula, normalization, channel-spin sum, and source definitions. Keep it as a solve-vs-extractor check, not as a replacement for path-B."
+    },
+    {
+      "candidate_id": "B1",
+      "verdict": "kept",
+      "rationale": "This is the cleanest path-B operator test. It changes only the Rxy side move in the current Eq.17 harness: B1 explicitly targets \"Rbra = Rxy*bra\", prints metric-adjoint variants including \"B \\\\ (transpose(Rxy)*B*bra)\", and measures \"norm(B*Rxy_13 - transpose(Rxy_31)*B)\". This directly attacks the stuck-card contradiction that T1 and T4 differ by 674 versus 4.4 because Rxy is not acting as a symmetric operator in the truncated basis.",
+      "redundant_with": null,
+      "info_gain_correction": null,
+      "first_step_correction": "Avoid forming a production-size dense inverse. For the smoke test, solve B*x = transpose(Rxy)*B*bra and compare actions on the bra, then validate any promising map with B2."
+    },
+    {
+      "candidate_id": "B2",
+      "verdict": "kept",
+      "rationale": "Kept as the fixed-number operator ruler. It stays inside swift, uses the existing \"swift/test_V23V31_operator.jl\", and has a non-fitted pass condition: \"one pair equals 1 and the two-pair sum equals 2 within truncation\". It is not a T1-T5 reinvention because it removes scattering, CS growth, y-kernels, and prefactors from the test.",
+      "redundant_with": null,
+      "info_gain_correction": "If the identity fails, the Eq.17 extraction cannot be trusted regardless of prefactor. If it passes at theta=0, it validates the interior V/Rxy ledger only within the bound-state channel and still leaves the scattering bra metric-adjoint and channel-spin projection to test.",
+      "first_step_correction": null
+    },
+    {
+      "candidate_id": "B3",
+      "verdict": "refine_first_step",
+      "rationale": "The prefactor ledger is a valid axis, but the stated first step is too close to T3 unless sharpened. B3 says to \"print a factor table\" including \"4*pi*base\", \"(2*mu/m)*base\", and \"base*exp(im*n*theta)\" for n=1,2,3,6. The stuck card already rejects scale and phase coincidences, so a table cannot be the primary experiment.",
+      "redundant_with": null,
+      "info_gain_correction": "The information gain is only a scalar audit. It can distinguish legal magnitude factors from illegal scans, but it cannot explain delta near zero if the raw matrix element remains nearly real.",
+      "first_step_correction": "Before printing numerical candidates, derive each allowed factor from the reduced F(x,y)/(xy) measure, C_n convention, angular normalization, and the locked two-body formula. Remove any factor not derived before the run."
+    },
+    {
+      "candidate_id": "B4",
+      "verdict": "kept",
+      "rationale": "Kept as the best Born/scattered disambiguator. It is not T2 reinvention because B4 does not accept psi_sc-only as the answer; it prints the components \"Mp_in\" and \"Mp_sc\" and repeats with a \"COLOSS-style split\" to see where the phase sits in the converged T4 ordering.",
+      "redundant_with": null,
+      "info_gain_correction": "If Mp_sc is tiny or phase-aligned, do not jump directly to a source or GMRES bug; the wrong Rxy metric-adjoint or a collapsed channel projection can also suppress the scattered contribution. If Mp_sc has the benchmark-scale phase but the total does not, the next target is the Born/scattered subtraction or split.",
+      "first_step_correction": null
+    },
+    {
+      "candidate_id": "B5",
+      "verdict": "kept",
+      "rationale": "Kept as the cheap projection test. It targets the explicit code smell \"first(cpl)\" and proposes to \"print every cpl channel\" plus block-by-block Mp values before using the existing \"recouple_to_channel_spin\" path. This axis was not tested by T1-T5, which varied ordering, psi_sc, scale, and bra type while staying single-block.",
+      "redundant_with": null,
+      "info_gain_correction": "A negative result is still valuable: if all deuteron-compatible blocks are small or nearly real before recoupling, channel-spin collapse is not the cause. A positive result must be checked first on raw per-channel values to avoid mistaking Wigner phase convention errors for physics.",
+      "first_step_correction": null
+    },
+    {
+      "candidate_id": "A5",
+      "verdict": "refine_first_step",
+      "rationale": "A5 correctly covers the previously undersampled reduced-representation axis and is not a T1-T5 reinvention. It explicitly changes the y-kernel and normalization together, citing \"regular F_lambda(qy e^{itheta})\", \"prefactor to -(1/E_cm)\", and a reduced C_n phase. The first step overreaches by replacing the Eq.17 outgoing Green kernel before showing the partial-wave reduction from \"e^{-iqy}/|y|\" to the proposed regular-F object.",
+      "redundant_with": null,
+      "info_gain_correction": "A working result would strongly implicate representation mismatch, but only after the kernel and Jacobian powers are derived from Eq.17 rather than imported from the 2-body anchor. A failure would not rule out all normalization issues if the regular-F substitution was not the correct reduced Green kernel.",
+      "first_step_correction": "First write the reduced Eq.17 ledger: angular 4pi factors, whether the y kernel is hminus, hminus/y, or regular F, the number of rotated radial Jacobians, and the C_n phase. Then make the smallest code edit matching that ledger."
+    },
+    {
+      "candidate_id": "A6",
+      "verdict": "refine_first_step",
+      "rationale": "A6 is a good non-scan way to attack the 4*pi and mass-factor ambiguity. It proposes a \"synthetic n+d Born-only limit\", sets \"Psibar = psi_in\", and says to \"Demand equality and SOLVE for the prefactor\" between m/hbar^2, (4/3)m/hbar^2, 4pi, and phase powers. This is not T3 reinvention if the Born reference is genuinely derived.",
+      "redundant_with": null,
+      "info_gain_correction": "The information gain is high only if the independent Born reference is not circular. If the reference reuses the same angular reduction or kernel assumption as the tested Eq.17 integral, solving for the prefactor becomes a disguised calibration.",
+      "first_step_correction": "Specify the analytic Born reference before coding: the exact V23+V31 geometry, bipolar-harmonic normalization, deuteron c-normalization, and y-coordinate kinetic mass. Then solve for the prefactor once, with no candidate table."
+    },
+    {
+      "candidate_id": "A7",
+      "verdict": "redundant",
+      "rationale": "A7 is the same channel-spin projection axis as B5. It cites the same failure mode \"iel=first(cpl)\" and proposes a full \"n_deuteron x n_deuteron f-matrix\" followed by \"compute_phase_shift_analysis\" and recoupling. B5 is the cheaper first pass because it prints raw per-channel blocks before applying Wigner factors.",
+      "redundant_with": "B5",
+      "info_gain_correction": "If retained after B5, use A7 as the full recoupled confirmation, not as an independent idea. For central S-wave MT, the D-channel may be tiny, so a null result mainly rules out this axis.",
+      "first_step_correction": "Run B5's raw per-channel print first. Only if multiple blocks carry appreciable complex amplitude should the full f-matrix and recouple_to_channel_spin path be promoted."
+    }
+  ],
+  "diagonal": {
+    "candidate_id": "B1",
+    "rationale": "B1 is the best diagonal because the stuck card's sharpest internal contradiction is operator-theoretic: T1 versus T4 gives 674 versus 4.4 after moving Rxy across the contraction. B1 tests exactly that move in the current Eq.17 harness, with no prefactor scan, no external solver, and no change to the GMRES solution."
+  },
+  "cheapest_disambiguator": {
+    "candidate_id": "B1",
+    "rationale": "It needs only a local smoke contraction and metric-adjoint variants of the existing bra map. If B1 changes Mp qualitatively, B2 is the fixed-number validation. If B1 leaves Mp near-real and small, the next cheap branches are B5 for channel projection and B4 for Born/scattered localization."
+  },
+  "incompatible_pairs": [
+    {
+      "a": "A1",
+      "b": "A5",
+      "reason": "Their first steps assume different Eq.17 vehicles. A1 keeps a T4-style bra vertex inside a COLOSS-like spectral f_born+f_sc construction, while A5 says the y kernel and prefactor must first be replaced by reduced-rep 2-body-anchor factors such as regular F_lambda and -(1/E_cm). They cannot both be the final unmodified extraction formula."
+    },
+    {
+      "a": "A1",
+      "b": "B4",
+      "reason": "As diagnoses, they conflict if B4 finds that the direct T4 scattered component already carries the benchmark-scale phase. That would contradict A1's claim that the phase is structurally absent until an explicit spectral resolvent f_sc is inserted."
+    },
+    {
+      "a": "B1",
+      "b": "B2",
+      "reason": "They are compatible tests but incompatible final operator stories in one specific outcome: if B2 shows the literal V23+V31 identity already passes with the current side maps, then a large B1 metric-adjoint correction cannot also be the root cause of the same V23+V31 mapping error."
+    },
+    {
+      "a": "A6",
+      "b": "B3",
+      "reason": "A6 requires a single Born-derived prefactor. B3's factor-table mode is acceptable only before that derivation exists. Once A6 fixes the mass, 4pi, and phase triple, the competing B3 table entries are ruled out."
+    }
+  ],
+  "groupthink_flag": {
+    "raised": false,
+    "shared_anchor": "The original A/B reports shared an operator and Born-phase anchor: A1 focuses on missing resolvent, A2/B4 on Born/scattered pieces, and A3/B2 on Rxy/V identity. The respawn A5/A6/A7 breaks that groupthink by adding the reduced-rep y-kernel, 4pi/mass/C_n/Jacobian ledger, and channel-spin recoupling axes.",
+    "recommended_re_prompt_target": null
+  },
+  "all_filtered": {
+    "raised": false,
+    "minimum_info_needed": null
+  }
+}

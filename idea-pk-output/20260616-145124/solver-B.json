@@ -1,0 +1,163 @@
+{
+  "solver": "B",
+  "stance_summary": "Methodologist and cheapest-test designer. I would not tune a scalar amplitude until the operator side, channel projection, and prefactor ledger each pass a fixed-number test against either the locked two-body CS result or a three-body bound-state identity.",
+  "anchored_assumption": "Disambiguation: is delta about 0 because H1 the rearrangement is applied on the wrong side or with the wrong metric adjoint, H2 the Eq.17 reduced-basis prefactor or y-kernel normalization is wrong, H3 the deuteron doublet channel projection is incomplete, or H4 the scattering phase is present in psi_sc but canceled or hidden by the Born/scattered split?",
+  "candidates": [
+    {
+      "id": "B1",
+      "one_line": "Audit the Rxy side move with an explicit metric-adjoint/inverse rearrangement, not the symmetric shortcut.",
+      "first_concrete_step": "In the current Eq.17 harness, keep the solve unchanged, but replace only the local `Rbra = Rxy*bra` at swift/test_eq17_green.jl:88 by a printed comparison of four bra maps: `Rxy*bra`, `2*Rxy_13_matrix_optimized(alpha,grid)*bra`, `B \\\\ (transpose(Rxy)*B*bra)`, and `B \\\\ (transpose(Rxy_31)*B*bra)`, where `B` is built as in swift/scattering.jl:99-101 and `Rxy_13_matrix_optimized` is defined at swift/matrices_optimized.jl:296-382. Also print `norm(B*Rxy_13 - transpose(Rxy_31)*B)/norm(transpose(Rxy_31)*B)` and the resulting `Mp = transpose(blk(Rbra,iel))*blk(VPsi,iel)` from swift/test_eq17_green.jl:89-90.",
+      "cost_estimate": "One local smoke run at nx=12, ny=30; no GMRES change. Minutes.",
+      "info_gain": "Directly tests whether the 674 vs 4.4 contradiction comes from using `Rxy = 2*Rxy_31` at swift/matrices_optimized.jl:266-268 and then moving Rxy across a non-orthogonal Laguerre metric as if it were symmetric.",
+      "risk": "The full B inverse can be ill-conditioned on larger Laguerre meshes; judge first by action on the bra/vector and by the small grid, not by a production-size dense inverse.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "Does not use `bra^T*(Rxy*V*Psibar)`; V stays adjacent to the protected side."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "Does not switch to psi_sc-only; it tests the representation of the same operator."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "No scalar or phase fitting and no regular-F shortcut."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "Keeps the T4 V-protected idea but removes the untested literal `Rxy` symmetry assumption."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "The Hankel/F bra type is fixed; only the rearrangement map is varied."
+        }
+      ],
+      "dependencies": "Needs only objects already built in run_case plus `Rxy_13_matrix_optimized`; no new physics input."
+    },
+    {
+      "id": "B2",
+      "one_line": "Use the bound-state identity as the independent ruler for V23+V31 before using that operator in Eq.17.",
+      "first_concrete_step": "Extend the existing swift/test_V23V31_operator.jl, not a new script. It already builds `V`, `Rxy`, `Rxy_31`, `Rxy_13`, `B`, and `Psi` at lines 30-39 and the ruler `2*real(Psi'*V*Psi)` at lines 41-45. Print the separate one-pair quantity `real(Psi'*(Rxy_31*(V*(Rxy_13*Psi))))/real(Psi'*(V*Psi))`, then the c-product and B-metric versions, before the summed candidates at lines 49-57. The pass condition is one pair equals 1 and the two-pair sum equals 2 within truncation.",
+      "cost_estimate": "One existing MN bound-state test at nx=16, ny=16; typically minutes and no scattering solve.",
+      "info_gain": "If this fails, the Eq.17 amplitude cannot be right regardless of y-kernel or prefactor. It isolates `V_matrix_optimized` at swift/matrices_optimized.jl:520-610 and the Rxy family at swift/matrices_optimized.jl:182-270,296-382 from all open-channel complications.",
+      "risk": "The current test uses Hermitian `Psi'` at swift/test_V23V31_operator.jl:44,56 while the CS scattering amplitude uses a bilinear c-product. Run at theta=0 first, then add the B-metric/c-product print only as a diagnostic.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "No growing scattering bra and no Green integral, only a bound-state operator identity."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "No psi_sc-only variant; the test uses a known 3-body eigenstate."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "No amplitude prefactor or regular-F coincidence is involved."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "Tests whether T4's operator premise is valid before applying the T4 amplitude formula."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "Independent of hminus/hplus/F bra choice."
+        }
+      ],
+      "dependencies": "Uses the existing `malfiet_tjon_solve_optimized` path already called by swift/test_V23V31_operator.jl:24-26."
+    },
+    {
+      "id": "B3",
+      "one_line": "Make the Eq.17 prefactor ledger deterministic, then forbid all free scale scans.",
+      "first_concrete_step": "Around swift/test_eq17_green.jl:94-103, print a factor table from the already computed `q`, `C_n` at lines 75-79, and `Mp` at line 90: base `-(m/(hbar^2/amu))/C_n*Mp`, `4*pi*base`, `(2*mu/m)*base` with `mu=2m/3` from swift/matrices_optimized.jl:1176-1179, `base*exp(im*n*theta)` for only the paper/code Jacobian candidates n=1,2,3,6, and `C_n` replaced by the 3D phase convention from PhysRevC.84.034002 Eq.16-17 text lines 199-227. Cross-check signs against the locked two-body formula in swift/test_2body_cs_1S0.jl:77-114 and COLOSS/src/scatt.f:52,60.",
+      "cost_estimate": "Seconds after one existing Eq.17 run; no new solve.",
+      "info_gain": "Separates a pure magnitude defect, such as the observed about 4*pi, from a phase/operator defect. If every legal factor leaves S near the positive real axis, normalization is not the cause of delta about 0.",
+      "risk": "Easy to misuse as fitting. The table must include only factors derived from Eq.17, the reduced F/(xy) representation in the paper Eq.25 text lines 278-282, and the locked 2-body/COLOSS conventions.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "Does not revisit the divergent operator ordering."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "Does not change Psibar to psi_sc-only."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "Explicitly rejects arbitrary scalar sweeps; only fixed candidates are printed."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "Runs on the convergent T4 raw matrix element but tests only legal prefactors."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "No bra-type scan; kernel is fixed while constants are audited."
+        }
+      ],
+      "dependencies": "Requires the locked two-body reference to remain untouched: swift/test_2body_cs_1S0.jl lines 77-114 and COLOSS scatt.f lines 38-62."
+    },
+    {
+      "id": "B4",
+      "one_line": "Decompose the matrix element into Born and scattering pieces using the COLOSS split as the known subproblem.",
+      "first_concrete_step": "At swift/test_eq17_green.jl:71-90, compute and print complex magnitude and phase for `Mp_in = transpose(blk(Rbra,iel))*blk(V*(psi_in+Rxy*psi_in),iel)` and `Mp_sc = transpose(blk(Rbra,iel))*blk(V*(psi_sc+Rxy*psi_sc),iel)`, then repeat with a COLOSS-style split: unrotated Born from `V_matrix_optimized` and `compute_initial_state_vector(..., theta=0)`, plus rotated scattered part from `V_matrix_optimized_scaled`. The template is the locked split in swift/test_2body_cs_1S0.jl:82-99 and COLOSS/src/scatt.f:54-62.",
+      "cost_estimate": "One Eq.17 smoke run plus one extra unrotated V build; minutes.",
+      "info_gain": "Tells whether the scattering phase is computed but canceled by the total rotated integral, or whether it never enters `V*Psibar` at all. If `Mp_sc` has the benchmark-scale imaginary phase and `Mp_in` dominates real, the next bug is the Born/scattered split, not Rxy. If `Mp_sc` is tiny or phase-aligned with Born, debug the source/solution path.",
+      "risk": "The split is a diagnostic, not a replacement formula unless it reproduces the locked two-body result exactly under the same conventions.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "Uses the V-protected ordering and only decomposes the convergent raw number."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "Does not accept psi_sc-only as the final amplitude; it prints the missing contribution next to Born."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "The regular-F old formula is not used as a success criterion."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "Explains the T4 raw `Mp` by components instead of changing its side ordering."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "Keeps one bra convention and asks where the phase sits."
+        }
+      ],
+      "dependencies": "Needs the current Eq.17 harness and the already validated two-body split; no literature read and no production-code edit."
+    },
+    {
+      "id": "B5",
+      "one_line": "Test whether `first(cpl)` is throwing away the doublet channel-spin projection.",
+      "first_concrete_step": "Before swift/test_eq17_green.jl:82, print every `cpl` channel with `i_alpha`, `lambda`, `J3`, `J12`, `s12`, and `l_2b`, then compute the same `Mp` block-by-block for all deuteron-compatible channels instead of only `iel=first(cpl)`. Use the channel-spin recoupling machinery in swift/scattering.jl:423-542 as the reference for combining J3-basis amplitudes, since `compute_scattering_amplitude` deliberately keeps all deuteron channels at swift/scattering.jl:259-296 before phase-shift analysis.",
+      "cost_estimate": "Seconds after the Eq.17 run; just extra block contractions and Wigner factors.",
+      "info_gain": "Directly tests H3. A missing recoupling weight can change both phase and scale while all bra-type scans look inert, because T5 varied only the radial y-kernel after the channel projection had already been collapsed.",
+      "risk": "Wigner phase conventions can produce false sign flips. The first print should therefore compare per-channel raw `Mp` values before applying any recoupling.",
+      "orthogonality_to_tried": [
+        {
+          "tried_item": "T1",
+          "difference": "Does not use the divergent ket-side Rxy ordering."
+        },
+        {
+          "tried_item": "T2",
+          "difference": "Uses the full and component amplitudes only to test channel projection, not to drop the incoming wave."
+        },
+        {
+          "tried_item": "T3",
+          "difference": "No prefactor rescale and no regular-F coincidence."
+        },
+        {
+          "tried_item": "T4",
+          "difference": "Keeps T4's convergent ordering but replaces the single-block projection."
+        },
+        {
+          "tried_item": "T5",
+          "difference": "Orthogonal to hminus/hplus/F; this varies the channel-spin vector, not the radial kernel."
+        }
+      ],
+      "dependencies": "Requires only alpha channel metadata from the existing `alpha3b` object and `recouple_to_channel_spin` conventions already in scattering.jl."
+    }
+  ],
+  "convergence_note": "Run B1 and B2 first because they decide the operator side without touching prefactors. If those pass, B5 tests the projection. B4 then localizes whether the scattering phase is absent or canceled. B3 is the final scale audit and should not be used to declare success unless the earlier operator/projection tests pass."
+}

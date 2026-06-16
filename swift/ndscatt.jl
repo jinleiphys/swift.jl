@@ -69,8 +69,9 @@ E_scatt = 3.0   # Can be adjusted
 # Coulomb parameter (z1*z2 for n+d scattering)
 z1z2 = 0.0      # Neutron-deuteron: both neutral
 
-# Complex scaling angle (for resonance calculations)
-θ_deg = 10.0     # Standard calculation (no complex scaling)
+# Complex scaling angle (for scattering above breakup / resonances)
+θ_deg = 10.0           # CS angle in DEGREES
+θ_rad = θ_deg * π / 180.0   # radians; compute_initial_state_vector expects radians (exp(im*θ))
 
 println("System configuration:")
 println("  Jtot = $Jtot, T = $T, Parity = $Parity, MT = $MT")
@@ -120,7 +121,7 @@ println()
 
 println("Step 4: Computing initial state vector...")
 println("  Computing φ(θ) = [φ_d(x) F_λ(ky)] / [ϕx ϕy]...")
-φ_θ = compute_initial_state_vector(grid, α, φ_d_matrix, E_scatt, z1z2, θ=θ_deg)
+φ_θ = compute_initial_state_vector(grid, α, φ_d_matrix, E_scatt, z1z2, θ=θ_rad)
 
 # Verify initial state
 println("  Initial state vector size: $(length(φ_θ))")

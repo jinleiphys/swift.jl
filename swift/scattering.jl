@@ -227,7 +227,7 @@ where:
 f_matrix, channel_map, labels = compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix, z1z2)
 ```
 """
-function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix::Matrix{ComplexF64}, z1z2; θ=0.0, σ_l=0.0)
+function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix::Matrix{ComplexF64}, z1z2; θ=0.0, σ_l=0.0, conj_bra::Bool=true)
     # Constants
     ħ = 197.3269718  # MeV·fm (ħc)
     m = 1.0079713395678829     # Nucleon mass in amu
@@ -345,9 +345,21 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
             V_Rxy_ψ_component = temp2[idx_in_start:idx_in_end]
 
             # Compute inner product ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩_{α₀_in}.
-            # Same convention as the bound state: conjugated bra (dot = a'·b); V is the
-            # operator matrix element so no separate B metric (cf. ψ'·V_UIX·ψ in MalflietTjon).
-            inner_product = dot(ψ_out_component, V_Rxy_ψ_component)
+            #
+            # CONVENTION (see 2026-06-16 finding in TODO.md + FADDEEV_R_SPACE_NOTES "Scattering
+            # amplitude"): under complex scaling the rotated Hamiltonian is complex-SYMMETRIC,
+            # not Hermitian, so the physically correct projection is the BILINEAR c-product
+            # (transpose, NO conjugation) combined with the deuteron c-norm factor 1/C_n
+            # (C_n = φ_d^T B φ_d), which removes the arbitrary global phase of the CS eigenvector.
+            # That combination turns the unphysical η≥1 into a physical η<1 (gauge-invariant).
+            #
+            # conj_bra defaults to TRUE (Hermitian dot = the pre-2026-06-16 production path) because
+            # the bilinear path is NOT yet benchmark-complete: it still leaves a residual
+            # (η≈0.27 vs 0.4649, δ≈77° vs 105°) traced to the V·Rxy projection OPERATOR differing
+            # from Lazauskas Eq.16/17 — see TODO "▶ NEXT". Set conj_bra=false for the bilinear
+            # c-product; the 1/C_n factor is applied by the caller (test_cnorm_extraction.jl).
+            inner_product = conj_bra ? dot(ψ_out_component, V_Rxy_ψ_component) :
+                                       transpose(ψ_out_component) * V_Rxy_ψ_component
 
             # Apply prefactor
             f_matrix[i_out, i_in] = prefactor * inner_product
