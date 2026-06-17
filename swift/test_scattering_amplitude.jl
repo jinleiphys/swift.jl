@@ -41,12 +41,12 @@ println("Grid: $(nx)×$(ny) mesh")
 println()
 
 # Scattering energy and charges
-E = 1.0   # MeV
+E = 3.0   # MeV, n-d relative energy in the cm frame
 z1z2 = 0.0 # Charge product for n+d (no Coulomb interaction)
 θ_deg = 8.0    # Complex scaling angle in degrees
 
 println("Computing matrices...")
-V = V_matrix_optimized(α, grid, "MT")
+V = V_matrix_optimized_scaled(α, grid, "MT", θ_deg=θ_deg)
 Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
 println("  Matrices computed")
 println()
@@ -63,8 +63,10 @@ end
 
 φ_d_matrix = ComplexF64.(bound_wavefunctions[1])  # Ground state with ³S₁ + ³D₁ components
 E_deuteron = real(bound_energies[1])
+E_total = E + E_deuteron
 
 println("  Deuteron binding energy: $(round(E_deuteron, digits=4)) MeV")
+println("  Total three-body energy: $(round(E_total, digits=4)) MeV")
 println("  Deuteron wavefunction computed")
 println()
 
@@ -90,7 +92,7 @@ println()
 
 # Solve scattering equation to get ψ_sc
 # Solves: [E*B - T - V*(I + Rxy)] ψ_sc = 2*V*Rxy_31*φ
-ψ_sc, A_matrix, b_vector = solve_scattering_equation(E, α, grid, "MT", ψ_in,
+ψ_sc, A_matrix, b_vector = solve_scattering_equation(E_total, α, grid, "MT", ψ_in,
                                                        θ_deg=θ_deg)
 println("  Scattering solution ψ_sc computed via preconditioned GMRES")
 println("  Residual norm: ||A*ψ_sc - b|| = $(norm(A_matrix * ψ_sc - b_vector))")
@@ -137,6 +139,21 @@ println("="^70)
 println("PHASE SHIFT ANALYSIS")
 println("="^70)
 phase_results = compute_phase_shift_analysis(f_matrix, k, α, deuteron_channels, channel_labels)
+println()
+
+U_matrix = compute_collision_matrix(f_matrix, k)
+U_channel_spin, cs_labels = Scattering.recouple_to_channel_spin(U_matrix, α, deuteron_channels)
+key = (Jtot, 1)
+if haskey(U_channel_spin, key)
+    idx = findfirst(==("λ=0, 𝕊=0.5"), cs_labels[key])
+    if idx !== nothing
+        S00 = U_channel_spin[key][idx, idx]
+        δ_principal = rad2deg(0.5 * angle(S00))
+        δ_0_180 = δ_principal < 0 ? δ_principal + 180.0 : δ_principal
+        @printf("DIRECT DOUBLET S-WAVE: S = %+.6e %+.6e i,  δ = %.4f° (principal %.4f°),  η = %.6f\n",
+                real(S00), imag(S00), δ_0_180, δ_principal, abs(S00))
+    end
+end
 println()
 
 # Display summary

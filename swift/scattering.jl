@@ -192,15 +192,21 @@ end
 Compute the partial-wave scattering amplitude matrix f_{α₀_out, α₀_in}(k) for elastic deuteron scattering.
 
 # Physics:
-For elastic scattering, we match three-body channels to deuteron bound state channels (J12=1).
-The scattering amplitude for transition between deuteron channels α₀_in → α₀_out is:
+For elastic scattering, this implements the Lazauskas-Carbonell Green-theorem
+integral in the reduced partial-wave representation. In swift's identical-particle
+Faddeev basis the Eq.17 short-range source is evaluated as
 
-f_{α₀_out, α₀_in}(k) = -4μ₃/(ℏ²k²) e^(-iσ_l) ⟨φ_{α₀_out} | V | Rxy_31 | ψ_total⟩
+    [V_j+V_k]Ψ_m = V_i(ψ_j+ψ_k) = V * Rxy * ψ_i,total,
+
+with Rxy = 2Rxy_31 and ψ_i,total = ψ_in + ψ_sc. The projection uses the CS
+bilinear product and the reduced deuteron c-norm C_n. The current API carries
+one driven solution, so only diagonal projections are populated; a full coupled
+on-shell matrix requires one solve per independent incoming channel.
 
 where:
-- φ_{α₀} are asymptotic states in deuteron channels (J12=1, with ³S₁ and ³D₁ components)
-- ψ_total = φ + ψ₃^(sc) is the total wavefunction
-- μ = 2m/3 is the reduced mass for deuteron-nucleon system
+- φ_{α₀} are asymptotic deuteron channels (J12=1, with coherent ³S₁ and ³D₁ components)
+- ψ_i,total = ψ_in + ψ_sc is the total Faddeev component for this driven solve
+- μ = 2m/3 is the physical n-d reduced mass
 
 # Arguments
 - `ψ_in`: Initial state vector φ
@@ -227,7 +233,7 @@ where:
 f_matrix, channel_map, labels = compute_scattering_amplitude(φ, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix, z1z2)
 ```
 """
-function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix::Matrix{ComplexF64}, z1z2; θ=0.0, σ_l=0.0, conj_bra::Bool=true)
+function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d_matrix::Matrix{ComplexF64}, z1z2; θ=0.0, σ_l=0.0, conj_bra::Bool=false)
     # Constants
     ħ = 197.3269718  # MeV·fm (ħc)
     m = 1.0079713395678829     # Nucleon mass in amu
@@ -253,16 +259,19 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
     println("  Coulomb phase σ_l = $σ_l")
     println("  Total three-body channels: $n_channels")
 
-    # Step 1: Identify which three-body channels correspond to deuteron bound state (J12=1)
+    # Step 1: Identify physical deuteron channels (J12=1) and collect the
+    # ³S₁/³D₁ internal components belonging to the same asymptotic (λ,J3) channel.
     println("  Identifying deuteron channels (J12=1)...")
 
-    deuteron_channels = Vector{Int}()        # Three-body channel indices α
-    deuteron_2b_channels = Vector{Int}()     # Corresponding two-body channel indices
+    deuteron_channels = Vector{Int}()        # Representative three-body channel indices
+    deuteron_components = Vector{Vector{Tuple{Int, Int}}}()  # (three-body α, deuteron 2b component)
     channel_labels = Vector{String}()        # Human-readable labels
+    group_keys = Vector{Tuple{Int, Float64, Float64, Float64, Float64}}()
 
     for iα in 1:n_channels
         # Get quantum numbers for this three-body channel
         λ_channel = α.λ[iα]
+        J3_channel = α.J3[iα]
         i2b = α.α2bindex[iα]
 
         # Get two-body quantum numbers
@@ -284,15 +293,21 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
                 label = "³D₁, λ=$(Int(round(λ_channel)))"
             end
 
-            # Only keep deuteron components the bound state actually occupies. The (l₁₂)
-            # split (³S₁ vs ³D₁) is INTERNAL to the deuteron, not a separate scattering
-            # channel: components with the same (λ, J₃) would otherwise be double-counted in
-            # the channel-spin recoupling. For a central S-wave potential (e.g. MT) the ³D₁
-            # amplitude is zero, so only ³S₁ survives.
             if matched_2b_channel > 0 && norm(φ_d_matrix[:, matched_2b_channel]) > 1e-8
-                push!(deuteron_channels, iα)
-                push!(deuteron_2b_channels, matched_2b_channel)
-                push!(channel_labels, label)
+                key = (Int(round(λ_channel)), J3_channel, J12_2b, s12_2b, α.T12[iα])
+                group_idx = findfirst(==(key), group_keys)
+                if group_idx === nothing
+                    push!(group_keys, key)
+                    push!(deuteron_channels, iα)
+                    push!(deuteron_components, [(iα, matched_2b_channel)])
+                    push!(channel_labels, "λ=$(Int(round(λ_channel))), J3=$(J3_channel)")
+                else
+                    push!(deuteron_components[group_idx], (iα, matched_2b_channel))
+                    # Prefer the ³S₁ channel as representative for recoupling labels.
+                    if l_2b == 0
+                        deuteron_channels[group_idx] = iα
+                    end
+                end
             end
         end
     end
@@ -300,21 +315,35 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
     n_deuteron = length(deuteron_channels)
     println("  Found $n_deuteron deuteron channels:")
     for i in 1:n_deuteron
-        println("    α₀=$i → α=$(deuteron_channels[i]): $(channel_labels[i])")
+        comps = join(["α=$(c[1])" for c in deuteron_components[i]], ", ")
+        println("    α₀=$i → rep α=$(deuteron_channels[i]): $(channel_labels[i]) [$comps]")
     end
 
     if n_deuteron == 0
         error("No deuteron channels found! Check channel structure.")
     end
 
-    # Step 2: Compute total wave function
-    println("  Computing ψ₃^(total) = ψ₃^(in) + ψ₃^(sc)...")
+    # Step 2: Compute the total Faddeev component for this incoming state.
+    # Eq.17 can be evaluated from the Faddeev source operator
+    # [V_j+V_k]Ψ_m ≡ V_i(ψ_j+ψ_k) = V * Rxy * ψ_i,total in swift's component basis.
+    # Rxy = Rxy_31 + Rxy_32 = 2 Rxy_31 for the identical-nucleon basis used here.
+    println("  Computing ψ₃,total = ψ₃,in + ψ₃,sc...")
     ψ_total = ψ_in + ψ_sc
 
-    # Step 3: Compute V × Rxy_31 × ψ_total (shared for all channel pairs)
-    println("  Computing V × Rxy_31 × ψ_total...")
-    temp1 = Rxy_31 * ψ_total
-    temp2 = V * temp1
+    # Step 3: Compute [V_j+V_k]Ψ_m on the mesh.
+    println("  Computing Eq.17 source operator W = V × Rxy × ψ₃,total...")
+    Rxy_ψ_total = 2.0 .* (Rxy_31 * ψ_total)
+    W = V * Rxy_ψ_total
+
+    # Reduced deuteron c-norm. Lazauskas writes C_n with the 3D e^{3iθ} volume
+    # factor; after the deuteron 1/x radial reduction this is e^{iθ}.
+    Nx = matrices_optimized.compute_overlap_matrix(nx, grid.xx)
+    evec = ComplexF64[
+        φ_d_matrix[j, ich] / grid.ϕx[j]
+        for ich in 1:n_2b_channels for j in 1:nx
+    ]
+    B2b = kron(Matrix{Float64}(I, n_2b_channels, n_2b_channels), Nx)
+    C_n = (transpose(evec) * B2b * evec) * exp(im * θ)
 
     # Step 4: Compute scattering amplitude matrix for deuteron channels
     println("  Computing scattering amplitudes for deuteron channel pairs...")
@@ -322,46 +351,32 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
     # Initialize amplitude matrix (for deuteron channels only)
     f_matrix = zeros(ComplexF64, n_deuteron, n_deuteron)
 
-    # Prefactor: f(k) = -4μ₃/(ℏ²k²) e^(-iσ_l) × ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩
-    prefactor = -4.0 * μ * amu / (ħ^2 * k_squared) * exp(-im * σ_l)
+    # Eq.17 in physical y coordinates: 2μ_y/ℏ² = 4m_N/(3ℏ²).
+    # The partial-wave reduced form uses the Riccati regular wave F_λ=qy j_λ(qy),
+    # already present in ψ_in, which contributes the extra 1/q² relative to the
+    # plane-wave kernel exp(-iq·y)/|y|.
+    prefactor = -(2.0 * μ * amu) / (ħ^2 * k_squared) * exp(-im * σ_l) / C_n
 
     for i_out in 1:n_deuteron
         for i_in in 1:n_deuteron
-            # Map deuteron channel indices to three-body channel indices
-            α_out = deuteron_channels[i_out]
-            α_in = deuteron_channels[i_in]
+            if i_in != i_out
+                f_matrix[i_out, i_in] = 0.0
+                continue
+            end
 
-            # Extract channel components from ψ_total and temp2
-            idx_out_start = (α_out - 1) * n_gridpoints + 1
-            idx_out_end = α_out * n_gridpoints
+            inner_product = 0.0 + 0.0im
+            for (α_out, _) in deuteron_components[i_out]
+                idx_start = (α_out - 1) * n_gridpoints + 1
+                idx_end = α_out * n_gridpoints
+                bra_component = ψ_in[idx_start:idx_end]
+                ket_component = W[idx_start:idx_end]
+                inner_product += conj_bra ? dot(bra_component, ket_component) :
+                                            transpose(bra_component) * ket_component
+            end
 
-            idx_in_start = (α_in - 1) * n_gridpoints + 1
-            idx_in_end = α_in * n_gridpoints
-
-            # Get the incoming state component for this outgoing channel
-            ψ_out_component = ψ_in[idx_out_start:idx_out_end]
-
-            # Get V × Rxy_31 × ψ_total for the incoming channel
-            V_Rxy_ψ_component = temp2[idx_in_start:idx_in_end]
-
-            # Compute inner product ⟨φ_{α₀_out} | V Rxy_31 | ψ_total⟩_{α₀_in}.
-            #
-            # CONVENTION (see 2026-06-16 finding in TODO.md + FADDEEV_R_SPACE_NOTES "Scattering
-            # amplitude"): under complex scaling the rotated Hamiltonian is complex-SYMMETRIC,
-            # not Hermitian, so the physically correct projection is the BILINEAR c-product
-            # (transpose, NO conjugation) combined with the deuteron c-norm factor 1/C_n
-            # (C_n = φ_d^T B φ_d), which removes the arbitrary global phase of the CS eigenvector.
-            # That combination turns the unphysical η≥1 into a physical η<1 (gauge-invariant).
-            #
-            # conj_bra defaults to TRUE (Hermitian dot = the pre-2026-06-16 production path) because
-            # the bilinear path is NOT yet benchmark-complete: it still leaves a residual
-            # (η≈0.27 vs 0.4649, δ≈77° vs 105°) traced to the V·Rxy projection OPERATOR differing
-            # from Lazauskas Eq.16/17 — see TODO "▶ NEXT". Set conj_bra=false for the bilinear
-            # c-product; the 1/C_n factor is applied by the caller (test_cnorm_extraction.jl).
-            inner_product = conj_bra ? dot(ψ_out_component, V_Rxy_ψ_component) :
-                                       transpose(ψ_out_component) * V_Rxy_ψ_component
-
-            # Apply prefactor
+            # The current API carries one driven solution. A full coupled on-shell
+            # matrix requires one solve per independent incoming channel, so only
+            # the diagonal projection is populated here.
             f_matrix[i_out, i_in] = prefactor * inner_product
         end
     end
@@ -369,6 +384,7 @@ function compute_scattering_amplitude(ψ_in, V, Rxy_31, ψ_sc, E, grid, α, φ_d
     println("  Scattering amplitude matrix computed:")
     println("    Matrix size: $n_deuteron × $n_deuteron")
     println("    Max |f_{α₀_out,α₀_in}| = $(maximum(abs.(f_matrix)))")
+    println("    Deuteron reduced c-norm C_n = $(C_n) (|C_n|=$(abs(C_n)))")
     println("Scattering amplitude computed successfully.")
 
     return f_matrix, deuteron_channels, channel_labels

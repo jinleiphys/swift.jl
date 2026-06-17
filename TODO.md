@@ -1,17 +1,57 @@
 # swift.jl TODO
 
-Snapshot **2026-06-16**. This session: traced the n-d scattering η bug from the physics outward.
-**Two-layer result**: (layer 1, SOLVED in understanding) the CS amplitude must use the bilinear
-c-product + deuteron c-norm 1/C_n, which turns the unphysical η≥1 into a physical η<1 and is
-gauge-invariant; (layer 2, LOCALIZED) a residual remains (η≈0.27 vs 0.4649, δ≈77° vs 105°) that is
-NOT mesh truncation and is traced to the V·Rxy projection OPERATOR differing from Lazauskas Eq.16/17.
+Snapshot **2026-06-17**. ⏸ **BLOCKED on the n-d scattering extraction, waiting for Rimas's reply.**
+Root cause FOUND this session (see next section): every amplitude-extraction form diverges with the
+y-box because the **Lagrange-Laguerre overlap matrix has a long-range 1/√(yᵢyⱼ) off-diagonal tail**
+that couples the exponentially-growing CS incoming wave from small y up to large y. The formulas and
+the coordinate rotation are correct; the basis representation is the problem. Email drafted to Rimas
+(`~/Downloads/email-to-lazauskas-scattering-extraction.txt`); he said he later uses Lagrange-Laguerre,
+so the question is HOW he keeps the source/integral convergent in that basis.
 
 > ⚠️ **CLOUD-SYNC HAZARD**: this repo lives in a cloud-synced folder; a `scattering (conflicted copy …).jl`
-> appeared mid-session before and the sync silently reverted an `inner_product` line at least once.
-> **CORRECTION to the old banner**: the old TODO said line ~350 "should be `dot` NOT `transpose`".
-> That was BACKWARDS. Under complex scaling the correct projection is the BILINEAR c-product
-> (`transpose`, no conj) + 1/C_n; `dot` (Hermitian) pins η≈1 and is only kept as the current default
-> because the bilinear path is not yet benchmark-complete (see layer 2 below). Commit early/often.
+> appeared mid-session before and the sync silently reverted an `inner_product` line at least once. Commit early/often.
+
+---
+
+## ⏸ BLOCKED 2026-06-17 — root cause found, waiting for Rimas
+
+**Target unchanged**: Lazauskas-Carbonell PRC 84,034002 Tab.III doublet n-d, E_lab=14.1 MeV →
+**Re δ=105.49°, η=0.4649** (K[1,1]=−1.143+1.870i). Extraction back-end = Glöckle Physics Reports 274
+(1996) Eq.209-214 (channel-spin Blatt-Biedenharn S=U†ΛU), already in `compute_phase_shift_analysis`.
+
+**What this session settled (all in memory `kmatrix-integral-relations-method.md`):**
+- ✅ **Rimas's actual method = his 2011 Eq.17 (Green theorem), NOT the Duerinck-thesis K-matrix.** The
+  whole K-matrix A-matrix linear-system detour was the overcomplication. Eq.17:
+  `f = −C_n⁻¹(2µ_y/ħ²)e^{6iθ}∫∫ φ_n*(xe^{−iθ})[e^{−iqy e^{iθ}}/y][V_j+V_k]ψ_m d³x d³y`, then S=1+2iq·f.
+- ✅ **Formula/coefficient OK**: coordinate-space S=1+2iq·f (Rimas Eq.6) vs momentum-space Glöckle U→S
+  differ ONLY in the amplitude→S step; Eq.209-214 is convention-free on S. swift's `compute_collision_matrix`
+  already uses U=1+2ik·f (coordinate-space). Don't mix in momentum-space µq/(2π)³ factors. Coefficient = 31.10·q
+  (=ℏ²q/2µ_y, swift physical Jacobi coords; the earlier "ℏ²q/m0=4/3" was wrong — Codex-confirmed).
+- ✅ **Coordinate rotation OK**: verified V uses back-rotation (basis at re^{−iθ}, V at real r, jacobian e^{−iθ})
+  = exactly V(re^{+iθ}), same r→re^{+iθ} as the kinetic's e^{−2iθ}. Outgoing decays, no sign error.
+- ✅ **off-diagonal=0 is physical** (MT central force, no deuteron D-state → doublet decouples from λ=2 at
+  the V vertex). Doublet is a scalar K[1,1].
+- ❌ **THE BUG (root cause, decisive per-y diagnostics)**: `compute_overlap_matrix` (matrices_optimized.jl:49)
+  builds the non-orthonormal Lagrange-Laguerre overlap `N[i,j]=δ + (-1)^{i-j}/√(yᵢyⱼ)`. The 1/√(yᵢyⱼ)
+  off-diagonal is LONG-RANGE. Since `V_block=kron(V_x,Ny)`, this tail couples the incoming F(qy·e^{iθ})
+  — which grows to ~1e5 at y=120 under CS — from small y up to large y. The source `V·Rxy·ΩR` then does
+  not localize (decays only ~1/√y instead of exponentially), and Eq.17 (growing bra × algebraic-tail source)
+  diverges with the box: η = 0.57 (ymax60) → 25 (ymax90) → 5549 (ymax120). Proof: Rxy·ΩR(y_large)=1e-21 but
+  src(y_large)=18 ⟹ src at large y comes non-locally from small y via the overlap tail.
+- **Rimas's 2011 paper used local Hermite splines (banded overlap, no tail) — but he says he later switched
+  to Lagrange-Laguerre, so he handles this. That is the question in the email.**
+
+**[ ] WAIT for Rimas's reply** (`~/Downloads/email-to-lazauskas-scattering-extraction.txt`). Key questions:
+how to keep source+integral convergent in Lagrange-Laguerre given the growing incoming wave; what θ and
+y_max for n-d @14.1 MeV; Eq.17 vs Eq.16 and the G̃ regularization.
+
+**[ ] After reply — candidate fixes (don't start before hearing back):**
+  (a) limit y_max so F doesn't overflow precision (e^{q·ymax·sinθ}≲1e2-3 → ymax≲40-50 @θ=10°), trading
+      asymptotic reach; cheapest, verify Eq.17 converges + hits benchmark in that window.
+  (b) switch the y-direction basis to local splines (matches Rimas 2011) — large change, root cure.
+  (c) handle the overlap consistently in the extraction (B-weighted inner product / de-project), not
+      treating reduced-rep coefficients as function values.
+  (d) reduce θ (slower F growth, lighter tail contamination); pair with (a).
 
 ---
 
@@ -121,7 +161,12 @@ and a global e^{iθ} sufficed; that does not carry over to the 3-body V·Rxy vol
   Rimas-thesis.pdf`, Appendix H + §1.1.4 + §2.3).** The TALENT folder has only teaching codes (bound
   state, ordinary CC phase shifts via `atan(K)`, resonances) — NO 3-body CS amplitude code.
 
-## ★★★ NEW DIRECTION 2026-06-16 — K-matrix integral-relations method (group's OTHER method) ★★★
+## ★★★ K-matrix integral-relations method (2026-06-16) — ⚠️ SUPERSEDED, see 2026-06-17 top section ★★★
+
+> **2026-06-17 verdict**: this whole K-matrix route (from the Duerinck STUDENT thesis) was the
+> overcomplication. Rimas himself uses his 2011 Eq.17 (Green theorem). The 3-body K-matrix below
+> never converged (δ stuck) for the same root cause now identified: the Lagrange-Laguerre overlap
+> tail + growing CS incoming wave. Kept below for the record only. Do NOT resume the K-matrix path.
 
 Lazauskas sent his student P.Y. Duerinck's PhD thesis (`~/Downloads/PhD_Thesis_PYDuerinck_REV.pdf`,
 §1.1.6 / §1.3.5 / Appendix A). NOTE (per Jin): Eq.16/17 Green's theorem and the K-matrix integral
@@ -284,5 +329,18 @@ Old text below (superseded; kept for the Eq.17 piece-by-piece checklist):
 7. **NEW (2026-06-16)**: when an extracted observable (here δ≈77°) is INVARIANT under a normalization/
    convention change, the bug is in the OPERATOR being projected, not the normalization. δ stuck 28°
    low under both `dot` and `transpose×1/C_n` ⟹ the V·Rxy projection ≠ Lazauskas Eq.16/17.
+8. **★ NEW (2026-06-17), the root cause**: the n-d scattering extraction divergence is NOT a formula,
+   coefficient, or rotation bug (all verified correct). It is the **Lagrange-Laguerre non-orthonormal
+   overlap** `N[i,j]=δ+(-1)^{i-j}/√(yᵢyⱼ)` (compute_overlap_matrix:49): its long-range 1/√y tail, via
+   `V_block=kron(V_x,Ny)`, couples the exponentially-growing CS incoming wave (F~1e5 @y120) from small
+   y to large y, so the source/integral decay only algebraically and Eq.17 diverges with the box. The
+   bound state is immune (exponentially localized). Lazauskas's 2011 paper used local Hermite splines
+   (banded overlap, no tail); he reportedly later uses Lagrange-Laguerre, so a specific trick exists —
+   that is the question in the email. Diagnostic of record: `swift/test_3body_kmatrix.jl` per-y norms.
+9. **NEW (2026-06-17)**: phase-shift extraction back-end = Glöckle PhysRep 274 (1996) Eq.209-214
+   (Blatt-Biedenharn channel-spin S=U†ΛU); it is convention-free on S. Build S coordinate-space
+   (S=1+2iq·f, Rimas Eq.6) — do NOT mix momentum-space U→S factors. Coefficient = ℏ²q/2µ_y = 31.10·q.
 
-*End 2026-06-16. Resume at "▶ NEXT A": 2-body CS MT ¹S₀ isolation (δ=63.512°), then Eq.16.*
+*End 2026-06-17. ⏸ BLOCKED: waiting for Rimas's reply (email in ~/Downloads). Do not resume the K-matrix
+or any volume-integral variant — they all fail on the overlap-tail root cause. Resume at the top
+"⏸ BLOCKED 2026-06-17" section once Rimas answers; candidate fixes (a)-(d) listed there.*

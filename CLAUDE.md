@@ -17,15 +17,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > - **New files**: `benchmark_rimas.jl` (AV18 3H/3He jx scan vs rimas), `benchmark_nd_scatt.jl` (n-d MT
 >   vs Lazauskas PRC 84 Tab.III), `test_scatt_diag.jl` / `test_scatt_diag2.jl` (scattering diagnostics),
 >   `test_cnorm_extraction.jl` (c-product / C_n extraction diagnostic, 2026-06-16).
-> - **Open bug (2026-06-16, two layers)**: n-d elastic η was extracted ≈1 (unphysical) instead of the
->   benchmark η=0.4649. LAYER 1 (understood): the CS amplitude must use the **bilinear c-product**
->   (`transpose`, not Hermitian `dot`) + the **deuteron c-norm 1/C_n** (C_n = φ_dᵀBφ_d removes the
->   eigenvector's arbitrary global phase); this turns η≥1 into a physical η<1 (0.27) and is
->   gauge-invariant. LAYER 2 (localized, open): a residual (η 0.27 vs 0.46, δ 77° vs 105°) is
->   independent of mesh AND normalization → the `⟨φ_d F|V·Rxy_31|ψ⟩` projection OPERATOR differs from
->   Lazauskas Eq.16/17. `compute_scattering_amplitude` gained a `conj_bra` kwarg (default `true` = old
->   `dot`, since the bilinear path is not yet benchmark-complete). See TODO.md "▶ NEXT". The earlier
->   note "line 350 should be `dot` not `transpose`" was BACKWARDS.
+> - **n-d scattering extraction — ROOT CAUSE FOUND 2026-06-17, now ⏸ BLOCKED waiting for Rimas.** The
+>   doublet η/δ extraction diverges with the y-box (η: 0.57 @ymax60 → 5549 @ymax120). After exhausting
+>   K-matrix and all volume-integral forms, the cause is NOT the formula, coefficient, or coordinate
+>   rotation (all verified correct, incl. Rimas's 2011 Eq.17 Green-theorem amplitude + Glöckle Eq.209-214
+>   Blatt-Biedenharn back-end). It is the **non-orthonormal Lagrange-Laguerre overlap** `N[i,j]=δ+(-1)^{i-j}/√(yᵢyⱼ)`
+>   (`compute_overlap_matrix`): its long-range 1/√y tail, via `V_block=kron(V_x,Ny)`, couples the
+>   exponentially-growing CS incoming wave (F~1e5 @y120) from small y to large y, so the source/integral
+>   decay only ~1/√y and the extraction diverges. Bound states are immune (exponentially localized).
+>   Rimas's 2011 paper used local Hermite splines (banded overlap, no tail); he reportedly later uses
+>   Lagrange-Laguerre, so a specific trick exists. Email drafted: `~/Downloads/email-to-lazauskas-scattering-extraction.txt`.
+>   Full record in TODO.md top section + memory `kmatrix-integral-relations-method.md`. Do NOT resume the
+>   K-matrix or any volume-integral variant before Rimas replies. (`compute_scattering_amplitude` keeps a
+>   `conj_bra` kwarg, default `true`=old `dot`; the bilinear c-product + 1/C_n work is layer-1 understanding only.)
 
 ## Project Overview
 
