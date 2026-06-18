@@ -1,12 +1,16 @@
 # swift.jl TODO
 
-Snapshot **2026-06-17**. ⏸ **BLOCKED on the n-d scattering extraction, waiting for Rimas's reply.**
-Root cause FOUND this session (see next section): every amplitude-extraction form diverges with the
-y-box because the **Lagrange-Laguerre overlap matrix has a long-range 1/√(yᵢyⱼ) off-diagonal tail**
-that couples the exponentially-growing CS incoming wave from small y up to large y. The formulas and
-the coordinate rotation are correct; the basis representation is the problem. Email drafted to Rimas
-(`~/Downloads/email-to-lazauskas-scattering-extraction.txt`); he said he later uses Lagrange-Laguerre,
-so the question is HOW he keeps the source/integral convergent in that basis.
+Snapshot **2026-06-18**. ✅ **BREAKTHROUGH: δ now hits ~103-104° (benchmark 105.49°) after Rimas replied.**
+Rimas's answer: I was using too large a CS angle (θ=10°). swift uses PHYSICAL (non-mass-scaled) Jacobi
+coords so θ_max is smaller than my √3 estimate; dropping to **θ=3-4°** makes the scattered term
+mesh-stable (his Table 5.1: θ=3° → δ=105.0/η=0.456). The amplitude is his HDR **Eq.2.118** (arXiv:1904.04675):
+`f = −(1/Ecm)[ e^{2iθ}⟨Ω_in|V·Rxy|ψ_sc⟩_CS + ⟨Ω_in|V·Rxy|Ω_in⟩_{no CS, Born} ]`, bra = REGULAR incoming
+(not the outgoing exp I wrongly switched to), Born term on the real axis, CS Jacobian = e^{2iθ} (x-contour
+cancels V's e^{−iθ}, y-contour supplies the factor missing from Ny). δ within ~2° now; **remaining: η is
+~30% low (0.30-0.34 vs 0.465) and drifts with ymax** → channel-spin recoupling (only first λ group, no
+Blatt-Biedenharn weights) and/or y-mesh resolution. NOTE: the earlier "Lagrange-Laguerre overlap tail"
+root-cause was a misread; the real issue was the CS angle (back-rotation + Lagrange-Laguerre is correct,
+confirmed by Rimas + COLOSS). Full record in memory `kmatrix-integral-relations-method.md`.
 
 > ⚠️ **CLOUD-SYNC HAZARD**: this repo lives in a cloud-synced folder; a `scattering (conflicted copy …).jl`
 > appeared mid-session before and the sync silently reverted an `inner_product` line at least once. Commit early/often.
