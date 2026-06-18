@@ -927,18 +927,36 @@ then the collision matrix $U=2ik_d f+1$ (below) and the channel-spin / Blatt-Bie
 >   Lazauskas + COLOSS): the real Lagrange basis stays well-conditioned, whereas forward rotation would
 >   evaluate basis functions at complex arguments (ill-conditioned). swift already uses back-rotation.
 >
-> **Status (swift.jl, $\theta=3^\circ$, $e^{2i\theta}$):** $\delta=103$–$104^\circ$ (benchmark
-> $105.49^\circ$, within $\sim2^\circ$; was stuck at $77^\circ$ or diverging for the whole saga).
-> $\eta\approx0.30$–$0.34$ vs $0.4649$ ($\sim30\%$ low and still drifting with $y_{max}$). Remaining work:
-> the channel-spin recoupling (use the full Blatt-Biedenharn weights below, not just the first $\lambda$
-> group) and/or the $y$-mesh resolution. Diagnostic of record: `swift/test_3body_kmatrix.jl`.
+> **Status (swift.jl, $\theta=3^\circ$, $e^{2i\theta}$; CONVERGED 2026-06-18):** $\delta\approx104^\circ$
+> (benchmark $105.49^\circ$, within $\sim2^\circ$; was stuck at $77^\circ$ or diverging for the whole
+> saga). $\eta\approx0.35$ vs benchmark $0.4649$ ($\sim25\%$ low). This residual survives every
+> convergence and structure test:
+> - **Mesh-converged.** At $n_{ch}=2$, $\eta\to0.348$ for $n_y\gtrsim120$ at $y_{max}=120$, and stays
+>   $0.34$–$0.36$ for $y_{max}=60$–$180$. The earlier "$\eta$ drifts with $y_{max}$ / $\eta=0.44$" readings
+>   were coarse-$n_y$ under-resolution artifacts, now resolved.
+> - **Channel-INVARIANT.** $l_{max}$ 0→4 / $n_{ch}$ 2→26 give byte-identical $f_{sc}$ at fixed mesh. For
+>   $J_{tot}=1/2$ the spectator $\lambda$ is capped by $J_{12}\otimes J_3=1/2$ ($\lambda=4$ cannot couple
+>   for the deuteron $J_{12}=1$), and MT's S-wave-only $V$ makes the extra $j_{2b}$ channels decoupled free
+>   spectators (the channel coupling in $A=E B-T-V(I+\text{Rxy})$ runs only through $V\cdot\text{Rxy}$). So
+>   the gap is NOT model-space truncation.
+> - **NOT channel-spin recoupling / D-state.** MT is central $\Rightarrow$ the deuteron is pure $^3S_1$
+>   (0% D-state), so the bi-conjugate / Blatt-Biedenharn-recoupling hypotheses are moot here.
+> - **2-body machinery validated.** The scalar analog (`test_2body_cs_1S0.jl`, MT $^1S_0$) reproduces
+>   $\eta=0.999$ (unitarity) and $\delta=63.2^\circ$, uniquely pinning the per-radial CS Jacobian to
+>   $e^{+1\theta}$. Amplitude structure variants (conjugated bra, bra/ket swap, $(1+\text{Rxy})\psi$ full
+>   wavefunction, plain-$V$ operator) all ruled out: the baseline above IS the paper formula.
+>
+> The converged amplitude needs $\times1.075$ magnitude $+2.7^\circ$ phase to hit the benchmark: a FIXED
+> $\sim7.5\%$ normalization $+$ small phase, not convergence/channels. Open leads: (a) swift's MT
+> parametrization vs the exact potential behind PRC 84 Tab.III ($E_d=-2.2295$ MeV here); (b) a subtle
+> amplitude prefactor. Diagnostic of record: `swift/test_3body_greens.jl`.
 >
 > **Why the earlier notes misled (for the record):** the un-separated Eq.2.117 form above lumps
 > $\psi^{in}+\psi^{sc}$ under CS (diverges); the implementation note used the outgoing-exp bra and only a
 > single $e^{i\theta}$ Jacobian (2-body), and never stated the angle constraint. The two things that
-> actually fixed it (small $\theta$ + Born-on-real-axis) came from Lazauskas's reply, not from these
-> notes. The old "$\eta\approx19/82$, $\sim150\times$ too large normalization error" was just the
-> not-separated, too-large-$\theta$ divergence.
+> actually fixed the PHASE (small $\theta$ + Born-on-real-axis) came from Lazauskas's reply. The
+> "channel-spin recoupling / $y$-mesh" remaining-work note (now corrected) was wrong: $\eta$ is
+> channel-invariant and mesh-converged at $0.35$.
 
 The scattering amplitude can also be written as $f^{\alpha_0,\alpha_0'}(k)$, where $\alpha_0$ indexes the channel in which the deuteron remains in its ground state. The scattering matrix can then be computed through 
 $$

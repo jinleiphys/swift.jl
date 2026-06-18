@@ -6,11 +6,30 @@ coords so θ_max is smaller than my √3 estimate; dropping to **θ=3-4°** make
 mesh-stable (his Table 5.1: θ=3° → δ=105.0/η=0.456). The amplitude is his HDR **Eq.2.118** (arXiv:1904.04675):
 `f = −(1/Ecm)[ e^{2iθ}⟨Ω_in|V·Rxy|ψ_sc⟩_CS + ⟨Ω_in|V·Rxy|Ω_in⟩_{no CS, Born} ]`, bra = REGULAR incoming
 (not the outgoing exp I wrongly switched to), Born term on the real axis, CS Jacobian = e^{2iθ} (x-contour
-cancels V's e^{−iθ}, y-contour supplies the factor missing from Ny). δ within ~2° now; **remaining: η is
-~30% low (0.30-0.34 vs 0.465) and drifts with ymax** → channel-spin recoupling (only first λ group, no
-Blatt-Biedenharn weights) and/or y-mesh resolution. NOTE: the earlier "Lagrange-Laguerre overlap tail"
-root-cause was a misread; the real issue was the CS angle (back-rotation + Lagrange-Laguerre is correct,
-confirmed by Rimas + COLOSS). Full record in memory `kmatrix-integral-relations-method.md`.
+cancels V's e^{−iθ}, y-contour supplies the factor missing from Ny). δ within ~2° now. NOTE: the earlier
+"Lagrange-Laguerre overlap tail" root-cause was a misread; the real issue was the CS angle (back-rotation +
+Lagrange-Laguerre is correct, confirmed by Rimas + COLOSS). Full record in memory `kmatrix-integral-relations-method.md`.
+
+**η update 2026-06-18 (CONVERGED; supersedes the c-norm/model-space guesses earlier this day):** the
+amplitude is the Green's-theorem Eq.2.118 (NOT K-matrix; file renamed `test_3body_kmatrix.jl`→`test_3body_greens.jl`,
+dead K-matrix scaffolding stripped). Converged result at θ=3°: **δ≈104°** (benchmark 105.49°, ✓ within ~2°),
+**η≈0.35** (benchmark 0.4649, ~25% low). This residual survives EVERY convergence/structure test:
+- **Mesh-converged** (nch=2): η→0.348 for ny≳120 at ymax=120; 0.34–0.36 across ymax 60–180. The earlier
+  "drifts with ymax / η=0.44" were coarse-ny under-resolution artifacts.
+- **Channel-INVARIANT**: lmx 0→4 / nch 2→26 give byte-identical f_sc at fixed mesh. For Jtot=1/2 the
+  spectator λ is capped by J12⊗J3=1/2 (λ=4 can't couple for deuteron J12=1); MT's S-wave-only V makes extra
+  j2b channels decoupled free spectators (coupling in A runs only through V·Rxy). **So NOT model-space truncation.**
+- **NOT D-state / channel-spin recoupling**: MT is central ⇒ deuteron is pure ³S₁ (0% D) ⇒ bi-conjugate /
+  Blatt-Biedenharn-recoupling moot. **NOT the deuteron c-norm** (the −12.4° is the random eigenvector gauge phase,
+  divided out by √C_n; |C_n|≈0.9965, a 0.35% effect, not 25%).
+- **2-body machinery validated**: `test_2body_cs_1S0.jl` (MT ¹S₀) gives η=0.999 (unitarity) + δ=63.2°,
+  uniquely pinning the per-radial CS Jacobian to e^{+1θ}. Amplitude structure variants (conj bra, bra/ket
+  swap, (1+Rxy)ψ, plain-V) all ruled out: baseline = the paper formula Eq.2.48.
+
+Converged amplitude needs ×1.075 magnitude + 2.7° phase to hit benchmark: a FIXED ~7.5% normalization +
+small phase. **Open leads (concrete, no Rimas needed):** (a) swift's MT parametrization vs the exact
+potential behind PRC 84 Tab.III (E_d=−2.2295 MeV here); (b) a subtle amplitude prefactor. Diagnostic of
+record: `swift/test_3body_greens.jl`.
 
 > ⚠️ **CLOUD-SYNC HAZARD**: this repo lives in a cloud-synced folder; a `scattering (conflicted copy …).jl`
 > appeared mid-session before and the sync silently reverted an `inner_product` line at least once. Commit early/often.
@@ -202,7 +221,7 @@ but harmless there since source only needs F); (2) φ^(I) source needs the local
 d=(H̄0^θ−E)G̃ = −E[2G₀'(z)reg_z'+G₀(z)reg_z''] (analytic, from COULCC G₀,G₀'); (3) K=−I_R/(ℏ²k/2µ+I_I),
 S=(1+iK)/(1−iK); b≳8 converges. Consistency self-check I_I→−i·I_R.
 
-**[~] 3-body multichannel IMPLEMENTED, η ballpark-right, δ NOT yet pinned** (`swift/test_3body_kmatrix.jl`,
+**[~] 3-body multichannel IMPLEMENTED, η ballpark-right, δ NOT yet pinned** (`swift/test_3body_greens.jl`,
 2026-06-16). 2 channels (l_y=0,j_y=½)=doublet + (l_y=2,j_y=3/2). Per-incident-λ: (R) solve A·v^(R)=V·Rxy·Ω^(R)
 (=masked existing solve); (I) solve A·v^(I)=B·d3+V·Rxy·Ω̃^(I) with d3=φ_d⊗d_y, d_y=−E_cm[2G_{l_y}'(z)reg_z'+
 G_{l_y}(z)reg_z''] (same form all l_y, centrifugal cancels). K from [(ℏ²q/2µ_y)δ+M^(I)]K=−M^(R),
@@ -340,7 +359,7 @@ Old text below (superseded; kept for the Eq.17 piece-by-piece checklist):
    y to large y, so the source/integral decay only algebraically and Eq.17 diverges with the box. The
    bound state is immune (exponentially localized). Lazauskas's 2011 paper used local Hermite splines
    (banded overlap, no tail); he reportedly later uses Lagrange-Laguerre, so a specific trick exists —
-   that is the question in the email. Diagnostic of record: `swift/test_3body_kmatrix.jl` per-y norms.
+   that is the question in the email. Diagnostic of record: `swift/test_3body_greens.jl` per-y norms.
 9. **NEW (2026-06-17)**: phase-shift extraction back-end = Glöckle PhysRep 274 (1996) Eq.209-214
    (Blatt-Biedenharn channel-spin S=U†ΛU); it is convention-free on S. Build S coordinate-space
    (S=1+2iq·f, Rimas Eq.6) — do NOT mix momentum-space U→S factors. Coefficient = ℏ²q/2µ_y = 31.10·q.
