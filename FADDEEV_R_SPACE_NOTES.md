@@ -877,73 +877,68 @@ $$
 \varphi_i(\theta) = \frac{\phi_d^{\alpha_1}(x_ie^{i\theta}) F^{\alpha_1}(y_ie^{i\theta})}{f_{i_x}(x_i) f_{i_y}(y_i)},
 $$
 
+> **Complex-scaling angle constraint (Lazauskas-Carbonell; HDR arXiv:1904.04675 Eq.2.143). This is the
+> single most important practical point and the one most easily missed.**
+> The inhomogeneous term $b(\theta)$ stays exponentially bound (and the scattered wave decays) only if
+> $\theta$ is small enough. In the non-proper coordinate set, the point $y_b\gg0,\ x_b=0$ (where $V_b\ne0$)
+> maps to $x_a=|s_{ab}|y_b,\ y_a=|c_{ab}|y_b$; the source decays as $e^{-x_a q_d\cos\theta}$ (deuteron bound
+> state) but grows as $e^{+y_a q_{scatt}\sin\theta}$ (incoming wave), so it is bound only if
+> $$ \tan\theta < \left|\frac{s_{ab}}{c_{ab}}\right|\frac{q_{deuteron}}{q_{scatt}}. $$
+> swift uses **PHYSICAL (non-mass-scaled) Jacobi coordinates**, so $|s_{ab}/c_{ab}|$ is smaller than the
+> mass-scaled $\sqrt3$ and $\theta_{max}$ is correspondingly smaller than a naive estimate. For n-d at
+> 14.1 MeV, $\theta=3$–$4^\circ$ works (Rimas Table 5.1: $\theta=3^\circ\to\delta=105.0^\circ,\ \eta=0.456$);
+> $\theta=10^\circ$ is too large and the amplitude **diverges with the y-box** ($\eta$: 0.57 at $y_{max}{=}60$
+> → 5549 at $y_{max}{=}120$). **If the extraction blows up with $y_{max}$, check this bound FIRST** — it is
+> not an operator, normalization, or basis bug.
+
 ## Scattering amplitude
 
-The scattering amplitude can be rewritten as 
+The amplitude is the Lazauskas-Carbonell Green-theorem integral relation (HDR arXiv:1904.04675
+Eq.2.117-2.118). The crucial step is to **separate the Born term** (the two-incoming-wave piece) and
+evaluate it WITHOUT complex scaling, because that term carries the fastest $\theta$-divergence:
 $$
-\begin{aligned}
-f(k)& = -\frac{2\mu_3}{\hbar^2 k_d^2} e^{-i\sigma_l} \langle \phi_d F | V_{23} + V_{31}| \psi_3^{in} + \psi_{3}^{sc} \rangle  \\
-& = -\frac{4\mu_3}{\hbar^2 k_d^2} e^{-i\sigma_l} \sum_{\alpha_3k_xk_y} \sum_{\alpha_1 i_x i_y} \sum_{\alpha_1' i_x' i_y'} \langle \phi_d F | f_{i_x} f_{i_y} \alpha_1 \rangle \langle f_{i_x} f_{i_y} \alpha_1 | V_{23}| f_{i_x'} f_{i_y'} \alpha_1' \rangle \langle f_{i_x'} f_{i_y'} \alpha_1' | f_{k_x} f_{k_y} \alpha_3 \rangle \\
-& \quad \times \langle f_{k_x} f_{k_y} \alpha_3 |  \psi_3^{in} + \psi_{3}^{sc} \rangle
-\end{aligned}
+f(k) = -\frac{1}{E_{cm}}\Big[\, e^{2i\theta}\,\big\langle \phi_d F \,\big|\, V_{23}+V_{31} \,\big|\, \psi_3^{sc}\big\rangle_{CS}
+\;+\; \big\langle \phi_d F \,\big|\, V_{23}+V_{31} \,\big|\, \psi_3^{in}\big\rangle_{\theta=0,\ \text{Born, no CS}} \,\Big],
 $$
+then the collision matrix $U=2ik_d f+1$ (below) and the channel-spin / Blatt-Biedenharn analysis.
 
-> **Implementation note — complex-scaling inner product (2026-06-16).**
-> Under complex scaling the rotated Hamiltonian is **complex-symmetric, not Hermitian**, so every
-> bracket $\langle\,\cdot\,|\,\cdot\,\rangle$ in the amplitude above is the **bilinear c-product**
-> $\int \phi(re^{i\theta})\,\hat O\,\psi(re^{i\theta})\,dr$ with **no complex conjugation** of the bra
-> (analytic continuation, same rotation branch). Projecting with the Hermitian product (conjugated bra)
-> restores an artificial Hermiticity, which forces single-channel elastic unitarity $|S|=1$ ($\eta\to1$)
-> and erases the breakup loss carried by $\psi_3^{sc}$.
+> **Validated recipe (2026-06-18, after R. Lazauskas's reply; this SUPERSEDES the earlier debugging
+> notes that were partly wrong and cost a lot of time).**
 >
-> A subtlety specific to the bilinear product: the deuteron bound state $\phi_d$ obtained from the
-> complex-scaled generalized eigenproblem carries an **arbitrary global complex phase** $e^{i\gamma}$
-> (the eigensolver fixes only $|\phi_d|$ via the Hermitian norm $\phi_d^\dagger B\phi_d=1$, not the
-> phase). Since $f$ is quadratic in $\phi_d$, the bilinear extraction picks up a spurious $e^{2i\gamma}$.
-> This is removed by dividing by the **deuteron c-norm**
-> $$ C_n \;=\; \phi_d^{\mathsf T} B\, \phi_d \;=\; e^{2i\gamma}\,|C_n|, \qquad |C_n|\approx 1 \ (\theta\text{-stable}), $$
-> i.e. the physically correct amplitude is $f \to f/C_n$. The Hermitian product hides $e^{2i\gamma}$
-> automatically ($e^{-i\gamma}e^{+i\gamma}$) but at the cost of also hiding the absorption.
+> - **Bra = the REGULAR incoming** $\phi_d F$ (NOT the outgoing Hankel / $e^{-iq_n y e^{i\theta}}$ form —
+>   an earlier note had this backwards, which was a dead end). Use the **bilinear c-product**
+>   (transpose, no conjugation) under CS: the rotated Hamiltonian is complex-symmetric, not Hermitian.
+> - **Born term on the real axis ($\theta=0$):** $\langle\phi_d F|V_{23}+V_{31}|\psi_3^{in}\rangle$ is
+>   built from un-rotated matrices. It is mesh-stable and is the piece that diverges fastest with
+>   $\theta$, so it must NOT be placed under CS. Only the scattered term
+>   $\langle\phi_d F|\cdots|\psi_3^{sc}\rangle$ gets CS (the scattered wave decays, so it converges).
+>   Lumping $\psi^{in}+\psi^{sc}$ together under CS (the un-separated Eq.2.117) is what diverges.
+> - **CS contour Jacobian $=e^{2i\theta}$** for the 3-body scattered term: one $e^{i\theta}$ per rotated
+>   radial integral ($x$ and $y$). swift's $V$ matrix already carries the Hamiltonian's $e^{-i\theta}$ on
+>   the $x$-contour, so the explicit factor cancels it on $x$ and supplies the **missing $y$-contour
+>   factor** (the real overlap $N_y$ carries no contour factor). The 2-body case (one radial integral)
+>   needs $e^{i\theta}$.
+> - **Operator** $[V_{23}+V_{31}]=\mathcal R\,V_{12}$ ($\mathcal R=\text{Rxy}=P^++P^-$), realized in swift
+>   as $V\cdot\text{Rxy}$ acting on the appropriate component.
+> - **Deuteron c-norm $1/C_n$** ($C_n=\phi_d^{\mathsf T}B\phi_d=e^{2i\gamma}|C_n|$, $|C_n|\approx1$
+>   $\theta$-stable) removes the eigenvector's arbitrary global phase $e^{i\gamma}$; pre-normalize
+>   $\phi_d\to\phi_d/\sqrt{C_n}$ so that $\phi_d^{\mathsf T}B\phi_d=1$.
+> - **back-rotation is correct and numerically MORE stable** than forward coordinate rotation (R.
+>   Lazauskas + COLOSS): the real Lagrange basis stays well-conditioned, whereas forward rotation would
+>   evaluate basis functions at complex arguments (ill-conditioned). swift already uses back-rotation.
 >
-> **Status (swift.jl):** the bilinear + $1/C_n$ correction turns the unphysical $\eta\ge1$ into a
-> physical $\eta<1$ and is gauge-invariant, but it left a residual ($\eta\approx0.27$ vs $0.4649$).
-> A **2-body isolation test** (`swift/test_2body_cs_1S0.jl`, CS MT $^1S_0$) then pinned the remaining
-> piece: with $f=-\tfrac{2\mu}{\hbar^2k^2}\langle F_0|V|u\rangle$ the *magnitude* of $f$ matches the
-> exact value to 4 digits, but the *phase* is off by exactly $\theta$. The fix is an explicit
-> **complex-scaling contour Jacobian** $e^{+i\theta}$ (one factor per rotated radial integration; the
-> backward-rotation $V$ matrix carries the Hamiltonian's $e^{-i\theta}$, but the amplitude integral over
-> $d(re^{i\theta})$ needs the forward $e^{+i\theta}$):
-> $$ f \;=\; -\frac{2\mu}{\hbar^2 k^2}\, e^{+i\theta}\,\langle F_0 | V | u_{tot}\rangle_{\text{bilinear}}. $$
-> With it the 2-body gives $\eta\to1$ (unitarity restored) and $\delta=63.512^\circ$ to CS convergence.
+> **Status (swift.jl, $\theta=3^\circ$, $e^{2i\theta}$):** $\delta=103$–$104^\circ$ (benchmark
+> $105.49^\circ$, within $\sim2^\circ$; was stuck at $77^\circ$ or diverging for the whole saga).
+> $\eta\approx0.30$–$0.34$ vs $0.4649$ ($\sim30\%$ low and still drifting with $y_{max}$). Remaining work:
+> the channel-spin recoupling (use the full Blatt-Biedenharn weights below, not just the first $\lambda$
+> group) and/or the $y$-mesh resolution. Diagnostic of record: `swift/test_3body_kmatrix.jl`.
 >
-> **Extraction method — Green's theorem (Eq. 17), NOT asymptotic projection (Eq. 16).** Lazauskas
-> (personal comm. to Lei) and the paper itself (§II.A: Eq. 7 is ~1 digit more accurate; HDR §5.5) state
-> the Green's-theorem integral relation is the reliable extraction; the asymptotic projection does not
-> give a stable plateau (confirmed numerically here — `f_λ(y)` did not plateau). The neutral 3-body
-> Green's-theorem amplitude is
-> $$ f_{nm}(\hat y) = -C_n^{-1}\frac{m}{\hbar^2}\iint \phi_n^*(x e^{-i\theta})\,\frac{e^{-i q_n y e^{i\theta}}}{y}\,[V_{23}+V_{31}]\,\bar\Psi_m(x,y)\,e^{6i\theta}\,d^3x\,d^3y, $$
-> with $C_n=\int\phi_n^*(xe^{-i\theta})\phi_n(xe^{i\theta})e^{3i\theta}d^3x$. The 2-body Wronskian/integral
-> form (thesis Eq. 1.42, $\sin\delta_l=-\tfrac{2\mu}{\hbar^2 k}\int \hat\jmath_l V\psi\,dr$) uses the
-> **regular** $\hat\jmath_l$ in the bra — relevant when reconciling the 3-body bra convention.
->
-> **Operator identity (derived + validated, 2026-06-16, `swift/test_V23V31_operator.jl`):**
-> $$ [V_{23}+V_{31}]\,\bar\Psi \;=\; \mathcal{R}\,V\,\bar\Psi \qquad (\mathcal{R}=\text{Rxy}=P^++P^-,\; V=V_{12}), $$
-> i.e. apply the pair potential $V_{12}$ first, then the rearrangement, on the FULL $\bar\Psi=(1+\mathcal R)\psi$.
-> Derivation: $V_{23}=P^+V_{12}P^-$, $V_{31}=P^-V_{12}P^+$, and $P^\pm\bar\Psi=\bar\Psi$ (a cyclic
-> permutation is even, so $+1$ on the antisymmetric state), hence $[V_{23}+V_{31}]\bar\Psi=(P^++P^-)V_{12}\bar\Psi$.
-> NOT $V\cdot\mathcal R$, NOT $\mathcal R V\mathcal R$. Validated T-free (never apply the kinetic $T$ to
-> $\bar\Psi$ — the $\mathcal R\psi$ part is non-smooth in a single Jacobi frame and $T$ amplifies the
-> truncation noise; this is the same reason Faddeev uses the $3\langle\Psi|\psi_3\rangle$ norm):
-> $\langle\bar\Psi|\mathcal R V\bar\Psi\rangle = 2\langle V_{12}\rangle$ and $\|\mathcal R\bar\Psi-2\bar\Psi\|/\|2\bar\Psi\|$
-> both hold to the basis-truncation level.
->
-> **Open task (2026-06-16):** assemble the full 3-body Eq. 17 amplitude. Operator part `Rxy·V·Ψ̄`
-> validated; the remaining unknown is the amplitude MAGNITUDE/normalization — first 3-body attempts gave
-> $\eta\approx19$ (Hankel bra) and $\eta\approx82$ (regular-$F$ bra), i.e. $\sim150\times$ too large, a
-> normalization (not phase) error. Unresolved: object ($\bar\Psi=(1+\mathcal R)\psi$ vs Faddeev component;
-> possible double-count from $\mathcal R V(1+\mathcal R)$), the exact $f\to S$ normalization for 3-body, and
-> regular-$F$ vs Hankel bra (+ $y$-convergence). To be derived from thesis §2.3 (3-body scattering),
-> cross-checked against the working 2-body, not by trial. Target: 14.1 MeV doublet $\eta=0.4649$, $\delta=105.49^\circ$.
+> **Why the earlier notes misled (for the record):** the un-separated Eq.2.117 form above lumps
+> $\psi^{in}+\psi^{sc}$ under CS (diverges); the implementation note used the outgoing-exp bra and only a
+> single $e^{i\theta}$ Jacobian (2-body), and never stated the angle constraint. The two things that
+> actually fixed it (small $\theta$ + Born-on-real-axis) came from Lazauskas's reply, not from these
+> notes. The old "$\eta\approx19/82$, $\sim150\times$ too large normalization error" was just the
+> not-separated, too-large-$\theta$ divergence.
 
 The scattering amplitude can also be written as $f^{\alpha_0,\alpha_0'}(k)$, where $\alpha_0$ indexes the channel in which the deuteron remains in its ground state. The scattering matrix can then be computed through 
 $$
