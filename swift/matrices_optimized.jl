@@ -179,9 +179,15 @@ Optimized Rxy_matrix with better algorithmic structure
 Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
 ```
 """
-function Rxy_matrix_optimized(α, grid)
+function Rxy_matrix_optimized(α, grid; real_output::Bool=false)
+    # Rxy is a pure geometric coordinate transform: G coefficients (Float64) × Lagrange
+    # basis values, no complex arithmetic, so the result is always real. Default keeps the
+    # ComplexF64 storage for back-compat (bound-state / Arnoldi callers); real_output=true
+    # halves the memory (Float64) for the scattering path. eltype is opt-in to avoid the
+    # Arnoldi eltype-promotion trap in MalflietTjon.
+    Telt = real_output ? Float64 : Complex{Float64}
     # Pre-allocate result matrix (only compute Rxy_31)
-    Rxy_31 = zeros(Complex{Float64}, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
+    Rxy_31 = zeros(Telt, α.nchmax*grid.nx*grid.ny, α.nchmax*grid.nx*grid.ny)
 
     # Compute G coefficients once
     Gαα = computeGcoefficient(α, grid)

@@ -19,12 +19,24 @@ fermion=true; Jtot=0.5; T=0.5; Parity=1; MT=-0.5
 nθ=12; alpha=1.0; θ_deg=10.0; θ=θ_deg*π/180
 E_lab=14.1; E_cm=(2/3)*E_lab; potname="MT"; z1z2=0.0; μ_y=2m/3
 
-function build(nx,ny,xmax,ymax,b; θdeg=θ_deg, lmx=2, λmx=2, j2bmx=1.0)
+# light=true: only V and Rxy are built (Born/projection term needs no A,B,T,LU). Rxy is
+# θ-independent, so the real-axis s0 reuses s's Rxy via Rxy_share instead of rebuilding the
+# whole scattering matrix. This removes the entire second compute_scattering_matrix + LU.
+function build(nx,ny,xmax,ymax,b; θdeg=θ_deg, lmx=2, λmx=2, j2bmx=1.0, Rxy_share=nothing, light=false)
     θl=θdeg*π/180
     α=α3b(fermion,Jtot,T,Parity,lmx,0,λmx,0,0.5,0.5,0.5,0.5,0.5,0.5,MT,j2bmx)
     grid=initialmesh(nθ,nx,ny,xmax,ymax,alpha)
     bE,bψ=bound2b(grid,potname,θ_deg=θdeg); φ_d=ComplexF64.(bψ[1]); E_d=real(bE[1])
-    A,B,Tm,V,Rxy,Rxy_31,Tx_ch,Ty_ch,_,Nx,Ny,_ = Scattering.compute_scattering_matrix(E_cm+E_d,α,grid,potname,θ_deg=θdeg)
+    Efull=E_cm+E_d
+    if light
+        B=nothing; Tm=nothing; Tx_ch=nothing; Ty_ch=nothing; Nx=nothing; Ny=nothing; V_x_full=nothing
+        V = θdeg==0.0 ? V_matrix_optimized(α,grid,potname) :
+                        V_matrix_optimized_scaled(α,grid,potname,θ_deg=θdeg)
+        Rxy = Rxy_share !== nothing ? Rxy_share : Rxy_matrix_optimized(α,grid;real_output=true)[1]
+    else
+        # assemble_A=false: no dense A / no dense V*Rxy; the CS solve goes through matrix-free GMRES
+        _,B,Tm,V,Rxy,Rxy_31,Tx_ch,Ty_ch,_,Nx,Ny,V_x_full = Scattering.compute_scattering_matrix(Efull,α,grid,potname,θ_deg=θdeg,assemble_A=false)
+    end
     q=sqrt(2*μ_y*amu*E_cm)/ħ
     nxg=grid.nx; nyg=grid.ny; nch=length(α.l)
     # deuteron-coupled channels grouped by λ (=l_y); j_y=J3
@@ -50,7 +62,7 @@ function build(nx,ny,xmax,ymax,b; θdeg=θ_deg, lmx=2, λmx=2, j2bmx=1.0)
         for iα in 1:nch; Int(round(α.λ[iα]))==λ || (ψ[(iα-1)*nxg*nyg+1:iα*nxg*nyg].=0); end
         return ψ
     end
-    return (;α,grid,A,B,V,Rxy,q,C_n,λs,chans,nxg,nyg,blk,Omega_R,φd=φ_d,mcomp)
+    return (;α,grid,B,T=Tm,V,Rxy,Efull,Tx_ch,Ty_ch,Nx,Ny,V_x_full,q,C_n,λs,chans,nxg,nyg,blk,Omega_R,φd=φ_d,mcomp)
 end
 
 
@@ -58,22 +70,44 @@ end
 #   f = (1/Ecm)[ e^{i·p·θ} ⟨Ω_in^θ | V·Rxy | ψ_sc^θ⟩   +   ⟨Ω_in^0 | V·Rxy | Ω_in^0⟩_{NO CS} ]
 # bra = REGULAR incoming Ω_in (c-product, transpose); scattered ket gets CS, BORN term (in×V×in)
 # computed on the REAL axis (θ=0) since it diverges fastest with θ.  S = 1 + 2i q f → δ, η.
-function run(nx,ny,xmax,ymax,b; jacpow=2.0, verbose=true, diag=false, lmx=2, λmx=2, j2bmx=1.0)
+function run(nx,ny,xmax,ymax,b; jacpow=2.0, verbose=true, diag=false, chflux=false, lmx=2, λmx=2, j2bmx=1.0)
     s  = build(nx,ny,xmax,ymax,b; lmx=lmx,λmx=λmx,j2bmx=j2bmx)              # CS build (θ = θ_deg)
-    s0 = build(nx,ny,xmax,ymax,b; θdeg=0.0,lmx=lmx,λmx=λmx,j2bmx=j2bmx)     # real-axis build for the Born term
+    # real-axis Born build: light (no A/B/T/LU) + share s's θ-independent Rxy
+    s0 = build(nx,ny,xmax,ymax,b; θdeg=0.0,lmx=lmx,λmx=λmx,j2bmx=j2bmx, Rxy_share=s.Rxy, light=true)
     λs = s.λs
     proj(bra,ket,bld)=(acc=0.0im; for iα in bld.chans[λs[1]]; acc+=transpose(bld.blk(bra,iα))*bld.blk(ket,iα); end; acc)
     # incoming (regular F) in the doublet entrance channel
     Ω  = s.Omega_R(λs[1])                        # CS incoming
     Ω0 = s0.Omega_R(λs[1])                       # real incoming
-    ψsc = s.A \ (s.V*(s.Rxy*Ω))                  # scattered wave (CS): A ψ_sc = V·Rxy·Ω_in
+    # scattered wave (CS): A ψ_sc = V·Rxy·Ω_in, via matrix-free preconditioned GMRES (no dense A/LU)
+    RxyΩ = s.Rxy*Ω; bsrc = s.V*RxyΩ
+    ψsc, _ = gmres_scattering(s.Efull, s.B, s.T, s.V, s.Rxy, bsrc, s.α, s.grid,
+                              s.Tx_ch, s.Ty_ch, s.V_x_full, s.Nx, s.Ny; reltol=1e-9)
     jac = exp(im*jacpow*θ)
     f_sc  = jac*proj(Ω, s.V*(s.Rxy*ψsc), s)      # ⟨Ω|V·Rxy|ψ_sc⟩ (CS), mesh-stable for θ within constraint
     f_brn =     proj(Ω0, s0.V*(s0.Rxy*Ω0), s0)   # Born term, real axis (no CS)
-    f = -(1.0/E_cm)*(f_sc + f_brn)
+    flux_norm = (μ_y/(m/2))^(1/4)
+    f = -(flux_norm*cis(θ)/E_cm)*(f_sc + f_brn)
     S = 1 + 2im*s.q*f
     verbose && @printf("[lmx=%d λmx=%d j2b=%.0f nch=%2d ny=%3d ymax=%5.0f] f_sc=%.2f%+.2fi f_brn=%.2f  δ=%8.3f° η=%.4f\n",
             lmx, λmx, j2bmx, length(s.α.l), ny, ymax, real(f_sc),imag(f_sc), real(f_brn), rad2deg(0.5*angle(S)), abs(S))
+    if chflux
+        # source diagnostic: does V·Rxy·Ω leak OUT of the entrance sector at all?
+        @printf("  per-channel source norms (Ω→Rxy·Ω→b=V·Rxy·Ω):\n")
+        for iα in 1:length(s.α.l)
+            @printf("    ch%2d (λ=%d): ‖Ω‖=%.3e ‖Rxy·Ω‖=%.3e ‖b‖=%.3e\n",
+                iα, Int(round(s.α.λ[iα])), norm(s.blk(Ω,iα)), norm(s.blk(RxyΩ,iα)), norm(s.blk(bsrc,iα)))
+        end
+        # per-channel Faddeev-component flux ‖ψ_sc‖: does each channel actually couple/carry breakup?
+        nrm=0.0; for iα in 1:length(s.α.l); nrm+=norm(s.blk(ψsc,iα))^2; end; nrm=sqrt(nrm)
+        @printf("  per-channel ‖ψ_sc‖ (frac of total), total=%.3e:\n", nrm)
+        for iα in 1:length(s.α.l)
+            i2b=s.α.α2bindex[iα]
+            @printf("    ch%2d (l=%d s12=%.0f J12=%.0f λ=%d J3=%.1f T12=%.0f) ‖ψ‖=%.3e (%.1f%%) ‖VRxyψ‖=%.3e\n",
+                iα, s.α.α2b.l[i2b], s.α.α2b.s12[i2b], s.α.α2b.J12[i2b], s.α.λ[iα], s.α.J3[iα], s.α.α2b.T12[i2b],
+                norm(s.blk(ψsc,iα)), 100*norm(s.blk(ψsc,iα))^2/nrm^2, norm(s.blk(s.V*(s.Rxy*ψsc),iα)))
+        end
+    end
     if diag
         # paper-derivable bra-structure variants (Eq.2.48: A=⟨Ψ_full|−(V_β+V_γ)|Ψ̃^in⟩, bi-conjugate bra).
         # All reuse Ω, ψsc; only the projection over chans[λ=0]=[2,9] (ch2=deuteron-S l2b=0, ch9=D l2b=2) changes.
@@ -124,14 +158,18 @@ println("benchmark doublet 14.1: δ=105.49°, η=0.4649  [Rimas HDR Eq.2.118: sc
 # observable, most sensitive to the channel space (lmx,λmx,j2bmx); δ converges faster. Question the
 # framing: is η=0.334 vs benchmark 0.4649 a model-space-truncation gap, not an amplitude bug?
 global θ_deg = 3.0; global θ = 3.0*π/180
-# Channels are INVARIANT (lmx 0→4 give identical f_sc at fixed mesh), so use nch=2 (lmx=0) and converge
-# the y-MESH, which is the actual non-converged variable (η swings 0.30–0.44 across meshes).
-println("=== θ=3°, lmx=0 (nch=2) — Y-MESH convergence ===")
-println("-- resolution: ymax=120 fixed, vary ny --")
-for ny in [48,72,96,120,144,168]
-    run(24,ny,30.0,120.0,8.0; jacpow=2.0, lmx=0,λmx=0,j2bmx=1.0); flush(stdout)
-end
-println("-- box: density≈1.0 (ny=ymax), vary ymax --")
-for ymx in [60.0,90.0,120.0,150.0,180.0]
-    run(24,Int(ymx),30.0,ymx,8.0; jacpow=2.0, lmx=0,λmx=0,j2bmx=1.0); flush(stdout)
-end
+# 2026-06-18: "channels are INVARIANT for MT" is CORRECT, mechanism now verified. MT is an
+# S-wave-only force: ‖V_blk‖ nonzero only for l=0 channels, exactly 0 for l>0. So V·Rxy·Ω is killed
+# outside the S-wave entrance — Rxy DOES couple the entrance into l>0/λ>0 channels (‖Rxy·Ω‖≠0 there)
+# but V zeroes b=V·Rxy·Ω there, those channels carry zero flux, and the observable is independent of
+# (lmx,λmx,j2bmax). The chflux print proves it (source norms: ‖Rxy·Ω‖≠0 but ‖b‖=0 off the l=0 sector).
+# The gap to benchmark η=0.4649 is mesh + amplitude-normalization (waiting on Rimas), NOT channels.
+# CAVEAT: a realistic l>0 force (AV18) WOULD couple higher channels; this MT result does not generalize.
+println("=== θ=3°, per-channel source+flux diagnostic (MT S-wave-only ⇒ only l=0 entrance carries flux) ===")
+println("-- nch=3 (lmx=0,λmx=2), fine mesh --")
+run(24,120,30.0,120.0,8.0; lmx=0,λmx=2,j2bmx=1.0, chflux=true); flush(stdout)
+# Channel-count comparisons MUST be at a FIXED mesh: comparing different meshes gives a spurious η
+# shift that is a mesh artifact, not a channel effect. Same mesh ⇒ nch=2 ≡ nch=15 bit-identical for MT.
+println("\n=== SAME-MESH (16,40,20,40) channel test: nch=2 vs nch=15 must match for MT ===")
+println("-- nch=2 (lmx=0,λmx=0) --");   run(16,40,20.0,40.0,8.0; lmx=0,λmx=0,j2bmx=1.0); flush(stdout)
+println("-- nch=15 (lmx=2,λmx=2) --");  run(16,40,20.0,40.0,8.0; lmx=2,λmx=2,j2bmx=2.0); flush(stdout)

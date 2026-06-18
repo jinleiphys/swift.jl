@@ -14,7 +14,7 @@ using .matrices_optimized
 include("matrices.jl")
 using .matrices
 
-export solve_scattering_equation, compute_scattering_matrix, compute_scattering_amplitude
+export solve_scattering_equation, compute_scattering_matrix, compute_scattering_amplitude, gmres_scattering
 export compute_collision_matrix, compute_eigenphase_shifts, compute_phase_shift_analysis
 
 # ============================================================================
@@ -52,6 +52,53 @@ Base.size(P::PreconditionerOperator, d::Int) = d <= 2 ? P.size : 1
 Base.eltype(::PreconditionerOperator{T}) where T = T
 
 """
+    MatVecOperator{T}
+
+Matrix-free linear operator wrapping a matvec function `apply(x) -> A*x`, so GMRES can
+solve A*c = b without ever materializing the dense N×N matrix A. Used by the scattering
+solver to apply A = E*B - T - V - V*Rxy as a sequence of cheap matvecs.
+"""
+struct MatVecOperator{T}
+    apply::Function
+    size::Int
+end
+Base.size(A::MatVecOperator) = (A.size, A.size)
+Base.size(A::MatVecOperator, d::Int) = d <= 2 ? A.size : 1
+Base.eltype(::MatVecOperator{T}) where T = T
+Base.:*(A::MatVecOperator, x::AbstractVector) = A.apply(x)
+function LinearAlgebra.mul!(y::AbstractVector, A::MatVecOperator, x::AbstractVector)
+    copyto!(y, A.apply(x)); return y
+end
+function LinearAlgebra.mul!(y::AbstractVector, A::MatVecOperator, x::AbstractVector, α, β)
+    tmp = A.apply(x)
+    if iszero(β)
+        @. y = α * tmp
+    else
+        @. y = α * tmp + β * y
+    end
+    return y
+end
+
+"""
+    gmres_scattering(E, B, T, V, Rxy, b, α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny; ...)
+
+Solve [E*B - T - V - V*Rxy] ψ = b by preconditioned GMRES on a matrix-free A operator
+(no dense A is ever assembled, and the dense V*Rxy product is never formed; A acts as the
+matvec x -> E*(B*x) - T*x - V*x - V*(Rxy*x)). Left preconditioner is the same V-sector
+block-diagonal M^{-1} cache as the bound-state / dense-A solver. Returns (ψ, history).
+"""
+function gmres_scattering(E, B, T, V, Rxy, b, α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny;
+                          reltol=1e-8, maxiter=300, verbose=false)
+    N = length(b)
+    Aop = MatVecOperator{ComplexF64}(x -> E .* (B * x) .- (T * x) .- (V * x) .- V * (Rxy * x), N)
+    M_cache    = matrices.precompute_M_inverse_cache_vsector(α, grid, Tx_ch, Ty_ch, V_x_full, Nx, Ny)
+    M_inv_func = matrices.M_inverse_operator_cached_vsector(E, M_cache)
+    M_inv_op   = PreconditionerOperator{ComplexF64}(M_inv_func, N)
+    ψ, history = gmres(Aop, b, Pl=M_inv_op, log=true, verbose=verbose, maxiter=maxiter, reltol=reltol)
+    return ψ, history
+end
+
+"""
     compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
 
 Compute the left-hand side matrix A = E*B - T - V*(I + Rxy) for scattering equation.
@@ -74,7 +121,7 @@ Compute the left-hand side matrix A = E*B - T - V*(I + Rxy) for scattering equat
 - `V_x_diag_ch`: Per-channel diagonal V blocks (kept for diagnostics)
 - `V_x_full`: Per-pair within-x V blocks for the V-sector M⁻¹ cache
 """
-function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
+function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0, assemble_A::Bool=true)
     N = α.nchmax * grid.nx * grid.ny
 
     println("Computing scattering matrix A = E*B - T - V*(I + Rxy)")
@@ -100,21 +147,22 @@ function compute_scattering_matrix(E, α, grid, potname; θ_deg=0.0)
     println("  Computing overlap matrix B...")
     B = kron(Matrix{Float64}(I, α.nchmax, α.nchmax), kron(Nx, Ny))
 
-    # Compute rearrangement matrices
+    # Compute rearrangement matrices (real-typed: Rxy is a pure geometric transform,
+    # so Float64 storage halves the dense N×N footprint vs ComplexF64)
     println("  Computing rearrangement matrices Rxy...")
-    Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid)
+    Rxy, Rxy_31 = Rxy_matrix_optimized(α, grid; real_output=true)
 
-    # Build scattering matrix: A = E*B - T - V*(I + Rxy)
-    println("  Assembling scattering matrix A...")
-
-    # Identity matrix
-    I_mat = Matrix{ComplexF64}(I, N, N)
-
-    # Compute V*(I + Rxy)
-    V_times_I_plus_Rxy = V * (I_mat + Rxy)
-
-    # Final assembly: A = E*B - T - V*(I + Rxy)
-    A = E * B - T - V_times_I_plus_Rxy
+    # Build scattering matrix: A = E*B - T - V*(I + Rxy) = E*B - T - V - V*Rxy
+    # Expand the V*(I+Rxy) product so no dense N×N identity is ever materialized
+    # (saves one full ComplexF64 N×N matrix); exact, V is local.
+    # assemble_A=false: skip the dense A entirely (and the dense V*Rxy intermediate) for the
+    # matrix-free GMRES path; the caller applies A via gmres_scattering using the components.
+    if assemble_A
+        println("  Assembling scattering matrix A...")
+        A = E * B - T - V - V * Rxy
+    else
+        A = nothing
+    end
 
     println("  Scattering matrix computed successfully.")
 
