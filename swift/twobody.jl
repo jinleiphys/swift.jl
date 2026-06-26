@@ -81,8 +81,13 @@ function bound2b(grid, potname; θ_deg=0.0, n_gauss=nothing, verbose=false)
             bound_count += 1
             eigenvec = eigenvectors[:, i]
 
-            # Proper B-normalization: ⟨ψ|B|ψ⟩ = 1
-            # This is correct for both θ=0 and θ≠0 (complex scaling)
+            # B-normalization to PHYSICAL (unrotated) unit norm: ⟨ψ|B|ψ⟩ = 1 with the conjugate
+            # product and real part. NOTE (tested 2026-06-18): switching this to the bilinear
+            # c-product (ψᵀBψ=1) makes the CS deuteron's rotated-frame c-norm exactly 1 but BREAKS
+            # the n-d doublet benchmark (η 0.466->0.443, angle(S) -148°->-135° vs benchmark -149°).
+            # The deuteron must stay normalized to 1 in physical space; in the 3-body amplitude that
+            # shows up as φᵀBφ = e^{-iθ} in the rotated frame (the CS Jacobian), which the downstream
+            # e^{iθ} factor in test_3body_greens supplies. Do NOT "clean up" to ψᵀBψ=1 here.
             norm_squared = eigenvec' * B * eigenvec
             norm = sqrt(real(norm_squared))  # Take real part in case of numerical noise
 

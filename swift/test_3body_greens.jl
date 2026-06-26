@@ -50,11 +50,15 @@ function build(nx,ny,xmax,ymax,b; θdeg=θ_deg, lmx=2, λmx=2, j2bmx=1.0, Rxy_sh
         end
     end
     λs=sort(collect(keys(chans)))   # [0,2]
-    # c-norm (bilinear, e^{iθ}) → pre-normalize deuteron to c-norm 1 so cħ & matrix-element terms are consistent
+    # Deuteron normalization for the CS amplitude: φᵀBφ must equal e^{-iθ} in the rotated frame
+    # (deuteron is unit-normalized in PHYSICAL space; the e^{iθ} below is the CS x-integral Jacobian).
+    # bound2b returns the conjugate-normalized state; this C_n = (φᵀBφ)·e^{iθ} then divides φ_d so the
+    # amplitude's two terms are on a consistent footing. Tested: dropping e^{iθ} (forcing φᵀBφ=1)
+    # BREAKS the benchmark (angle(S) -148°->-135° vs benchmark -149°). Keep it.
     n2b=size(φ_d,2); evec=ComplexF64[φ_d[j,ich]/grid.ϕx[j] for ich in 1:n2b for j in 1:grid.nx]
     Ix=[(i==j ? 1.0 : 0.0)+(-1.0)^(j-i)/sqrt(grid.xx[i]*grid.xx[j]) for i in 1:grid.nx,j in 1:grid.nx]
     C_n=(transpose(evec)*kron(Matrix{Float64}(I,n2b,n2b),Ix)*evec)*exp(im*θl)
-    φ_d = φ_d ./ sqrt(C_n)          # c-normalized deuteron (φ_dᵀ B φ_d = 1)
+    φ_d = φ_d ./ sqrt(C_n)          # deuteron consistent with φᵀBφ = e^{-iθ}
     blk(v,iα)=v[(iα-1)*nxg*nyg+1:iα*nxg*nyg]
     # regular incoming Ω_in = φ_d(x)·F_λ(qy)/(ϕx ϕy), masked to the λ entrance group (COULCC F via helper)
     function Omega_R(λ)
@@ -89,8 +93,11 @@ function run(nx,ny,xmax,ymax,b; jacpow=2.0, verbose=true, diag=false, chflux=fal
     flux_norm = (μ_y/(m/2))^(1/4)
     f = -(flux_norm*cis(θ)/E_cm)*(f_sc + f_brn)
     S = 1 + 2im*s.q*f
+    # δ = ½·arg(S) lives on the principal branch; lift the negative branch by +180° so the doublet
+    # prints near the benchmark +105° instead of its half-angle alias −74° (same S-matrix).
+    δ_print = rad2deg(0.5*angle(S)); δ_print = δ_print < 0 ? δ_print + 180 : δ_print
     verbose && @printf("[lmx=%d λmx=%d j2b=%.0f nch=%2d ny=%3d ymax=%5.0f] f_sc=%.2f%+.2fi f_brn=%.2f  δ=%8.3f° η=%.4f\n",
-            lmx, λmx, j2bmx, length(s.α.l), ny, ymax, real(f_sc),imag(f_sc), real(f_brn), rad2deg(0.5*angle(S)), abs(S))
+            lmx, λmx, j2bmx, length(s.α.l), ny, ymax, real(f_sc),imag(f_sc), real(f_brn), δ_print, abs(S))
     if chflux
         # source diagnostic: does V·Rxy·Ω leak OUT of the entrance sector at all?
         @printf("  per-channel source norms (Ω→Rxy·Ω→b=V·Rxy·Ω):\n")
