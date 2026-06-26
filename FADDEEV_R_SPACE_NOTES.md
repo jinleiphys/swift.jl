@@ -897,13 +897,17 @@ The amplitude is the Lazauskas-Carbonell Green-theorem integral relation (HDR ar
 Eq.2.117-2.118). The crucial step is to **separate the Born term** (the two-incoming-wave piece) and
 evaluate it WITHOUT complex scaling, because that term carries the fastest $\theta$-divergence:
 $$
-f(k) = -\frac{1}{E_{cm}}\Big[\, e^{2i\theta}\,\big\langle \phi_d F \,\big|\, V_{23}+V_{31} \,\big|\, \psi_3^{sc}\big\rangle_{CS}
+f(k) = -\frac{f_{\rm norm}\,e^{i\theta}}{E_{cm}}\Big[\, e^{2i\theta}\,\big\langle \phi_d F \,\big|\, V_{23}+V_{31} \,\big|\, \psi_3^{sc}\big\rangle_{CS}
 \;+\; \big\langle \phi_d F \,\big|\, V_{23}+V_{31} \,\big|\, \psi_3^{in}\big\rangle_{\theta=0,\ \text{Born, no CS}} \,\Big],
+\qquad f_{\rm norm}=\Big(\tfrac{\mu_y}{m/2}\Big)^{1/4},
 $$
-then the collision matrix $U=2ik_d f+1$ (below) and the channel-spin / Blatt-Biedenharn analysis.
+then the collision matrix $U=2ik_d f+1$ (below) and the channel-spin / Blatt-Biedenharn analysis. (The
+overall $f_{\rm norm}\,e^{i\theta}$ prefactor and the $\theta=0$ Born build are exactly as coded in
+`swift/test_3body_greens.jl`; $\mu_y=2m/3$, $k_d=q$.)
 
-> **Validated recipe (2026-06-18, after R. Lazauskas's reply; this SUPERSEDES the earlier debugging
-> notes that were partly wrong and cost a lot of time).**
+> **Validated recipe (2026-06-18 → 06-26; benchmark reproduced, Codex cross-checked. This SUPERSEDES the
+> earlier debugging notes that were partly wrong and cost a lot of time). Matches the current code in
+> `swift/test_3body_greens.jl`, `swift/scattering.jl`, `swift/twobody.jl`, `swift/coulcc.jl`.**
 >
 > - **Bra = the REGULAR incoming** $\phi_d F$ (NOT the outgoing Hankel / $e^{-iq_n y e^{i\theta}}$ form —
 >   an earlier note had this backwards, which was a dead end). Use the **bilinear c-product**
@@ -920,43 +924,62 @@ then the collision matrix $U=2ik_d f+1$ (below) and the channel-spin / Blatt-Bie
 >   needs $e^{i\theta}$.
 > - **Operator** $[V_{23}+V_{31}]=\mathcal R\,V_{12}$ ($\mathcal R=\text{Rxy}=P^++P^-$), realized in swift
 >   as $V\cdot\text{Rxy}$ acting on the appropriate component.
-> - **Deuteron c-norm $1/C_n$** ($C_n=\phi_d^{\mathsf T}B\phi_d=e^{2i\gamma}|C_n|$, $|C_n|\approx1$
->   $\theta$-stable) removes the eigenvector's arbitrary global phase $e^{i\gamma}$; pre-normalize
->   $\phi_d\to\phi_d/\sqrt{C_n}$ so that $\phi_d^{\mathsf T}B\phi_d=1$.
+> - **Deuteron c-norm = $e^{-i\theta}$, NOT 1.** The code uses $C_n=(\phi_d^{\mathsf T}B\phi_d)\,e^{i\theta}$
+>   and pre-normalizes $\phi_d\to\phi_d/\sqrt{C_n}$, so the effective deuteron satisfies
+>   $\phi_d^{\mathsf T}B\phi_d=e^{-i\theta}$. The bilinear c-product (transpose, no conjugation) is correct,
+>   and the $e^{i\theta}$ is the **complex-scaling $x$-integral Jacobian**: the deuteron is unit-normalized
+>   in PHYSICAL (unrotated) space, which in the rotated bilinear product reads $\phi_d^{\mathsf T}B\phi_d=e^{-i\theta}$.
+>   `bound2b` itself normalizes with the conjugate $\langle\phi|B|\phi\rangle=1$; the $e^{i\theta}$ supplies
+>   the Jacobian downstream. **VERIFIED DEAD-END (2026-06-18):** "cleaning up" to the bilinear $\phi_d^{\mathsf T}B\phi_d=1$
+>   (c-normalize in `bound2b` and drop the $e^{i\theta}$) makes the c-norm exactly 1 but BREAKS the benchmark
+>   ($\eta\,0.466\!\to\!0.443$, $\arg S\,{-}148^\circ\!\to\!{-}135^\circ$). Do not do it. COLOSS cannot guide
+>   this point because its 2-body elastic problem has no internal bound state.
 > - **back-rotation is correct and numerically MORE stable** than forward coordinate rotation (R.
 >   Lazauskas + COLOSS): the real Lagrange basis stays well-conditioned, whereas forward rotation would
 >   evaluate basis functions at complex arguments (ill-conditioned). swift already uses back-rotation.
 >
-> **Status (swift.jl, $\theta=3^\circ$, $e^{2i\theta}$; CONVERGED 2026-06-18):** $\delta\approx104^\circ$
-> (benchmark $105.49^\circ$, within $\sim2^\circ$; was stuck at $77^\circ$ or diverging for the whole
-> saga). $\eta\approx0.35$ vs benchmark $0.4649$ ($\sim25\%$ low). This residual survives every
-> convergence and structure test:
-> - **Mesh-converged.** At $n_{ch}=2$, $\eta\to0.348$ for $n_y\gtrsim120$ at $y_{max}=120$, and stays
->   $0.34$–$0.36$ for $y_{max}=60$–$180$. The earlier "$\eta$ drifts with $y_{max}$ / $\eta=0.44$" readings
->   were coarse-$n_y$ under-resolution artifacts, now resolved.
-> - **Channel-INVARIANT.** $l_{max}$ 0→4 / $n_{ch}$ 2→26 give byte-identical $f_{sc}$ at fixed mesh. For
->   $J_{tot}=1/2$ the spectator $\lambda$ is capped by $J_{12}\otimes J_3=1/2$ ($\lambda=4$ cannot couple
->   for the deuteron $J_{12}=1$), and MT's S-wave-only $V$ makes the extra $j_{2b}$ channels decoupled free
->   spectators (the channel coupling in $A=E B-T-V(I+\text{Rxy})$ runs only through $V\cdot\text{Rxy}$). So
->   the gap is NOT model-space truncation.
-> - **NOT channel-spin recoupling / D-state.** MT is central $\Rightarrow$ the deuteron is pure $^3S_1$
->   (0% D-state), so the bi-conjugate / Blatt-Biedenharn-recoupling hypotheses are moot here.
-> - **2-body machinery validated.** The scalar analog (`test_2body_cs_1S0.jl`, MT $^1S_0$) reproduces
->   $\eta=0.999$ (unitarity) and $\delta=63.2^\circ$, uniquely pinning the per-radial CS Jacobian to
->   $e^{+1\theta}$. Amplitude structure variants (conjugated bra, bra/ket swap, $(1+\text{Rxy})\psi$ full
->   wavefunction, plain-$V$ operator) all ruled out: the baseline above IS the paper formula.
+> - **Eigenphase $\delta$ on the lifted branch.** The code prints $\delta=\tfrac12\arg S$ lifted by
+>   $+180^\circ$ when negative: the raw principal value is the half-angle alias $-74^\circ$; lifting gives
+>   $+106^\circ$ (same $S$). Without the lift the doublet *looks* wrong by $\sim180^\circ$.
+> - **Regular function $F_\lambda$ via COULCC with an analytic boundary repair.** For $n$-$d$ ($\eta=0$)
+>   $F_\lambda(0,x)=x\,j_\lambda(x)$ (Riccati-Bessel). COULCC's continued fraction loses precision for the
+>   high-$\lambda$/small-$|x|$ orders (it returns `ifail=11,13` there, sometimes garbage with `ifail=0`),
+>   which leaked as an intermittent $f_{\rm Born}=-\infty$. The COULCC wrapper (`swift/coulcc.jl`,
+>   `repair_boundary_F!`) now replaces only those boundary entries with the exact Riccati-Bessel value
+>   (Miller downward recurrence, matched to COULCC to $\sim3\times10^{-15}$); COULCC's good orders are kept.
+> - **Solver = matrix-free preconditioned GMRES** (`gmres_scattering`): the operator applies
+>   $A=EB-T-V-V\,\text{Rxy}$ without ever forming the dense $A$ (no dense LU), with the V-sector $M^{-1}$
+>   preconditioner. This is what makes the larger channel spaces fit in memory.
 >
-> The converged amplitude needs $\times1.075$ magnitude $+2.7^\circ$ phase to hit the benchmark: a FIXED
-> $\sim7.5\%$ normalization $+$ small phase, not convergence/channels. Open leads: (a) swift's MT
-> parametrization vs the exact potential behind PRC 84 Tab.III ($E_d=-2.2295$ MeV here); (b) a subtle
-> amplitude prefactor. Diagnostic of record: `swift/test_3body_greens.jl`.
+> **Status (swift.jl, $\theta=3^\circ$, $e^{2i\theta}$; BENCHMARK REPRODUCED 2026-06-26, supersedes the
+> earlier "$\eta\approx0.35$, $\sim25\%$ low" reading, which was a pre-Born-separation form):**
+> $\eta=0.4661$ vs benchmark $0.4649$ ($0.3\%$); $\delta=105.95^\circ$ vs $105.49^\circ$ (lifted branch).
+> Diagnostic of record `swift/test_3body_greens.jl`. Independently cross-checked by Codex (the code is
+> correct at the $S$-matrix level; the apparent $-74^\circ$ was only the half-angle display branch).
+> - **Box-converged.** Across $y_{max}=80\to160$ at fixed density ($n_y/y_{max}$), $\eta$ stays
+>   $0.463$–$0.471$ and $\arg S$ stays $-146^\circ\ldots-150^\circ$, both centered on the benchmark
+>   ($\eta=0.4649$, $\arg S\approx-149^\circ$). No drift, no divergence.
+> - **Channel space irrelevant for MT.** MT is S-wave-only ($\lVert V_{\rm blk}\rVert=0$ for $l>0$,
+>   verified): $\text{Rxy}\,\Omega$ does populate the $l{>}0/\lambda{>}0$ channels but $V$ zeroes
+>   $b=V\text{Rxy}\,\Omega$ there, so the higher channels carry no flux. $n_{ch}=2$ and $n_{ch}=15$ give
+>   BIT-IDENTICAL $f_{sc},\delta,\eta$ at a fixed mesh. (Compare channel counts only at a FIXED mesh: a
+>   different $n_y$ gives a spurious $\eta$ shift that is a mesh artifact, not a channel effect.) This does
+>   NOT generalize to a realistic $l>0$ force (AV18), where the higher channels would couple.
+> - **NOT channel-spin recoupling / D-state.** MT is central $\Rightarrow$ deuteron is pure $^3S_1$.
 >
-> **Why the earlier notes misled (for the record):** the un-separated Eq.2.117 form above lumps
-> $\psi^{in}+\psi^{sc}$ under CS (diverges); the implementation note used the outgoing-exp bra and only a
-> single $e^{i\theta}$ Jacobian (2-body), and never stated the angle constraint. The two things that
-> actually fixed the PHASE (small $\theta$ + Born-on-real-axis) came from Lazauskas's reply. The
-> "channel-spin recoupling / $y$-mesh" remaining-work note (now corrected) was wrong: $\eta$ is
-> channel-invariant and mesh-converged at $0.35$.
+> **Numerics not yet rock-solid.** (i) $\pm0.5\%$ box scatter in $\eta$ ($0.463$–$0.471$), oscillatory
+> rather than monotone, so a tight error bar needs averaging / finer study. (ii) Only the $J^\pi=1/2^+$
+> doublet at $E_{lab}=14.1$ MeV and a modest mesh is tested. (iii) Only the MT (S-wave) potential; AV18 /
+> realistic-force scattering is untested. (iv) The intermittent COULCC boundary failure is now repaired,
+> but it was a reminder that the small-$x$/high-$\lambda$ regime is delicate. **Bottom line: the $n$-$d$
+> doublet benchmark is reproduced to $<1\%$ in both $\eta$ and $\delta$, but the result is not yet at
+> production-grade numerical stability.**
+>
+> **Why the earlier notes misled (for the record):** they described a pre-Born-separation amplitude (gave
+> $\eta\approx0.35$) and an un-separated Eq.2.117 form that lumps $\psi^{in}+\psi^{sc}$ under CS (diverges);
+> the c-norm note had $\phi_d^{\mathsf T}B\phi_d=1$ (wrong: it is $e^{-i\theta}$). The two fixes that
+> actually closed it (Born-on-real-axis + the $e^{i\theta}$ deuteron Jacobian, NOT $\phi_d^{\mathsf T}B\phi_d=1$)
+> are now in the recipe above.
 
 The scattering amplitude can also be written as $f^{\alpha_0,\alpha_0'}(k)$, where $\alpha_0$ indexes the channel in which the deuteron remains in its ground state. The scattering matrix can then be computed through 
 $$
