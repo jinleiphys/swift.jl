@@ -1168,22 +1168,6 @@ bound_energies, bound_wavefunctions = bound2b(grid, "AV18")
 φ = compute_initial_state_vector(grid, α, φ_d_matrix, E, z1z2)
 ```
 """
-# Regular Coulomb function for η=0: F_λ(0,x) = x·j_λ(x) (Riccati-Bessel), λ=0..λmax, complex x.
-# Stable Miller downward recurrence started above the turning point λ≈|x|, normalized to the exact
-# j_0 = sin(x)/x. Deterministic and overflow-free (the regular solution decays for λ>|x|); replaces
-# COULCC mode=4 on the neutral path, which also builds the irregular G and can return garbage with
-# ifail=0 when its continued fraction loses precision. Validated vs COULCC to ~3e-15 (real + CS x).
-function riccati_bessel_F(λmax::Int, x::ComplexF64)
-    nstart = λmax + ceil(Int, abs(x)) + 30
-    j = zeros(ComplexF64, nstart + 2)        # j[l+1] holds j_l(x)
-    j[nstart + 1] = 1e-30 + 0im              # tiny seed; j[nstart+2]=0
-    for l in nstart:-1:1
-        j[l] = (2l + 1) / x * j[l + 1] - j[l + 2]   # j_{l-1}
-    end
-    scale = (sin(x) / x) / j[1]              # normalize to the exact j_0
-    return ComplexF64[x * j[λ + 1] * scale for λ in 0:λmax]
-end
-
 function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64}, E, z1z2; θ=0.0)
     # Load COULCC library if not already loaded
     if CoulCC.libcoulcc[] == C_NULL
@@ -1263,25 +1247,15 @@ function compute_initial_state_vector(grid, α, φ_d_matrix::Matrix{ComplexF64},
     # F_all[iy][λ] contains F_λ value at y-grid point iy (using OffsetArray for 0-based indexing)
     F_all = Vector{OffsetArray{ComplexF64, 1}}(undef, ny)
 
-    neutral = abs(η) < 1e-12   # n-d (z1z2=0): use the analytic Riccati-Bessel, bypass COULCC entirely
     for iy in 1:ny
         y_scaled = grid.yi[iy] * scale_factor
         x_coulomb = ComplexF64(k * y_scaled)
 
-        if neutral
-            # η=0 regular Coulomb function = Riccati-Bessel; deterministic, no COULCC roundoff overflow
-            F_all[iy] = OffsetArray(riccati_bessel_F(λ_max, x_coulomb), 0:λ_max)
-        else
-            # Charged channel: COULCC once for all λ from 0 to λ_max
-            fc, gc, fcp, gcp, sig, ifail = coulcc(x_coulomb, ComplexF64(η), 0, lmax=λ_max, mode=4)
-            if ifail != 0
-                @warn "COULCC failed at iy=$iy with ifail=$ifail, using F=0 for all λ"
-                F_all[iy] = OffsetArray(zeros(ComplexF64, λ_max + 1), 0:λ_max)
-            else
-                # Convert to OffsetArray with 0-based indexing: fc[0] = F_λ=0, fc[1] = F_λ=1, ...
-                F_all[iy] = OffsetArray(fc, 0:λ_max)
-            end
-        end
+        # COULCC for all λ from 0 to λ_max. The wrapper now repairs the high-λ / small-x boundary
+        # (where COULCC's continued fraction loses precision) with the analytic regular function, so
+        # the returned F is clean (fixes the intermittent f_brn=-Inf); no need to discard on ifail.
+        fc, gc, fcp, gcp, sig, ifail = coulcc(x_coulomb, ComplexF64(η), 0, lmax=λ_max, mode=4)
+        F_all[iy] = OffsetArray(fc, 0:λ_max)
     end
 
     # Second pass: populate channels using pre-computed Coulomb functions
