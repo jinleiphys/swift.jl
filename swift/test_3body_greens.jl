@@ -148,35 +148,20 @@ function run(nx,ny,xmax,ymax,b; jacpow=2.0, verbose=true, diag=false, chflux=fal
     return S
 end
 
-println("benchmark doublet 14.1: δ=105.49°, η=0.4649  [Rimas HDR Eq.2.118: scattered(CS)+Born(no CS)]")
-# Derived CS Jacobian: jac=e^{2iθ} (x-contour cancels V's e^{−iθ}, y-contour supplies the missing factor).
-# Check δ,η at jacpow=2, θ=3°/4°, convergence in mesh + b. Residual magnitude = deuteron c-norm / recoupling?
-# θ-plateau × box-stability grid (fixed point density ny/ymax≈0.75) to locate the
-# small-θ window where Im(f_sc) is box-converged. Plateau ⇒ η flat across ymax near 0.46.
-# Box-stability grid at fixed point density (ny/ymax≈0.75). FINDING 2026-06-18:
-#   η is box-CONVERGED at θ≥2.5° (flat across ymax 80/100/120 at ≈0.335), δ→≈104°.
-#   The earlier "η drifts with ymax" was a RESOLUTION artifact (ny under-scaled), not a
-#   box/CS-angle effect. So the gap to benchmark η=0.4649 is a FIXED ~28% amplitude-
-#   normalization factor, NOT convergence. C_n print shows the CS deuteron c-norm carries
-#   a spurious −12.4° phase vs the real-axis Born build (=1.0): the two terms in Eq.2.118
-#   are differently normalized. Resolving the convention is the open question for Rimas.
-# CHANNEL-TRUNCATION convergence scan (θ=3°, fixed moderate mesh). The amplitude assembly is the
-# paper formula (baseline = Eq.2.48; all structural variants ruled out). η is the breakup-absorption
-# observable, most sensitive to the channel space (lmx,λmx,j2bmx); δ converges faster. Question the
-# framing: is η=0.334 vs benchmark 0.4649 a model-space-truncation gap, not an amplitude bug?
 global θ_deg = 3.0; global θ = 3.0*π/180
-# 2026-06-18: "channels are INVARIANT for MT" is CORRECT, mechanism now verified. MT is an
-# S-wave-only force: ‖V_blk‖ nonzero only for l=0 channels, exactly 0 for l>0. So V·Rxy·Ω is killed
-# outside the S-wave entrance — Rxy DOES couple the entrance into l>0/λ>0 channels (‖Rxy·Ω‖≠0 there)
-# but V zeroes b=V·Rxy·Ω there, those channels carry zero flux, and the observable is independent of
-# (lmx,λmx,j2bmax). The chflux print proves it (source norms: ‖Rxy·Ω‖≠0 but ‖b‖=0 off the l=0 sector).
-# The gap to benchmark η=0.4649 is mesh + amplitude-normalization (waiting on Rimas), NOT channels.
-# CAVEAT: a realistic l>0 force (AV18) WOULD couple higher channels; this MT result does not generalize.
-println("=== θ=3°, per-channel source+flux diagnostic (MT S-wave-only ⇒ only l=0 entrance carries flux) ===")
-println("-- nch=3 (lmx=0,λmx=2), fine mesh --")
-run(24,120,30.0,120.0,8.0; lmx=0,λmx=2,j2bmx=1.0, chflux=true); flush(stdout)
-# Channel-count comparisons MUST be at a FIXED mesh: comparing different meshes gives a spurious η
-# shift that is a mesh artifact, not a channel effect. Same mesh ⇒ nch=2 ≡ nch=15 bit-identical for MT.
-println("\n=== SAME-MESH (16,40,20,40) channel test: nch=2 vs nch=15 must match for MT ===")
-println("-- nch=2 (lmx=0,λmx=0) --");   run(16,40,20.0,40.0,8.0; lmx=0,λmx=0,j2bmx=1.0); flush(stdout)
-println("-- nch=15 (lmx=2,λmx=2) --");  run(16,40,20.0,40.0,8.0; lmx=2,λmx=2,j2bmx=2.0); flush(stdout)
+# Reproduce the full n-d L=0 elastic Table III (Lazauskas-Carbonell PRC 84,034002), θ=3°:
+# doublet (J=1/2+) and quartet (J=3/2+), at E_lab=14.1 and 42 MeV. Jtot/E_lab/E_cm are reassigned
+# per case (build()/run() read them as globals). MT is S-wave-only so the channel space is irrelevant;
+# lmx=0,λmx=2 suffices. 42 MeV has q≈1.7× larger, so it needs a denser y-mesh (smaller ymax, larger ny).
+println("=== n-d L=0 elastic, Rimas PRC 84 Tab.III benchmark (θ=3°) ===")
+function bench(tag, Jt, Elab, δt, ηt, nx, ny, xmax, ymax; lmx=0, λmx=2, j2bmx=1.0)
+    global Jtot = Jt; global E_lab = Elab; global E_cm = (2/3)*Elab
+    S = run(nx,ny,xmax,ymax,8.0; lmx=lmx,λmx=λmx,j2bmx=j2bmx, verbose=false)
+    δ = rad2deg(0.5*angle(S)); δ = δ<0 ? δ+180 : δ; η = abs(S)
+    @printf("%-16s swift δ=%7.2f° η=%.4f | bench δ=%7.2f° η=%.4f | Δδ=%+6.2f° Δη=%+.4f\n",
+            tag, δ, η, δt, ηt, δ-δt, η-ηt); flush(stdout)
+end
+bench("doublet 14.1", 0.5, 14.1, 105.49, 0.4649, 24,120,30.0,120.0)
+bench("quartet 14.1", 1.5, 14.1,  68.95, 0.9782, 24,120,30.0,120.0)
+bench("doublet 42",   0.5, 42.0,  41.35, 0.5022, 24,150,30.0,100.0)
+bench("quartet 42",   1.5, 42.0,  37.71, 0.9033, 24,150,30.0,100.0)
