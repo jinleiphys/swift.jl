@@ -19,6 +19,7 @@
 
 using LinearAlgebra, Printf, FastGaussQuadrature
 include("splines.jl"); using .Splines
+include("ecs.jl");     using .ECS
 
 const ħ   = 197.3269718
 const amu = 931.49432
@@ -174,7 +175,83 @@ function solve_spline_2body_ecs(E, θ_deg, R0, rmax, n_in, n_ext; ncol = 3)
     return δ, abs(S), resid
 end
 
+"""
+    solve_spline_2body_qcs(cs, E, domains; ncol=3) -> (δ, η, resid)
+
+UNIFIED, basis-agnostic CS solver: the Hamiltonian is assembled in the q-operator form
+H = -(ħ²/2μ)[(1/q²)∂² - (q'/q³)∂] + V(x(r)) using the REAL-r spline (value, d/dr, d²/dr²)
+and the contour `cs` (x, q, q'). Works for any CSContour kind (:uniform, :sharp, :smooth).
+The spline supplies only real-coordinate derivatives; all complex scaling lives in cs.
+"""
+function solve_spline_2body_qcs(cs::CSContour, E, domains; ncol = 3)
+    k = sqrt(E / ħ2_2μ)
+    mesh = init_spline_mesh(domains; ncol = ncol)
+    knots = mesh.knots; nint = mesh.nint; nd = mesh.ndof; nc = length(mesh.xc)
+    A = zeros(ComplexF64, nc, nd); b = zeros(ComplexF64, nc)
+    for c in 1:nc
+        r_c = mesh.xc[c]
+        x = contour_x(cs, r_c); q = contour_q(cs, r_c); qp = contour_qp(cs, r_c)
+        Vx = mt_1S0(x)
+        idx, S, S1, S2 = spline_functions(mesh, r_c)         # θ=0: real-r value/∂/∂²
+        for (loc, j) in enumerate(idx)
+            kin = ħ2_2μ * ((1.0 / q^2) * S2[loc] - (qp / q^3) * S1[loc])
+            A[c, j] = E * S[loc] + kin - Vx * S[loc]         # (E - H) in q-operator form
+        end
+        b[c] = Vx * F0(k * x)
+    end
+    dropped = [1, nint * ncol + 1]; ncol == 3 && push!(dropped, nint * ncol + 2)
+    keep = setdiff(1:nd, dropped)
+    c_keep = A[:, keep] \ b
+    c_full = zeros(ComplexF64, nd); c_full[keep] = c_keep
+    resid  = norm(A * c_full - b) / norm(b)
+    # amplitude: ∫ F0(k·x) V(x) u_tot dz, with dz = q(r) dr (q carries the contour Jacobian)
+    nq = 12; uq, wq = gausslegendre(nq); M = 0.0im
+    for i in 1:nint
+        a = knots[i]; h = knots[i + 1] - knots[i]
+        for qd in 1:nq
+            r_q = a + 0.5h * (uq[qd] + 1.0); w_q = 0.5h * wq[qd]
+            x = contour_x(cs, r_q); qm = contour_q(cs, r_q)
+            idx, S, _, _ = spline_functions(mesh, r_q)
+            u = F0(k * x) + sum(c_full[idx[l]] * S[l] for l in eachindex(idx))
+            M += w_q * qm * F0(k * x) * mt_1S0(x) * u
+        end
+    end
+    f = -(1.0 / E) * M; Sm = 1.0 + 2im * k * f
+    δ = rad2deg(0.5 * angle(Sm)); δ = δ < 0 ? δ + 180 : δ
+    return δ, abs(Sm), resid
+end
+
 println("="^70)
+println(" THREE CS variants via the unified q-operator layer (quintic spline, MT ¹S₀)")
+println(" target δ=63.512°, η=1.  η→1 + θ-flat = good.  Lagrange-Laguerre ref: 63.224/0.999")
+println("="^70)
+let
+    rmax = 296.0
+    dom_uni    = [(0.0, 100.0, 300, 1.0)]                                          # uniform wants a matched box
+    dom_sharp  = [(0.0, 6.0, 40, 1.0), (6.0, rmax, 360, 1.0)]                      # knot at R0=6
+    dom_smooth = [(0.0, 6.0, 40, 1.0), (6.0, 8.0, 24, 1.0), (8.0, rmax, 340, 1.0)] # knots at R0, R0+w
+    for θd in (8.0, 10.0, 12.0, 14.0, 16.0)
+        u  = solve_spline_2body_qcs(CSContour(:uniform; θ_deg = θd), 1.0, dom_uni)
+        sh = solve_spline_2body_qcs(CSContour(:sharp;  θ_deg = θd, R0 = 6.0), 1.0, dom_sharp)
+        sm = solve_spline_2body_qcs(CSContour(:smooth; θ_deg = θd, R0 = 6.0, w = 2.0), 1.0, dom_smooth)
+        @printf("θ=%4.0f° | uniform δ=%7.3f η=%.4f | sharp δ=%7.3f η=%.4f | smooth δ=%7.3f η=%.4f\n",
+                θd, u[1], u[2], sh[1], sh[2], sm[1], sm[2])
+    end
+    println("""
+  Conclusion (q-operator layer with a REAL-r basis):
+   • SMOOTH is the ONLY one that works through this basis-agnostic path: δ flat ≈63.50°,
+     η→1.0000, θ-independent. C² contour, no kink, real-r derivatives suffice → ANY basis
+     (LL / Legendre / spline) plugs in. This is the production / multi-basis path.
+   • SHARP fails here (η=1.25→1.50): the real-r C²-quintic cannot carry the du/dr kink at R0.
+     Sharp works ONLY via the local complex-h route (solve_spline_2body_ecs below, η→1.0000),
+     which is local-basis-specific, NOT basis-agnostic.
+   • UNIFORM fails here too (δ=25): its natural discretization is the ROTATED-argument form
+     (solve_spline_2body below), not the real-r q-operator. Also θ-sensitive.
+  ⇒ Each CS variant has a natural discretization; only SMOOTH is basis-agnostic. For a
+    pluggable-basis framework, SMOOTH ECS is the layer to standardize on.""")
+end
+
+println("\n", "="^70)
 println(" Spline-collocation 2-body CS scattering  MT ¹S₀  (target δ=63.512°, η=1)")
 println("="^70)
 for ncol in (2, 3)

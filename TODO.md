@@ -72,7 +72,20 @@ oscillates).
       non-binding at usable nint. **User (ECS expert, PINN-ECS PRC 113,064618) called this; validated.**
       Refactor extracted `_hermite_local` shared by uniform-CS and ECS evaluators; `test_splines.jl` still
       passes to machine precision (regression held).
-      **NEXT: wire the quintic-spline + ECS y-basis into the 3-body Faddeev matrices (Step 2 proper).**
+- [x] **CS layer refactored to a basis-agnostic contour module (`swift/ecs.jl`)** with THREE variants
+      (`CSContour` kind = `:uniform` / `:sharp` / `:smooth`), each providing x(r), q(r)=dx/dr, q'(r).
+      Hamiltonian assembled in the q-operator form H=−(ħ²/2μ)[(1/q²)∂²−(q'/q³)∂]+V(x(r)), so the BASIS only
+      supplies REAL-r value/∂/∂² and ALL complex scaling lives in (x,q,q') — any basis (LL/Legendre/spline)
+      plugs in. `:smooth` is the PINN-ECS contour verbatim: x=r+(e^{iθ}−1)·I(r), cubic smoothstep s(t)=3t²−2t³
+      over [R0,R0+w] (confirmed by reading `~/Desktop/code/PINN-ECS/src/ecs/contour.py`, class
+      `SmoothECSContour`). Unified q-operator solver `solve_spline_2body_qcs` tested on all three:
+      **only SMOOTH works through the basis-agnostic real-r path** — δ flat ≈63.50°, η→1.0000, θ-independent.
+      Sharp fails there (real-r C²-quintic can't carry the du/dr kink → η=1.25–1.50; sharp's working form is
+      the local complex-h `solve_spline_2body_ecs`). Uniform's natural form is rotate-argument, not real-r.
+      ⇒ **SMOOTH ECS is the basis-agnostic layer to standardize on** (also bit-consistent with PINN-ECS for
+      cross-validation; works for LL, which sharp cannot).
+      **NEXT: wire quintic-spline + SMOOTH-ECS as the y-coordinate into the 3-body Faddeev matrices, with the
+      contour layer kept basis-agnostic so LL/Legendre can be swapped in (Step 2 proper).**
 - [ ] **Step 2 — wire the spline y-basis into the Faddeev matrices** (`matrices_optimized.jl`): y overlap Ny →
       spline value matrix S at collocation points (banded, no tail); y kinetic Ty → 2nd-deriv matrix S2; Rxy
       interpolation + initial F_λ(qy) → `spline_functions`. x stays Lagrange-Laguerre. Use quintic, apply
