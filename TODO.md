@@ -1,6 +1,49 @@
 # swift.jl TODO
 
-Snapshot **2026-06-18**. ✅ **BREAKTHROUGH: δ now hits ~103-104° (benchmark 105.49°) after Rimas replied.**
+Snapshot **2026-06-29**. ✅ **UNBLOCKED — Rimas replied twice; root cause of the doublet-42 residual is
+now fully understood and it is NOT a formula/operator/prefactor bug.** Two layers settled this session:
+1. The 14.1 MeV doublet reproduces the benchmark; the 42 MeV residual was (x,y) coupled-box
+   UNDER-convergence (swift hardwired xmax=30 ≪ ymax=100, but Rxy couples x↔y, so a high-energy
+   y-extent needs a matching x-box). Growing nx WITH xmax marches δ 52°→44°, η→0.50 toward 41.35°/0.5022.
+2. The Lagrange-Laguerre y-mesh cannot finish the job: at small θ it needs an impractically huge balanced
+   box (LL overflows ~1e150 past ny≈180); at large θ the box can be small but the CS incoming bra
+   e^{+qy·sinθ} grows and δ slides with the box (no plateau). η converges to ~0.50, δ does not.
+   Both dead-ends recorded with numbers in `devlog.md` (2026-06-29 + 2026-06-26 entries).
+
+> ▶ **NEXT ACTION (decided): give the scattering coordinate y a pluggable basis and switch it from
+> Lagrange-Laguerre to a finite-box HERMITE SPLINE (Rimas's actual choice).** LL clusters points at the
+> origin and covers the asymptotic region poorly, so it can't represent the 42-MeV oscillatory scattered
+> wave (λ≈6.6 fm). Read Rimas's own Faddeev code (`~/Desktop/TALENT-Trento-2015/LAZAUSKAS R/Ex-Fad_eq`):
+> his benchmark uses **spline collocation**, controlled by a single integer `TYPE/id` in `init_Lagrange_mesh`
+> (1=Legendre … 5=Laguerre=what swift hardcodes … + `coor_tr` for point distribution) and his `SPLINES`
+> module = Hermite finite elements (cubic NCOL=2 / quintic NCOL=3) on a graded knot grid, LOCAL support →
+> banded overlap, NO 1/√y tail, finite box → no overflow. Target after the switch: doublet-42 δ=41.35°,
+> η=0.5022. The 14.1 MeV doublet is the regression guard (must stay reproduced).
+
+**Design decision:** mirror Rimas — basis chosen by one parameter per coordinate; x stays Lagrange-Laguerre,
+y switchable. Hermite spline first (matches his benchmark); Legendre is only a lazier intermediate (endpoint
+clustering needs a `coor_tr` to spread points, whereas spline knots can be placed uniformly where the wave
+oscillates).
+
+- [x] **Step 1 — Hermite-spline basis module DONE** (`swift/splines.jl` + `swift/test_splines.jl`). Port of
+      Rimas's SPL / SPL_CMP / COLLOC / GND: `graded_grid`, `SplineMesh`/`init_spline_mesh`, `spline_functions`
+      (value+1st+2nd deriv, local 2·ncol support, CS via r→r·e^{iθ}), `collocation_points`, `find_interval`.
+      Self-test passes to machine precision: partition of unity 2e-16; polynomial reproduction (value/1st/2nd
+      deriv) cubic→deg 3, quintic→deg 5 at ~1e-16…1e-14 rel; CS analytic continuation 6e-15 (cubic) / 9e-14
+      (quintic). Written for readability, mirrors laguerre.jl / mesh.jl style.
+- [ ] **Step 2 — wire the spline y-basis into the Faddeev matrices** (`matrices_optimized.jl`): y overlap Ny →
+      spline value matrix S at collocation points (banded, no tail); y kinetic Ty → 2nd-deriv matrix S2; Rxy
+      interpolation + initial F_λ(qy) → `spline_functions`. x stays Lagrange-Laguerre. Apply origin/rmax BCs.
+- [ ] **Step 2 gate — 2-body CS unitarity**: reproduce `test_2body_cs_1S0.jl` η=0.999 on the spline y-mesh
+      before touching the 3-body path.
+- [ ] **Step 3 — re-test doublet-42** (41.35°/0.5022) and quartet-42 on the spline y-mesh; keep 14.1 MeV as
+      regression guard. Use θ near the upper CS bound (~7.5° @42 MeV, Rimas), not θ=3°.
+
+---
+
+## ✅ Superseded snapshot 2026-06-18 — δ≈103-104° after Rimas's first reply (kept for history)
+
+✅ **BREAKTHROUGH: δ now hits ~103-104° (benchmark 105.49°) after Rimas replied.**
 Rimas's answer: I was using too large a CS angle (θ=10°). swift uses PHYSICAL (non-mass-scaled) Jacobi
 coords so θ_max is smaller than my √3 estimate; dropping to **θ=3-4°** makes the scattered term
 mesh-stable (his Table 5.1: θ=3° → δ=105.0/η=0.456). The amplitude is his HDR **Eq.2.118** (arXiv:1904.04675):
@@ -36,7 +79,15 @@ record: `swift/test_3body_greens.jl`.
 
 ---
 
-## ⏸ BLOCKED 2026-06-17 — root cause found, waiting for Rimas
+## ✅ RESOLVED 2026-06-29 — Rimas replied; was never blocked on him (history below kept verbatim)
+
+> **2026-06-29 update**: Rimas answered (two emails). The 2026-06-17 "overlap-tail root cause" below was a
+> MISATTRIBUTION of (x,y) box under-convergence (see devlog 2026-06-26), and the final wall is the
+> Lagrange-Laguerre mesh itself at high energy (see devlog 2026-06-29). Action moved to the top of this
+> file: switch y to Lagrange-Legendre. The section below is kept verbatim for the diagnostic trail only;
+> do NOT act on its "WAIT for Rimas" / candidate-fix items, they are superseded.
+
+## ⏸ (history) BLOCKED 2026-06-17 — root cause found, waiting for Rimas
 
 **Target unchanged**: Lazauskas-Carbonell PRC 84,034002 Tab.III doublet n-d, E_lab=14.1 MeV →
 **Re δ=105.49°, η=0.4649** (K[1,1]=−1.143+1.870i). Extraction back-end = Glöckle Physics Reports 274
