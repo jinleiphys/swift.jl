@@ -31,11 +31,52 @@ oscillates).
       Self-test passes to machine precision: partition of unity 2e-16; polynomial reproduction (value/1st/2nd
       deriv) cubic→deg 3, quintic→deg 5 at ~1e-16…1e-14 rel; CS analytic continuation 6e-15 (cubic) / 9e-14
       (quintic). Written for readability, mirrors laguerre.jl / mesh.jl style.
+- [~] **Step 2 gate — 2-body CS unitarity PARTIAL (NOT yet matching the Lagrange ref)** (`swift/test_2body_spline.jl`).
+      Spline-COLLOCATION MT ¹S₀ CS scattering (`[E−H]u_sc=V·u_in` at Gauss points; B→S value, T→−ħ²/2μ·S2;
+      V at rotated z_c; amplitude on a fine sub-rule). Quintic reaches the benchmark ballpark (δ=63.506°,
+      η=0.996 at θ=14°/rmax=100/nint=300) BUT a head-to-head vs swift's own Lagrange-Laguerre 2-body
+      (`test_2body_cs_1S0.jl`) shows they DO NOT agree at matched settings, and the spline is θ-unstable:
+
+      | θ | Lagrange-Laguerre (nx=100) | spline quintic (nint=300) |
+      |---|---|---|
+      | 10° | δ=63.224 η=**0.999** | δ=62.166 η=1.024 |
+      | 14° | δ=63.483 η=**0.999** | δ=63.506 η=0.996 |
+      | 16° | δ=63.502 η=**0.999** | δ=63.554 η=0.979 |
+
+      Lagrange is θ-stable, η pinned at 0.999; spline slides (δ 62→63.5, η drifts THROUGH 1). The amplitude
+      machinery is fine (same formula gives Lagrange's pinned 0.999) → the deficits are in the spline
+      discretization, TWO distinct numerical problems:
+      - **(1) conditioning (intrinsic, NOT the binding constraint)**: Hermite-collocation cond ~ h^{-7} for
+        quintic (nint 100→800: 8.6e10→1.7e17). Tried fix A 2026-06-29: column AND full row+column
+        equilibration are BOTH ineffective (cond unchanged within ~25%) → the ill-conditioning is intrinsic
+        to high-order Hermite collocation of the 2nd-order CS operator, not a DOF-scaling artifact (so the
+        "non-dimensionalize the DOF" idea was wrong). It only sets a CEILING: keep nint ≲ 400 (cond < 1/eps);
+        below that the observable stays accurate. NOT what blocks θ=10° (there δ converges to 62.2 at
+        nint=300/400 before any corruption, ≠ Lagrange 63.224). Codex cross-check agreed equilibration was
+        the expected fix; the empirical result refuted it. Deprioritized.
+      - **(2) NOT instability — outer-BC consistency error**: the hard `u_sc(rmax)=0` + `u'(rmax)=0` cut
+        fights the finite CS tail (~0.07 at θ=10°/rmax=100) → θ-dependent systematic bias (the θ-slide).
+        Fix: outgoing-wave / Robin BC, or rmax large enough that the cut sits in the decayed region.
+      - cubic (ncol=2) is separately inadequate (C¹ → discontinuous 2nd deriv); use quintic (ncol=3).
+- [x] **Step 2 gate RESOLVED via EXTERIOR complex scaling (ECS)** (`splines.jl` `spline_functions_ecs`/
+      `ecs_contour`; `test_2body_spline.jl` `solve_spline_2body_ecs`). Interior [0,R0] unrotated (real,
+      exact wavefunction, no rotation angle), only exterior (R0,rmax] rotated; R0 forced onto a knot
+      (two-domain grid) so the contour kink sits on an element boundary; interface u and du/dz continuous
+      automatically (shared nodal slope DOF = du/dz, Codex's required condition). **ECS is θ-INDEPENDENT and
+      exactly unitary**, unlike uniform CS: at R0=6, L=290, quintic, δ flat at 63.49±0.03° for θ=8–16° and
+      η→1.0000 (θ=16°: η=0.99999), vs uniform CS sliding δ 62→63.5 and η drifting THROUGH 1. ECS's 63.49°
+      is closer to the published 63.512° than swift's own Lagrange-Laguerre (63.224°). Mechanism: the
+      amplitude integral lives in the short-range REAL interior → θ-independent; the outer-BC problem (2)
+      evaporated without touching the BC. Only requirement: exterior length L=rmax−R0 must damp the wave,
+      e^{−k·L·sinθ}≪1 (θ≥8° suffices here; θ=6° slightly under-damped). Conditioning (1) is unchanged but
+      non-binding at usable nint. **User (ECS expert, PINN-ECS PRC 113,064618) called this; validated.**
+      Refactor extracted `_hermite_local` shared by uniform-CS and ECS evaluators; `test_splines.jl` still
+      passes to machine precision (regression held).
+      **NEXT: wire the quintic-spline + ECS y-basis into the 3-body Faddeev matrices (Step 2 proper).**
 - [ ] **Step 2 — wire the spline y-basis into the Faddeev matrices** (`matrices_optimized.jl`): y overlap Ny →
       spline value matrix S at collocation points (banded, no tail); y kinetic Ty → 2nd-deriv matrix S2; Rxy
-      interpolation + initial F_λ(qy) → `spline_functions`. x stays Lagrange-Laguerre. Apply origin/rmax BCs.
-- [ ] **Step 2 gate — 2-body CS unitarity**: reproduce `test_2body_cs_1S0.jl` η=0.999 on the spline y-mesh
-      before touching the 3-body path.
+      interpolation + initial F_λ(qy) → `spline_functions`. x stays Lagrange-Laguerre. Use quintic, apply
+      origin/rmax BCs. Mind that y becomes COLLOCATION while x stays Galerkin Lagrange-mesh (mixed structure).
 - [ ] **Step 3 — re-test doublet-42** (41.35°/0.5022) and quartet-42 on the spline y-mesh; keep 14.1 MeV as
       regression guard. Use θ near the upper CS bound (~7.5° @42 MeV, Rimas), not θ=3°.
 

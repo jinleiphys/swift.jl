@@ -3,6 +3,8 @@ export SplineMesh,
        init_spline_mesh,
        graded_grid,
        spline_functions,
+       spline_functions_ecs,
+       ecs_contour,
        collocation_points,
        find_interval
 # Hermite finite-element ("spline") basis for the radial coordinate, ported from
@@ -241,44 +243,78 @@ global DOF indices.
 The local ordering is `[left-node DOF (value, slope[, curvature]),
 right-node DOF (value, slope[, curvature])]`, matching SPL's S(1..2*ncol).
 """
-function spline_functions(mesh::SplineMesh, r::Real; θ::Real = 0.0)
-    knots = mesh.knots
-    ncol  = mesh.ncol
-    ip    = find_interval(knots, r)            # r in [knots[ip-1], knots[ip]]
-
-    h  = knots[ip] - knots[ip - 1]             # interval length (real, as in SPL_CMP)
-    Rp = 1.0 / h
-    is_cs = (θ != 0.0)
-    # Rotated local coordinate R = (r*e^{iθ} - x_left)/h in [0,1] (or complex under CS).
-    dx = is_cs ? (r * cis(θ) - knots[ip - 1]) : (r - knots[ip - 1])
-    R  = dx / h
-
-    T  = is_cs ? ComplexF64 : Float64
-    S  = Vector{T}(undef, 2ncol)
-    S1 = Vector{T}(undef, 2ncol)
-    S2 = Vector{T}(undef, 2ncol)
-
+# Core per-element Hermite evaluation: given the local fractional coordinate R in [0,1]
+# and the element length hz ON THE INTEGRATION CONTOUR (real for an unrotated element,
+# complex hz = h·e^{iθ} for a rotated one), return the 2*ncol nonzero basis values and
+# their 1st / 2nd derivatives WITH RESPECT TO THE CONTOUR VARIABLE z. Both uniform CS and
+# exterior CS go through this one routine, so the two cannot drift apart. The slope DOF is
+# scaled by hz (so it represents du/dz at the node) and the curvature DOF by hz².
+function _hermite_local(ncol::Int, R, hz)
+    Rp = 1.0 / hz
+    S  = Vector{ComplexF64}(undef, 2ncol)
+    S1 = Vector{ComplexF64}(undef, 2ncol)
+    S2 = Vector{ComplexF64}(undef, 2ncol)
     if ncol == 2
-        # left node (value, slope), then right node (value, slope)
-        S[1]  = hv(R);            S1[1] = hv_p(R) * Rp;       S2[1] = hv_s(R) * Rp^2
-        S[2]  = hs(R) * h;        S1[2] = hs_p(R);            S2[2] = hs_s(R) * Rp
-        S[3]  = hv(1.0 - R);      S1[3] = -hv_p(1.0 - R) * Rp; S2[3] = hv_s(1.0 - R) * Rp^2
-        S[4]  = -hs(1.0 - R) * h; S1[4] = hs_p(1.0 - R);      S2[4] = -hs_s(1.0 - R) * Rp
+        S[1] = hv(R);          S1[1] = hv_p(R) * Rp;        S2[1] = hv_s(R) * Rp^2
+        S[2] = hs(R) * hz;     S1[2] = hs_p(R);             S2[2] = hs_s(R) * Rp
+        S[3] = hv(1.0 - R);    S1[3] = -hv_p(1.0 - R) * Rp; S2[3] = hv_s(1.0 - R) * Rp^2
+        S[4] = -hs(1.0 - R) * hz; S1[4] = hs_p(1.0 - R);    S2[4] = -hs_s(1.0 - R) * Rp
     else # ncol == 3
-        # left node (value, slope, curvature)
-        S[1]  = q1(1.0 - R);        S1[1] = -q1_p(1.0 - R) * Rp;   S2[1] = q1_s(1.0 - R) * Rp^2
-        S[2]  = -q2(1.0 - R) * h;   S1[2] = q2_p(1.0 - R);         S2[2] = -q2_s(1.0 - R) * Rp
-        S[3]  = q3(1.0 - R) * h^2;  S1[3] = -q3_p(1.0 - R) * h;    S2[3] = q3_s(1.0 - R)
-        # right node (value, slope, curvature)
-        S[4]  = q1(R);              S1[4] = q1_p(R) * Rp;          S2[4] = q1_s(R) * Rp^2
-        S[5]  = q2(R) * h;          S1[5] = q2_p(R);               S2[5] = q2_s(R) * Rp
-        S[6]  = q3(R) * h^2;        S1[6] = q3_p(R) * h;           S2[6] = q3_s(R)
+        S[1] = q1(1.0 - R);    S1[1] = -q1_p(1.0 - R) * Rp; S2[1] = q1_s(1.0 - R) * Rp^2
+        S[2] = -q2(1.0 - R) * hz; S1[2] = q2_p(1.0 - R);    S2[2] = -q2_s(1.0 - R) * Rp
+        S[3] = q3(1.0 - R) * hz^2; S1[3] = -q3_p(1.0 - R) * hz; S2[3] = q3_s(1.0 - R)
+        S[4] = q1(R);          S1[4] = q1_p(R) * Rp;        S2[4] = q1_s(R) * Rp^2
+        S[5] = q2(R) * hz;     S1[5] = q2_p(R);             S2[5] = q2_s(R) * Rp
+        S[6] = q3(R) * hz^2;   S1[6] = q3_p(R) * hz;        S2[6] = q3_s(R)
     end
+    return S, S1, S2
+end
 
-    # Global DOF indices: the two nodes (ip-1, ip) own consecutive DOF blocks.
-    base = (ip - 2) * ncol         # 0-based offset of the left node's first DOF
+function spline_functions(mesh::SplineMesh, r::Real; θ::Real = 0.0)
+    knots = mesh.knots; ncol = mesh.ncol
+    ip = find_interval(knots, r)               # r in [knots[ip-1], knots[ip]]
+    h  = knots[ip] - knots[ip - 1]
+    is_cs = (θ != 0.0)
+    # UNIFORM CS: the whole coordinate is rotated, z = r·e^{iθ}; hz stays real (= h) and
+    # the rotation enters through the complex local coordinate R = (z - x_left)/h.
+    z = is_cs ? r * cis(θ) : complex(r)
+    R = (z - knots[ip - 1]) / h
+    S, S1, S2 = _hermite_local(ncol, R, complex(h))
+    base = (ip - 2) * ncol
     idx  = collect(base + 1 : base + 2ncol)
+    return is_cs ? (idx, S, S1, S2) : (idx, real.(S), real.(S1), real.(S2))
+end
 
+"""
+    ecs_contour(r, R0, θ) -> ComplexF64
+
+Exterior-complex-scaling contour z(r): real interior, rotated exterior.
+`z = r` for `r ≤ R0`, `z = R0 + (r-R0)·e^{iθ}` for `r > R0`.
+"""
+ecs_contour(r::Real, R0::Real, θ::Real) = r <= R0 ? complex(r) : R0 + (r - R0) * cis(θ)
+
+"""
+    spline_functions_ecs(mesh, r, R0; θ=0.0) -> (idx, S, S1, S2)
+
+Hermite basis under EXTERIOR complex scaling. Interior elements (left knot ≤ R0) are NOT
+rotated (real, exact physical wavefunction, no rotation angle); exterior elements (left
+knot ≥ R0) use the complex contour length `hz = h·e^{iθ}`. R0 must be a knot so the kink
+sits on an element boundary. The local coordinate R is REAL in both regions; the rotation
+enters only through `hz`. Because the nodal slope DOF is du/dz (scaled by hz) and is shared
+across R0, the interface conditions u and du/dz are continuous there automatically (du/dr
+is correctly discontinuous by the metric factor e^{iθ}). S, S1, S2 are derivatives w.r.t.
+the contour variable z; evaluate the potential / source at `ecs_contour(r, R0, θ)`.
+"""
+function spline_functions_ecs(mesh::SplineMesh, r::Real, R0::Real; θ::Real = 0.0)
+    knots = mesh.knots; ncol = mesh.ncol
+    ip = find_interval(knots, r)
+    h  = knots[ip] - knots[ip - 1]
+    is_ext = knots[ip - 1] >= R0 - 1e-12       # element entirely in the rotated exterior
+    hz = is_ext ? h * cis(θ) : complex(h)      # complex contour length outside R0
+    R  = (r - knots[ip - 1]) / h               # REAL fractional position in the element
+    S, S1, S2 = _hermite_local(ncol, R, hz)
+    base = (ip - 2) * ncol
+    idx  = collect(base + 1 : base + 2ncol)
     return idx, S, S1, S2
 end
 
