@@ -86,9 +86,9 @@ oscillates).
       cross-validation; works for LL, which sharp cannot).
       **NEXT: wire quintic-spline + SMOOTH-ECS as the y-coordinate into the 3-body Faddeev matrices, with the
       contour layer kept basis-agnostic so LL/Legendre can be swapped in (Step 2 proper).**
-- [ ] **Email Rimas about ECS** (drafted `~/Downloads/email-to-lazauskas-ecs.txt`, code name removed per his
-      not knowing "swift.jl"): has he used exterior / smooth-exterior CS rather than uniform in his
-      configuration-space Faddeev work; high-energy experience; 3-body pitfalls with Rxy coupling x,y.
+- [x] **Email Rimas about ECS** (sent 2026-06-29; draft `~/Downloads/email-to-lazauskas-ecs.txt`): asked
+      whether he has used exterior / smooth-exterior CS rather than uniform in his configuration-space
+      Faddeev work, high-energy experience, and 3-body pitfalls with Rxy coupling x,y. ⏳ awaiting reply.
 - [ ] **Step 2 — wire quintic-spline + SMOOTH-ECS as the 3-body y-coordinate** via the basis-agnostic
       q-operator layer (`ecs.jl`): y kinetic from real-r spline ∂² with the contour metric q(r); V at x(r);
       Rxy interpolation + initial F_λ via `spline_functions` on real y. Keep the contour layer basis-agnostic
