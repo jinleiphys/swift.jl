@@ -86,12 +86,15 @@ oscillates).
       cross-validation; works for LL, which sharp cannot).
       **NEXT: wire quintic-spline + SMOOTH-ECS as the y-coordinate into the 3-body Faddeev matrices, with the
       contour layer kept basis-agnostic so LL/Legendre can be swapped in (Step 2 proper).**
-- [ ] **Step 2 — wire the spline y-basis into the Faddeev matrices** (`matrices_optimized.jl`): y overlap Ny →
-      spline value matrix S at collocation points (banded, no tail); y kinetic Ty → 2nd-deriv matrix S2; Rxy
-      interpolation + initial F_λ(qy) → `spline_functions`. x stays Lagrange-Laguerre. Use quintic, apply
-      origin/rmax BCs. Mind that y becomes COLLOCATION while x stays Galerkin Lagrange-mesh (mixed structure).
-- [ ] **Step 3 — re-test doublet-42** (41.35°/0.5022) and quartet-42 on the spline y-mesh; keep 14.1 MeV as
-      regression guard. Use θ near the upper CS bound (~7.5° @42 MeV, Rimas), not θ=3°.
+- [ ] **Email Rimas about ECS** (drafted `~/Downloads/email-to-lazauskas-ecs.txt`, code name removed per his
+      not knowing "swift.jl"): has he used exterior / smooth-exterior CS rather than uniform in his
+      configuration-space Faddeev work; high-energy experience; 3-body pitfalls with Rxy coupling x,y.
+- [ ] **Step 2 — wire quintic-spline + SMOOTH-ECS as the 3-body y-coordinate** via the basis-agnostic
+      q-operator layer (`ecs.jl`): y kinetic from real-r spline ∂² with the contour metric q(r); V at x(r);
+      Rxy interpolation + initial F_λ via `spline_functions` on real y. Keep the contour layer basis-agnostic
+      so Lagrange-Laguerre/Legendre can be swapped in for y. x stays Lagrange-Laguerre.
+- [ ] **Step 3 — re-test doublet-42** (41.35°/0.5022) and quartet-42 on the spline+smooth-ECS y-mesh; keep
+      14.1 MeV as regression guard.
 
 ---
 

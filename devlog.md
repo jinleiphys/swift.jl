@@ -5,6 +5,34 @@ Completed work lives in TODO.md; forward-looking decisions live in CLAUDE.md. Th
 
 ---
 
+## 2026-06-29: sharp and uniform CS both fail through the basis-agnostic q-operator (only smooth works)
+
+**Why we tried it:** to make the CS layer basis-agnostic (LL / Legendre / spline all plug in), assemble H
+in the q-operator form −(ħ²/2μ)[(1/q²)∂²−(q'/q³)∂]+V(x(r)) with a REAL-r basis and select the contour kind
+(:uniform / :sharp / :smooth). Goal: one code path for all three CS variants and all bases.
+**What failed:** through the real-r q-operator path only :smooth reproduced the MT ¹S₀ benchmark (δ flat
+63.50°, η→1.0000, θ-independent). :sharp gave η=1.25→1.50 (drifts up with θ); :uniform gave δ=25 (vs the
+rotate-argument uniform's 62.2).
+**Root cause:** sharp ECS has a du/dr kink at R0 that a C²-continuous real-r quintic cannot carry; uniform
+CS's natural discretization is the rotated-argument form, not real-r. Both are basis-specific; only smooth
+ECS (C² contour, no kink) is representable by a smooth real-r basis, hence basis-agnostic.
+**Lesson:** standardize the multi-basis framework on SMOOTH ECS. Keep sharp only as the local complex-h
+spline method (`solve_spline_2body_ecs`); do not expect sharp/uniform to work through the real-r q-operator.
+**Status:** Replaced by smooth ECS as the basis-agnostic CS layer (`swift/ecs.jl`).
+
+## 2026-06-29: column/row equilibration does NOT fix the Hermite-collocation conditioning
+
+**Why we tried it:** the Hermite spline collocation matrix is ill-conditioned (cond ~ h^{-7} for quintic;
+resid grew 1e-10→3e-6 and δ corrupted to 65 by nint=800), blamed on the h, h² slope/curvature DOF scaling;
+expected diagonal equilibration to cure it.
+**What failed:** column AND full row+column equilibration left cond unchanged within ~25% (quintic nint=100:
+8.6e10→7.0e10; nint=800: 1.7e17→1.1e17). Equilibration ineffective.
+**Root cause:** the ill-conditioning is INTRINSIC to high-order Hermite collocation of the 2nd-order
+operator, not a diagonal-scaling artifact, so no equilibration can touch it.
+**Lesson:** do not chase it with equilibration; it only sets a nint ceiling (≲400 for quintic) and is
+non-binding at usable resolution. The real accuracy blocker was the CS/BC choice (→ smooth ECS).
+**Status:** Abandoned (equilibration); conditioning deprioritized as non-binding.
+
 ## 2026-06-29: "more points + larger θ" cannot make Lagrange-Laguerre converge doublet-42 δ
 
 **Why we tried it:** after Rimas's 2nd email (θ=3° too small; use θ near the upper bound to damp the

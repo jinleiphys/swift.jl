@@ -2,6 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ 2026-06-29 UPDATE — n-d scattering convergence, current state (supersedes the 2026-06-16 note below).**
+> Read [TODO.md](TODO.md) + [devlog.md](devlog.md) for the full record. Key points:
+> - **The 2026-06-16/17 "Lagrange-Laguerre overlap-tail" root cause was a MISATTRIBUTION.** The real story:
+>   (a) at high energy the doublet-42 residual was (x,y) coupled-box under-convergence (Rxy couples x↔y);
+>   (b) the Lagrange-Laguerre y-mesh fundamentally cannot converge the oscillatory scattered wave at 42 MeV
+>   (no plateau; LL overflows past ny≈180). Not formula/operator/prefactor/basis-type bugs. NOT blocked on
+>   Rimas (he replied twice). Ignore the "⏸ BLOCKED" framing in the 2026-06-16 note below.
+> - **Decision: switch the y scattering coordinate to a Hermite spline + SMOOTH exterior complex scaling.**
+>   Validated on the 2-body MT ¹S₀ benchmark: smooth ECS is θ-independent and exactly unitary (δ flat
+>   63.50°, η→1.0000), where uniform CS slid. Smooth ECS is also the only basis-agnostic CS variant.
+> - **New files (2026-06-29):** `swift/splines.jl` (Hermite-spline / FEM radial basis, port of Lazauskas'
+>   SPL/COLLOC/GND; cubic & quintic; CS-aware) + `swift/test_splines.jl`; `swift/ecs.jl` (basis-agnostic CS
+>   contour layer: `CSContour` kind :uniform/:sharp/:smooth giving x(r), q=dx/dr, q'; H assembled as the
+>   q-operator −(ħ²/2μ)[(1/q²)∂²−(q'/q³)∂]+V(x(r)) so any basis plugs in; :smooth = the PINN-ECS contour);
+>   `swift/test_2body_spline.jl` (spline-collocation 2-body CS scattering, uniform/sharp/smooth comparison,
+>   smooth-ECS validation). PINN-ECS reference read at `~/Desktop/code/PINN-ECS/src/ecs/contour.py`.
+> - **NEXT:** wire quintic-spline + smooth-ECS as the y-coordinate into the 3-body Faddeev matrices, keeping
+>   the contour layer basis-agnostic so Lagrange-Laguerre/Legendre can be swapped in.
+
 > **⚠️ 2026-06-16 UPDATE — read [TODO.md](TODO.md) for the current state.** The code was cleaned to a
 > single fastest path; several descriptions below are now stale. Key changes:
 > - **M⁻¹ preconditioner is V-sector-only.** `matrices.jl` no longer has `M_inverse_operator`,
