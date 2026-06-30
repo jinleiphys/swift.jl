@@ -125,8 +125,60 @@ oscillates).
       derivative evaluator `lagrange_laguerre_regularized_derivs` (laguerre.jl) is ready for the x smooth-ECS
       contour but NOT yet used here (θ=0, x via existing real builders). A wrong Rxy/G would miss by MeV or
       unbind, not 20 keV → assembly structurally correct.
-- [ ] **Step 2 — turn on SMOOTH-ECS (θ>0) on BOTH x and y** via the basis-agnostic q-operator layer
-      (`ecs.jl`), each coordinate interior-real / exterior-rotated:
+- [ ] **Step 2 (REVISED 2026-06-30, Jin's call) — reproduce 14.1/42 with UNIFORM CS + spline-y FIRST;
+      smooth-ECS on the 3-body is PARKED.** Reason: the smooth-ECS 3-body Rxy needs the basis evaluated at
+      off-contour COMPLEX rearranged points (πb,ξb = sqrt of a complex (x,y) combination, not on the contour)
+      → cross-element analytic continuation a spline can't do; a non-uniform contour does not commute with the
+      Jacobi rearrangement. Uniform CS commutes → the existing REAL Rxy works unchanged (the validated θ=0
+      mixed Rxy is reused verbatim). Rimas's benchmark itself uses uniform CS + spline. Uniform CS still rotates
+      x (breakup-along-x damped); smooth ECS's only extra gain is interior-real amplitude, which the Green's
+      extraction already handles. Full rationale in devlog 2026-06-30. Sub-steps:
+      - [x] **2a — scattering assembly + source + solve DONE** (`test_3body_yspline_scatt.jl`, 2026-06-30):
+        θ>0 assembly (kinetic ×e^{-2iθ}, V from the scaled builder, real Rxy reused from the θ=0 bound state,
+        B=kron(Nx,Sy)), source Ω=φ_d(x)·F_λ(qy·e^{iθ}) with the y-part PROJECTED onto the spline basis
+        (c=Sy\∫φF_λ, COULCC for F_λ). 14.1 MeV: resid=2.6e-14, E_d=−2.2301, q=0.5497, ψ_sc solves and carries
+        flux across channels (ch2 λ=0 entrance 78%, ch1 λ=0 18%, ch3 λ=2 D-state 3%). Plumbing validated.
+      - [x] **2b — Green's amplitude ported; doublet-14.1 REPRODUCED** (test_3body_yspline_scatt.jl, 2026-06-30).
+        Ported the test_3body_greens extraction (f=−(flux_norm·e^{iθ}/E_cm)(f_sc+f_brn), jac=e^{2iθ}, bilinear
+        proj over the entrance λ=0 deuteron channel). KEY FIX 1: the deuteron must be C_n-normalized (φ_d/√C_n,
+        C_n=φ_dᵀB_xφ_d·e^{iθ}) or the bilinear amplitude ∝φ_d² carries the bound2b eigenvector gauge phase →
+        after the fix f_brn became REAL and matched the LL reference EXACTLY (−10.37 vs −10.38). KEY FIX 2: the
+        residual was X-BOX under-convergence, NOT a y-kinetic scheme error (my real-r + e^{-2iθ} scheme A is
+        correct). At θ=3°, ymax=100, nyint=70, scanning nx/xmax: (20,18)→δ=96.7/η=0.570, **(24,30)→δ=105.48/
+        η=0.472**, (28,40)→δ=110.4/η=0.483. At nx=24/xmax=30 (= the LL mesh) the spline reproduces the
+        benchmark δ=105.49 essentially exactly (η=0.472 vs 0.465, ~1.5%, convergence-level), and f_sc matches
+        the LL f_sc term-by-term (11.72−11.26i vs 11.76−11.19i). **CAVEAT (Jin caught it): δ is NOT box-converged
+        — it SLIDES with xmax** (fixed density 1pt/fm, θ=3°, ymax=100: xmax 24→30→36 gives δ=100.6→104.7→107.8),
+        crossing the benchmark at xmax≈30 rather than plateauing. DECISIVE check: the LL reference slides
+        IDENTICALLY (LL: 100.34→104.42→107.79, η 0.468→0.476→0.470; spline within 0.25°/0.01 at every box). ⇒
+        the spline is a FAITHFUL port of the LL method; the δ box-dependence is intrinsic to UNIFORM CS (the
+        amplitude integral lives in the rotated region), shared by LL, NOT a spline bug. η is box-stable (~0.47
+        ≈ benchmark). So 14.1 is "reproduced" only in the standard-box sense (= the LL reference, as Lazauskas
+        reports). A truly box-INDEPENDENT δ needs SMOOTH ECS (interior-real amplitude; the 2-body proved smooth
+        ECS is θ/box-independent while uniform slides) — i.e. decision A, whose 3-body Rxy off-contour problem
+        is parked. NB dense A\\b caps the size (~nyint≲80); production needs GMRES.
+      - [ ] **2b-convergence — needs r_max≈100 fm + GMRES (lit-confirmed, Jin's catch 2026-06-30).** 2011 PRC
+        Table III: 3-body working r_max≈100 fm (p-d y_max=150), 30-40 splines/direction, θ-stability window
+        (14.1: θ_max=14.2°; 42: [4°,12.5°], θ_max=8.9°). My earlier xmax≤36 was FAR too small → δ slid (and the
+        LL reference slides identically at the same small boxes → faithful port, not a bug). Dense A\\b CANNOT
+        reach r_max≈100 (the G-recompute at the y-quad points + dense solve hangs >5 min by box~80). So every
+        box I've run is under-converged; δ/η jump around (θ=3°/ymax100: η≈0.47✓ but δ slides 100→108;
+        θ=6° balanced 50→80: δ=117→111, η=0.56→0.71). NOT reproduced in a converged sense. REQUIRED next:
+        (i) matrix-free GMRES apply for the spline assembly (like ndscatt's gmres_scattering) to reach r_max~100;
+        (ii) graded spline grid (fine inner / coarse outer, 30-40 elements over [0,100]); (iii) θ-window box
+        convergence study, not single-box probes. Do NOT keep firing dense runs (空跑).
+      - [x] **GMRES matrix-free path BUILT + VALIDATED** (test_3body_yspline_scatt.jl, 2026-06-30): reshape-based
+        kron matvecs (B/T/V via Sy·M·Aᵀ per channel + one Rc matvec for V·Rxy) + within-channel block
+        preconditioner P[iα]=Efull·kron(Nx,Sy)−kron(Tx,Sy)−kron(Nx,Ky_cs)−kron(Vx_ii,Sy) (lu-factorized), wrapped
+        in Scattering.MatVecOperator/PreconditionerOperator → IterativeSolvers.gmres. Reproduces the dense solve
+        EXACTLY (nx=20/ymax=60/nyint=50/θ=4°: δ=97.087/η=0.6016, identical) in 15 GMRES iters, resid 3.5e-9. No
+        dense A, no dense \\ — scales to large boxes (Rc matvec + small kron pieces; preconditioner lu is the
+        remaining per-channel cost, fine to ~nx·ndy≈7000). Big r_max~100 runs belong on heliumx.
+      - [ ] **2c — doublet-42** (δ=41.35°, η=0.5022): the target the LL mesh could not reach; spline should,
+        once the GMRES + r_max~100 infrastructure above is in place.
+- [ ] **(PARKED) smooth-ECS on the 3-body** via the q-operator layer, each coordinate interior-real /
+      exterior-rotated — only after the uniform path reproduces the benchmark, and only if the off-contour
+      evaluation problem can be solved:
       - **y** (quintic-spline basis): y kinetic from real-r spline ∂² with contour metric q_y(r); initial
         F_λ via `spline_functions` on real y. Spline basis needed for the 42-MeV oscillation.
       - **x** (Lagrange-Laguerre basis, unchanged): ALSO carry a smooth-ECS contour q_x(r). Physics

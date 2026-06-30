@@ -5,6 +5,48 @@ Completed work lives in TODO.md; forward-looking decisions live in CLAUDE.md. Th
 
 ---
 
+## 2026-06-30: the spline y-kinetic must NOT use the real-r ×e^{-2iθ} form under uniform CS (θ-dependent error)
+
+**Why we tried it:** for the 3-body uniform-CS scattering I built the spline y-overlap/kinetic as REAL Galerkin
+matrices (Sy_real, Ky_real) and applied CS by multiplying the kinetic by e^{-2iθ} (and leaving Sy real),
+mirroring the LL code's "real-r + e^{-2iθ}" scheme. Reproduced doublet-14.1 at θ=3° (matched LL term-by-term).
+**What failed:** at θ=6° the spline gives η=0.69 while the LL reference gives η=0.43 at the same angle (both
+slide δ with the box, but LL's η is θ-stable ≈0.43-0.47, mine is not). So a θ-DEPENDENT discrepancy: spline≡LL
+at θ=3°, diverges by θ=6°. The δ does trend to the benchmark with box (GMRES balanced-box 50→70→90: δ=117→
+113→108.5), but η is wrong at θ>3°.
+**Root cause:** the real-r ×e^{-2iθ} scheme is WRONG for a spline. Under uniform CS the physical wave is
+ψ(r·e^{iθ}); a REAL-r spline Σc_iφ_i(r) cannot represent that globally-rotated oscillatory function, so
+scaling ∂² by e^{-2iθ} on a real-r basis is not the CS operator. The 2-body already proved this (solve_spline_2body_qcs
+:uniform → δ=25, vs rotated-argument → 62, vs smooth-ECS q-operator → 63.5). The error scales with θ: tiny at
+3° (masked by the x-box under-convergence), dominant by 6°. The LL analytic basis tolerates real-r ×e^{-2iθ}
+(its functions carry the rotation); the spline does not.
+**Lesson:** for uniform CS the spline y must use the ROTATED-ARGUMENT form — z=y·e^{iθ}, basis and S2 via
+spline_functions(mesh,y;θ), with the e^{iθ} contour measure on Sy and the centrifugal at z². Crucially the Rxy
+is then FEASIBLE without the smooth-ECS off-contour problem: under a uniform rotation the rearranged point
+e^{iθ}·ξb_real lies on the contour, so spline_functions(mesh,ξb_real;θ) evaluates it correctly. Rebuild Sy, Ky,
+Rxy, the F_λ source projection, and the amplitude all in rotated-argument; re-check θ-independence of η.
+**Status:** Active fix (rotated-argument spline for uniform CS). The GMRES infrastructure + the C_n
+normalization + the mixed-Rxy structure all stay; only the y CS bookkeeping changes.
+
+## 2026-06-30: smooth-ECS on the 3-body Rxy is PARKED (hard, non-standard); use uniform CS + spline-y first
+
+**Why we tried it:** decision A wanted smooth-ECS on both x and y (interior-real amplitude + breakup damping
+in x). The 2-body validated cleanly. Plan was to extend the same contour to the 3-body rearrangement.
+**What failed:** the 3-body Rxy under smooth ECS needs ψ at the rearranged coords πb=√(a²x²+b²y²+2ab·xy·cosθ_ang)
+with x=x(rx), y=y(ry) on the contour → πb,ξb are COMPLEX and generally do NOT lie on the contour (sqrt of a
+complex combination, not the contour's image). Evaluating a spline (or LL) basis at such an off-contour
+complex point needs cross-element analytic continuation, which a piecewise polynomial does not support.
+**Root cause:** a NON-uniform contour does not commute with the Jacobi rearrangement (a rotation in the (x,y)
+plane). Uniform CS commutes (πb_phys = e^{iθ}·πb_real, homogeneous) → the existing real Rxy works unchanged;
+smooth/exterior does not. Rimas's own benchmark uses UNIFORM CS + spline, not exterior — confirming exterior
+CS on the 3-body rearrangement is non-standard. The 2-body had no Rxy, so smooth ECS was clean there.
+**Lesson:** reproduce 14.1/42 first with uniform CS + spline-y (Rxy stays real, the validated θ=0 mixed Rxy
+is reused verbatim; the spline only has to fix the LL 42-MeV mesh wall). Treat smooth-ECS-on-the-3-body as a
+separate research refinement (off-contour evaluation) to attempt only after the uniform path reproduces the
+benchmark. Uniform CS already rotates x, so breakup-along-x is still damped; smooth ECS's only extra gain is
+interior-real amplitude, which Rimas's Green's-theorem extraction already handles under uniform CS.
+**Status:** Parked (smooth-ECS 3-body Rxy). Active path: uniform CS + spline-y (Jin's call 2026-06-30).
+
 ## 2026-06-30: anisotropic complex scaling (θ_x ≠ θ_y) is incompatible with the real, angle-free Rxy
 
 **Why we tried it:** to cheaply confirm "the breakup tail in x needs its own rotation" by turning OFF the x
@@ -35,49 +77,4 @@ ECS (C² contour, no kink) is representable by a smooth real-r basis, hence basi
 **Lesson:** standardize the multi-basis framework on SMOOTH ECS. Keep sharp only as the local complex-h
 spline method (`solve_spline_2body_ecs`); do not expect sharp/uniform to work through the real-r q-operator.
 **Status:** Replaced by smooth ECS as the basis-agnostic CS layer (`swift/ecs.jl`).
-
-## 2026-06-29: column/row equilibration does NOT fix the Hermite-collocation conditioning
-
-**Why we tried it:** the Hermite spline collocation matrix is ill-conditioned (cond ~ h^{-7} for quintic;
-resid grew 1e-10→3e-6 and δ corrupted to 65 by nint=800), blamed on the h, h² slope/curvature DOF scaling;
-expected diagonal equilibration to cure it.
-**What failed:** column AND full row+column equilibration left cond unchanged within ~25% (quintic nint=100:
-8.6e10→7.0e10; nint=800: 1.7e17→1.1e17). Equilibration ineffective.
-**Root cause:** the ill-conditioning is INTRINSIC to high-order Hermite collocation of the 2nd-order
-operator, not a diagonal-scaling artifact, so no equilibration can touch it.
-**Lesson:** do not chase it with equilibration; it only sets a nint ceiling (≲400 for quintic) and is
-non-binding at usable resolution. The real accuracy blocker was the CS/BC choice (→ smooth ECS).
-**Status:** Abandoned (equilibration); conditioning deprioritized as non-binding.
-
-## 2026-06-29: "more points + larger θ" cannot make Lagrange-Laguerre converge doublet-42 δ
-
-**Why we tried it:** after Rimas's 2nd email (θ=3° too small; use θ near the upper bound to damp the
-outgoing wave fast) the natural fix was: at 42 MeV push θ up to ~7° and just add grid points + grow the
-box until δ,η plateau on the benchmark (41.35°/0.5022).
-
-**What failed:** density converges each box, but the converged value still slides with box size, with no
-plateau. θ=7° square boxes: δ=53.9°(L=30) → 44.8°(L=55) → 28.8°(L=70); it crosses 41.35° only by accident
-near L≈60, never flat. η does converge cleanly to ~0.50, but δ does not. At small θ=3° there IS a δ plateau,
-but at the wrong value (~52°) unless xmax is also grown to ≈ymax (then it marches 52°→44°), and the LL
-basis overflows (basis values ~1e150) past ny≈180 before you reach a balanced box big enough to finish.
-
-**Root cause:** a genuine squeeze specific to the Lagrange-Laguerre mesh, not a formula/operator/prefactor
-bug (all of those were verified component-by-component: prefactor 1/E_cm correct, ψsc exact to 1e-10 vs
-dense A\b, F_λ accurate to 1e-15, T/B/V/Rxy validated on bound states). At small θ you need a huge BALANCED
-(x,y) box because Rxy couples x↔y and the high-energy scattered wave reaches ~ymax in y and maps to large x;
-LL overflows before you get there. At large θ the box can be small, but the CS incoming bra grows as
-e^{+qy·sinθ} and contaminates the amplitude integral box-dependently → no plateau. LL clusters points near
-the origin and covers the asymptotic region poorly, so it cannot represent the 42-MeV oscillatory scattered
-wave (λ≈6.6 fm) on a small box. Rimas's benchmark used spline collocation (free point placement, tolerates
-the asymmetric/large box without origin-clustering or overflow), which is why his LL-incapable regime is
-exactly where swift stalls.
-
-**Lesson:** do NOT keep tuning (θ, nx, ny, box) to force the LL-Laguerre y-mesh onto the 42-MeV benchmark.
-η reproduces; δ is mesh-limited. The fix is the basis, not more points: switch the scattering coordinate y
-from Lagrange-Laguerre (semi-infinite, origin-clustered) to Lagrange-Legendre on a finite box [0,ymax]
-(uniform-ish coverage of the asymptotic region; swift's DBMM/bound-state side already has this
-infrastructure). 14.1 MeV reproduces perfectly with LL because its y-extent is small; only high energy
-exposes the mesh wall.
-
-**Status:** Abandoned (LL + point-pushing). Replaced by the y→Lagrange-Legendre basis switch (see TODO.md).
 
