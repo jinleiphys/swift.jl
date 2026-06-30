@@ -1,7 +1,12 @@
 # swift.jl TODO
 
-Snapshot **2026-06-29**. ✅ **UNBLOCKED — Rimas replied twice; root cause of the doublet-42 residual is
-now fully understood and it is NOT a formula/operator/prefactor bug.** Two layers settled this session:
+Snapshot **2026-06-30**. ✅ **A-route foundation + θ=0 plumbing VALIDATED** (see the checked Step 2 items
+below): both 1D q-operator paths (spline-y, Lagrange-x) reproduce the MT ¹S₀ benchmark δ=63.5/η→1 through
+ONE shared smooth-ECS contour, and the mixed Lagrange-x / spline-y 3-body assembly + the hard mixed Rxy
+reproduce the MT 3-body bound state (−8.54 MeV, same as all-Lagrange, spline converges faster) at θ=0.
+**Next = Step 2 proper: turn on smooth-ECS (θ>0) on BOTH x and y + scattering source/amplitude → 14.1 then 42 MeV.**
+
+Earlier (2026-06-29) the doublet-42 residual was understood and is NOT a formula/operator/prefactor bug:
 1. The 14.1 MeV doublet reproduces the benchmark; the 42 MeV residual was (x,y) coupled-box
    UNDER-convergence (swift hardwired xmax=30 ≪ ymax=100, but Rxy couples x↔y, so a high-energy
    y-extent needs a matching x-box). Growing nx WITH xmax marches δ 52°→44°, η→0.50 toward 41.35°/0.5022.
@@ -10,8 +15,7 @@ now fully understood and it is NOT a formula/operator/prefactor bug.** Two layer
    e^{+qy·sinθ} grows and δ slides with the box (no plateau). η converges to ~0.50, δ does not.
    Both dead-ends recorded with numbers in `devlog.md` (2026-06-29 + 2026-06-26 entries).
 
-> ▶ **NEXT ACTION (decided): give the scattering coordinate y a pluggable basis and switch it from
-> Lagrange-Laguerre to a finite-box HERMITE SPLINE (Rimas's actual choice).** LL clusters points at the
+> ▶ **(history, now DONE) give the scattering coordinate y a finite-box HERMITE SPLINE.** LL clusters points at the
 > origin and covers the asymptotic region poorly, so it can't represent the 42-MeV oscillatory scattered
 > wave (λ≈6.6 fm). Read Rimas's own Faddeev code (`~/Desktop/TALENT-Trento-2015/LAZAUSKAS R/Ex-Fad_eq`):
 > his benchmark uses **spline collocation**, controlled by a single integer `TYPE/id` in `init_Lagrange_mesh`
@@ -89,10 +93,68 @@ oscillates).
 - [x] **Email Rimas about ECS** (sent 2026-06-29; draft `~/Downloads/email-to-lazauskas-ecs.txt`): asked
       whether he has used exterior / smooth-exterior CS rather than uniform in his configuration-space
       Faddeev work, high-energy experience, and 3-body pitfalls with Rxy coupling x,y. ⏳ awaiting reply.
-- [ ] **Step 2 — wire quintic-spline + SMOOTH-ECS as the 3-body y-coordinate** via the basis-agnostic
-      q-operator layer (`ecs.jl`): y kinetic from real-r spline ∂² with the contour metric q(r); V at x(r);
-      Rxy interpolation + initial F_λ via `spline_functions` on real y. Keep the contour layer basis-agnostic
-      so Lagrange-Laguerre/Legendre can be swapped in for y. x stays Lagrange-Laguerre.
+- [x] **Step 2 foundation — spline GALERKIN y-operators validated** (`swift/test_yspline_galerkin.jl`,
+      2026-06-30). The 3-body is Galerkin (square kron matrices), the validated 2-body spline was
+      collocation; this rebuilds MT ¹S₀ 2-body in the GALERKIN spline form via the q-operator contour layer
+      (`build_spline_galerkin_1d`: S[i,j]=∫φ_iφ_j q dr, K[i,j]=(ħ²/2μ)∫φ_i[(1/q²)φ_j''−(q'/q³)φ_j'] q dr −
+      centrifugal, bilinear c-product, BC = drop value@0 + value+slope@rmax). Smooth-ECS, quintic, R0=6:
+      δ→63.508°, η→1.0000 at θ=8°/rmax=300 (= published 63.512°), resid 1e-14. Small-θ/short-box deficits
+      (θ=8°/rmax=100: η=0.954) are pure exterior under-damping (η→1 monotonically as rmax or θ grows), NOT a
+      Galerkin bug — confirmed by the rmax 100→300 scan. ⇒ the y-direction Sy/Ky machinery for the 3-body is
+      correct and θ-independent in the well-damped regime.
+- [x] **Step 2 foundation — x-path (Lagrange-Laguerre) through the SAME q-operator layer validated**
+      (`swift/test_xlag_qcs.jl` + new `lagrange_laguerre_regularized_derivs` in `laguerre.jl`, 2026-06-30).
+      Decision A (Jin): x and y share ONE smooth-ECS q-operator contour (deep exterior both rotate by e^{iθ},
+      interior real → Rxy-consistent, deuteron + amplitude integral stay on the real axis). Needed the
+      Lagrange-Laguerre REAL-r value/∂/∂² (laguerre.jl had only values); added via the exact log-derivative
+      L=p/r−1/(2hs)+Σ1/(r−x_j), f'=fL, f''=f(L²+L'). Verified: value vs basis() 2e-16, ∂/∂² vs central FD
+      6e-9/7e-8. Lagrange-Laguerre GALERKIN MT ¹S₀ through the q-operator (Gauss-Legendre 5·nx quadrature, as
+      V_matrix_optimized_scaled already does; NO BC drop — regularized basis is regular at 0, decays at ∞):
+      δ→63.53°, η→0.999 at θ=16° = published 63.512°, resid 7e-15. ⇒ BOTH 1D paths (spline-y + LL-x) reproduce
+      the benchmark via the identical contour layer. Foundation for A complete; next is the 3-body assembly.
+- [x] **Step 2 plumbing — mixed Lagrange-x / spline-y 3-body assembly + MIXED Rxy validated at θ=0**
+      (`swift/test_3body_yspline_bound.jl`, 2026-06-30). 3-body MT BOUND state with y on the Hermite-spline
+      Galerkin basis (x kept Lagrange-Laguerre), θ=0. Reference (all-Lagrange, eigen(T+V+V·Rxy, B)):
+      E(MT 3-body) ≈ −8.52, and at fixed nx=20/box=18 the Lagrange-y converges −8.516(ny20)→−8.528→−8.532→
+      −8.535→−8.536(ny52, still creeping). Spline-y plateaus at **−8.540** by nyint=28. ⇒ BOTH y-bases
+      converge to the SAME ≈−8.54 MeV, spline MUCH faster (the whole point of the switch). The hard piece —
+      the MIXED Rxy — works: (a) G recomputed at the y-quadrature points via initialY+Gαα with a pseudo-grid
+      yi=yq (Gαα uses no grid.* internally, verified); (b) output y by Galerkin projection Σ_q w_q φ_{i'}(y_q)
+      replacing the Lagrange 1/ϕy mesh-value; (c) output x kept at Lagrange mesh (1/ϕx); (d) NO Sy⁻¹ needed —
+      V·Rxy_coeff = kron(Vx,I_yDOF)·Rxy_proj since the standalone V=kron(Vx,Sy) cancels Sy⁻¹ in y. New x-side
+      derivative evaluator `lagrange_laguerre_regularized_derivs` (laguerre.jl) is ready for the x smooth-ECS
+      contour but NOT yet used here (θ=0, x via existing real builders). A wrong Rxy/G would miss by MeV or
+      unbind, not 20 keV → assembly structurally correct.
+- [ ] **Step 2 — turn on SMOOTH-ECS (θ>0) on BOTH x and y** via the basis-agnostic q-operator layer
+      (`ecs.jl`), each coordinate interior-real / exterior-rotated:
+      - **y** (quintic-spline basis): y kinetic from real-r spline ∂² with contour metric q_y(r); initial
+        F_λ via `spline_functions` on real y. Spline basis needed for the 42-MeV oscillation.
+      - **x** (Lagrange-Laguerre basis, unchanged): ALSO carry a smooth-ECS contour q_x(r). Physics
+        (Jin 2026-06-30): n-d at 14.1 AND 42 MeV is ABOVE the deuteron breakup threshold (E_cm 9.4 / 28 MeV
+        ≫ 2.2 MeV), so the breakup Faddeev component goes out along the hyperradius ρ=√(x²+y²) — large x AND
+        large y together. Rotating only y leaves the breakup outgoing wave UNdamped along x → wrong breakup
+        flux at the box edge → biases η (the breakup flux-loss) and δ. **uniform CS rotated both; do NOT drop
+        x rotation in the switch.** Smooth-ECS on x is strictly better than uniform CS on x: interior [0,R0]
+        real keeps the deuteron bound state exact AND keeps the amplitude integral (∝ φ_d(x), short-range)
+        on the real axis → θ-independent (the 2-body ECS win); only the breakup leakage into large x sees the
+        rotated exterior. For pure elastic the x-ECS is a no-op (deuteron lives in the real interior); it
+        only bites the breakup component, which is exactly the point.
+      - V at the rotated contour x(r); Rxy interpolation on real (x,y). Keep the contour layer basis-agnostic
+        so Lagrange-Laguerre/Legendre can be swapped in for y.
+- [ ] **Step 2a (cheap diagnostic, do FIRST) — confirm the breakup component populates large x, the clean way.**
+      NOTE (Jin 2026-06-30, after reading the code): the originally-proposed "set θ_x=0 alone" test is NOT
+      clean. Rxy is built REAL and angle-free (`Rxy_matrix_optimized`, geometric coeffs a,b,c,d=−0.5,1,−0.75,−0.5),
+      and uniform CS keeps it real ONLY because a common θ factors out of the homogeneous map x₃=a·x₁+b·y₁
+      (→ λ·x₃, λ=e^{iθ}). With θ_x≠θ_y the phase no longer factors → the real Rxy is the WRONG transform, so a
+      θ_x=0/θ_y=θ run mixes a real-x potential with an Rxy that assumes rotated x. The number would be a muddle,
+      not an isolation of breakup-along-x. (This is also WHY anisotropic rotation is out and smooth-ECS with a
+      COMMON θ confined to the exterior is the consistent generalization.)
+      Clean test instead (touches no Rxy): on the existing uniform-CS doublet solve, scan |ψ_sc(x, y_fixed)|
+      (or the breakup flux) vs x and check for damped amplitude at large x beyond the deuteron range (~5 fm).
+      Support there = breakup populates large x and the exterior rotation is doing work → confirms x needs ECS.
+      Existing CORROBORATION already in hand: 42-MeV δ/η only converge when xmax grows WITH ymax (δ 52→44,
+      η→0.50), while 14.1 MeV converges at xmax=30 — the energy-dependent x-box requirement is the
+      breakup-leaks-into-large-x signature (uniform CS damps that large-x tail).
 - [ ] **Step 3 — re-test doublet-42** (41.35°/0.5022) and quartet-42 on the spline+smooth-ECS y-mesh; keep
       14.1 MeV as regression guard.
 

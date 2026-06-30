@@ -2,6 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ 2026-06-30 UPDATE — spline+ECS foundation built and θ=0 plumbing validated (supersedes the NEXT in
+> the 2026-06-29 note below).** Read [TODO.md](TODO.md) + [devlog.md](devlog.md) for the full record.
+> - **Decision A (Jin): smooth-ECS is applied to BOTH x and y, sharing ONE contour** (deep exterior both
+>   rotate by e^{iθ}, interior real). Motivation: n-d at 14.1 AND 42 MeV is above the deuteron breakup
+>   threshold, and the breakup Faddeev component goes out along the hyperradius ρ=√(x²+y²), i.e. large x AND
+>   large y. Confirmed numerically (`swift/test_breakup_xtail.jl`): 30-46% of the scattered ³S₁ component's
+>   x-norm sits beyond the deuteron range (~5 fm). Rotating only y would leave the breakup wave undamped
+>   along x. Interior-real keeps the deuteron + the amplitude integral on the real axis (θ-independent).
+> - **x stays Lagrange-Laguerre basis, y switches to Hermite spline; both go through the q-operator layer.**
+>   Added `lagrange_laguerre_regularized_derivs` (laguerre.jl) so the Lagrange-Laguerre basis supplies the
+>   real-r value/∂/∂² the q-operator needs, exactly as splines.jl does for y.
+> - **NOTE: anisotropic complex scaling (θ_x≠θ_y) is OUT** — it is incompatible with the real, angle-free Rxy
+>   (the homogeneous map x₃=a·x₁+b·y₁ only factors a single common phase). See devlog 2026-06-30.
+> - **Validated this session** (all to benchmark): spline-y Galerkin q-operator 2-body (`test_yspline_galerkin.jl`,
+>   δ=63.5/η→1); Lagrange-x q-operator 2-body (`test_xlag_qcs.jl`, same); mixed Lagrange-x/spline-y 3-body
+>   bound state + the MIXED Rxy at θ=0 (`test_3body_yspline_bound.jl`, MT 3-body −8.54 MeV = all-Lagrange,
+>   spline converges faster). Mixed Rxy recipe: G recomputed at the y-quadrature points (initialY+Gαα with a
+>   pseudo-grid yi=yq), output y by Galerkin projection, output x at Lagrange mesh, no Sy⁻¹ (V·Rxy=kron(Vx,I)·Rxy_proj).
+> - **NEXT: Step 2 proper — turn on smooth-ECS (θ>0) on both x and y + the scattering source (F_λ) and the
+>   Green's-theorem amplitude, reproduce doublet-14.1 then doublet-42 (δ=41.35°, η=0.5022).**
+
 > **⚠️ 2026-06-29 UPDATE — n-d scattering convergence, current state (supersedes the 2026-06-16 note below).**
 > Read [TODO.md](TODO.md) + [devlog.md](devlog.md) for the full record. Key points:
 > - **The 2026-06-16/17 "Lagrange-Laguerre overlap-tail" root cause was a MISATTRIBUTION.** The real story:

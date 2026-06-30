@@ -5,6 +5,22 @@ Completed work lives in TODO.md; forward-looking decisions live in CLAUDE.md. Th
 
 ---
 
+## 2026-06-30: anisotropic complex scaling (θ_x ≠ θ_y) is incompatible with the real, angle-free Rxy
+
+**Why we tried it:** to cheaply confirm "the breakup tail in x needs its own rotation" by turning OFF the x
+rotation alone (θ_x=0, θ_y=θ) on the existing uniform-CS 3-body path and watching η degrade.
+**What failed:** the test cannot isolate breakup-along-x at all; it would produce a meaningless number, so it
+was discarded before running (caught by reading the code, not by a bad result).
+**Root cause:** Rxy is built REAL and angle-free (`Rxy_matrix_optimized`, geometric coeffs a,b,c,d=−0.5,1,−0.75,−0.5).
+Uniform CS keeps it real ONLY because a single common θ factors out of the homogeneous map x₃=a·x₁+b·y₁ → λ·x₃
+(λ=e^{iθ}). With θ_x≠θ_y the phase no longer factors, so the real Rxy is the WRONG transform; mixing a real-x
+potential with an Rxy that assumes a rotated x is inconsistent.
+**Lesson:** never rotate x and y by different angles. Smooth-ECS with a COMMON θ confined to the exterior
+(interior real) is the only Rxy-consistent generalization of uniform CS — that is decision A. To check
+"breakup populates large x" instead, scan |ψ_sc(x)| at fixed y (`swift/test_breakup_xtail.jl`, which found
+30-46% of the scattered ³S₁ x-norm beyond the deuteron range); it touches no Rxy.
+**Status:** Abandoned (replaced by the shared-contour smooth-ECS, decision A in CLAUDE.md).
+
 ## 2026-06-29: sharp and uniform CS both fail through the basis-agnostic q-operator (only smooth works)
 
 **Why we tried it:** to make the CS layer basis-agnostic (LL / Legendre / spline all plug in), assemble H
@@ -65,29 +81,3 @@ exposes the mesh wall.
 
 **Status:** Abandoned (LL + point-pushing). Replaced by the y→Lagrange-Legendre basis switch (see TODO.md).
 
----
-
-## 2026-06-26: the "Lagrange-Laguerre overlap-tail" was NOT the root cause of doublet-42
-
-**Why we tried it:** the 2026-06-17 diagnosis blamed the non-orthonormal overlap N[i,j]=δ+(-1)^{i-j}/√(yᵢyⱼ)
-1/√y tail for coupling the growing CS incoming wave from small y to large y, making the amplitude integral
-diverge with the box. The candidate cure was to orthogonalize the overlap or cut the basis tail.
-
-**What failed:** cutting the basis tail (TAILCUT test) made EVERY point worse, including the working
-doublet-14.1 (δ 105.95°→101.57°) and the quartet (η 1.386→1.532). The tail is legitimate and needed. Also,
-a converged result must be basis-independent (Jin's objection), yet δ at fixed energy drifted with the LL
-scaling parameter alpha (52.15→52.47) and strongly with xmax — proving the answer was simply NOT converged,
-not corrupted by a tail.
-
-**Root cause:** the real defect at 42 MeV is (x,y) coupled-box UNDER-CONVERGENCE. swift hardwired xmax=30 ≪
-ymax=100, but Rxy couples x and y, so at high energy (large y-extent) the x-box must scale with the y-box.
-Growing nx WITH xmax (keeping density) marches doublet-42 monotonically toward the benchmark:
-δ=52.2°(xmax30)→49.6→47.7→46.3→45.4→44.8→44.4°(xmax90), η=0.599→0.526 (target 41.35°/0.5022). The earlier
-xmax scans missed this because they grew xmax at FIXED nx (diluting the mesh), mixing two effects.
-
-**Lesson:** at high scattering energy use a BALANCED box (xmax≈ymax, nx and ny grown together), never a
-fixed small xmax with a large ymax. The overlap tail is not a bug. This corrects lesson #8 in the old
-TODO.md "Lessons" list (the 2026-06-17 overlap-tail root cause was a misattribution of under-convergence).
-
-**Status:** Replaced by the box-under-convergence diagnosis, then by the LL-mesh-limit finding above
-(2026-06-29).
