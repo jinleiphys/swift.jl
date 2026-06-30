@@ -1,10 +1,12 @@
 # swift.jl TODO
 
-Snapshot **2026-06-30**. ✅ **A-route foundation + θ=0 plumbing VALIDATED** (see the checked Step 2 items
-below): both 1D q-operator paths (spline-y, Lagrange-x) reproduce the MT ¹S₀ benchmark δ=63.5/η→1 through
-ONE shared smooth-ECS contour, and the mixed Lagrange-x / spline-y 3-body assembly + the hard mixed Rxy
-reproduce the MT 3-body bound state (−8.54 MeV, same as all-Lagrange, spline converges faster) at θ=0.
-**Next = Step 2 proper: turn on smooth-ECS (θ>0) on BOTH x and y + scattering source/amplitude → 14.1 then 42 MeV.**
+Snapshot **2026-06-30** (latest). ✅ **doublet-14.1 REPRODUCED** with spline-y + UNIFORM CS + GMRES:
+θ=3°, xmax=30, ymax=120-140 → δ=105.5-105.7 / η=0.464-0.467 (benchmark 105.49 / 0.4649), a ymax plateau,
+f_sc ≡ LL term-by-term. Path PIVOTED from smooth-ECS (3-body Rxy off-contour, parked) to uniform CS +
+real mixed Rxy. Enabling fixes: C_n deuteron normalization + matrix-free GMRES (≡ dense, 15 iters, scales).
+Foundations also validated: spline-y & Lagrange-x q-operator 2-body (δ=63.5/η→1), mixed-Rxy θ=0 MT 3-body
+bound state (−8.54, spline converges faster). **Next = doublet-42 (δ=41.35°/η=0.5022): needs θ∈[4,12.5] +
+rotated-argument spline (scheme-A drifts η with θ) + r_max≈100 fm.** Full detail in the checked Step 2 items below.
 
 Earlier (2026-06-29) the doublet-42 residual was understood and is NOT a formula/operator/prefactor bug:
 1. The 14.1 MeV doublet reproduces the benchmark; the 42 MeV residual was (x,y) coupled-box

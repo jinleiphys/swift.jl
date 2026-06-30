@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **⚠️ 2026-06-30 UPDATE (LATER, supersedes the decision-A NEXT just below) — doublet-14.1 REPRODUCED with
+> spline-y + UNIFORM CS + GMRES.** Read [TODO.md](TODO.md) + [devlog.md](devlog.md) for the full record.
+> - **Pivot: smooth-ECS on the 3-body is PARKED** (its Rxy needs the basis at off-contour complex rearranged
+>   points — a non-uniform contour does not commute with the Jacobi rearrangement; Rimas's own benchmark uses
+>   uniform CS + spline). **Active path = UNIFORM CS + spline-y, with the REAL mixed Rxy** (uniform rotation
+>   commutes with Rxy → it stays real, reused verbatim). See devlog 2026-06-30.
+> - **doublet-14.1 REPRODUCED, converged:** θ=3° (LL's angle), xmax=30 (elastic x = deuteron ~4 fm), GMRES
+>   reaches ymax=120-140 → δ=105.5-105.7 / η=0.464-0.467 (benchmark δ=105.49/η=0.4649), a ymax PLATEAU,
+>   f_sc ≡ the LL reference term-by-term. The earlier "δ slides with xmax" was OVER-extending xmax past 30
+>   (14.1's converged box is small-x/large-y, = LL's); not under-convergence.
+> - **Two enabling fixes:** (i) the deuteron must be C_n-normalized (φ_d/√C_n, C_n=φ_dᵀB_xφ_d·e^{iθ}) or the
+>   bilinear amplitude ∝φ_d² carries the bound2b eigenvector gauge phase (after the fix f_brn is real, = LL);
+>   (ii) matrix-free GMRES (reshape kron matvecs + one Rc matvec + within-channel block preconditioner,
+>   IterativeSolvers) reproduces the dense solve exactly in ~15 iters and scales to large boxes — needed to
+>   reach ymax~120-140. Driver: `swift/test_3body_yspline_scatt.jl`.
+> - **NEXT = doublet-42 (δ=41.35°, η=0.5022).** 42 MeV needs θ∈[4°,12.5°] (θ=3° too small per 2011 PRC), and
+>   scheme-A (real-r + e^{-2iθ}) DRIFTS η with θ for a spline (fine at 3°, off by 6°; the local basis cannot
+>   carry the rotation the way LL's analytic functions do). So 42 needs the spline y in ROTATED-ARGUMENT form
+>   (z=y·e^{iθ}, basis via spline_functions(;θ), e^{iθ} measure) — under uniform rotation the Rxy rearranged
+>   point stays ON the contour, so no off-contour problem. Partial rebuild showed f_sc becomes θ-stable; the
+>   Born then needs a θ=0 real dual-build + x-y convention consistency. Also the literature r_max≈100 fm.
+
 > **⚠️ 2026-06-30 UPDATE — spline+ECS foundation built and θ=0 plumbing validated (supersedes the NEXT in
 > the 2026-06-29 note below).** Read [TODO.md](TODO.md) + [devlog.md](devlog.md) for the full record.
 > - **Decision A (Jin): smooth-ECS is applied to BOTH x and y, sharing ONE contour** (deep exterior both
