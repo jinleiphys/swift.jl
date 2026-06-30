@@ -174,8 +174,31 @@ oscillates).
         EXACTLY (nx=20/ymax=60/nyint=50/θ=4°: δ=97.087/η=0.6016, identical) in 15 GMRES iters, resid 3.5e-9. No
         dense A, no dense \\ — scales to large boxes (Rc matvec + small kron pieces; preconditioner lu is the
         remaining per-channel cost, fine to ~nx·ndy≈7000). Big r_max~100 runs belong on heliumx.
+      - [x] **2b — doublet-14.1 REPRODUCED, converged (2026-06-30).** At θ=3° (LL's angle), xmax=30 (LL's box;
+        the elastic x is the deuteron ~4 fm, so xmax=30 contains it), GMRES enables ymax→120-140: δ=105.49(ymax100)
+        →105.66→105.60, η=0.472→0.464→0.466 — a YMAX PLATEAU on the benchmark δ=105.49/η=0.4649 (Δ≈0.1°/0.002),
+        gmres=15, resid 3e-9. This is a converged reproduction, not the xmax-crossing: the earlier δ-slide was
+        OVER-extending xmax beyond 30 (14.1's breakup-x is modest); the physical converged box is small-x/large-y
+        (= LL's). scheme-A (real-r + e^{-2iθ}) is correct at θ=3°; rotated-argument is only needed for the larger
+        θ that 42 MeV requires. f_sc=11.71−11.19i ≡ LL's 11.76−11.19i.
+      - [~] **2b-rotated-argument (for 42 MeV's larger θ) — WIP stashed.** scheme-A drifts η with θ (fine at 3°,
+        off by 6°); 42 MeV needs θ∈[4,12.5] so it needs the rotated-argument spline. Partial rebuild done
+        (f_sc became θ-stable) but the Born needs a θ=0 real dual-build + x-y convention consistency; reverted to
+        keep the working 14.1. Resume for 42.
+        Changed the spline y to rotated-argument (spline_y_ops, the Rxy y output-projection + input ξb, the
+        F_λ source) per the devlog root cause. RESULT: f_sc is now θ-STABLE (Re≈12.6 flat for θ=3/6/9°, vs the
+        scheme-A drift) → fix direction CONFIRMED. But the rebuild is INCOMPLETE:
+        (a) **Born f_brn broken** — it is a θ=0 real-axis term but now uses the rotated Rc + a complex Sy with
+            real φ (inconsistent → f_brn blew up to 1e6). FIX: a separate θ=0 REAL build (Rxy0, Sy0, source0)
+            for the Born, exactly the s/s0 dual-build of test_3body_greens. Then f=f_sc(rotated)+f_brn(real).
+        (b) **f_sc Im still drifts** (−10.7→−8.9 over θ=3→9°) — likely the LL-x (still scheme-A real-r+e^{-2iθ})
+            vs spline-y (rotated-argument) convention MISMATCH; may need x on rotated-argument too (complex
+            lagrange_laguerre_regularized_derivs) for a fully consistent forward-rotated build.
+        (c) θ=9° GMRES needs 60 iters (preconditioner degrades at large θ) — revisit if θ>6° is used.
+        NEXT (fresh): finish the dual θ/θ=0 build + decide x rotated-argument, then re-check θ-stability of the
+        FULL δ/η and reproduce doublet-14.1, then push r_max~100 (heliumx) for 42.
       - [ ] **2c — doublet-42** (δ=41.35°, η=0.5022): the target the LL mesh could not reach; spline should,
-        once the GMRES + r_max~100 infrastructure above is in place.
+        once 2b-rotated-argument is consistent and the GMRES + r_max~100 infrastructure is used (heliumx).
 - [ ] **(PARKED) smooth-ECS on the 3-body** via the q-operator layer, each coordinate interior-real /
       exterior-rotated — only after the uniform path reproduces the benchmark, and only if the off-contour
       evaluation problem can be solved:

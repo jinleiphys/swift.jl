@@ -265,6 +265,9 @@ println("="^70)
 # GMRES validated (≡ dense δ=97.09/η=0.60, 15 iters). Now balanced-box convergence toward r_max~100 fm,
 # θ=6° (window θ_max=14.2°@14.1). Watch δ→105.50, η→0.4653 PLATEAU. (Big r_max~100 belongs on heliumx.)
 println(">>> balanced-box convergence, θ=6°, target δ=105.50/η=0.4653")
-scatt(E_lab=14.1, nx=30, xmax=50.0, ymax=50.0, nyint=34, nq=6, θ_deg=6.0)
-scatt(E_lab=14.1, nx=40, xmax=70.0, ymax=70.0, nyint=44, nq=6, θ_deg=6.0)
-scatt(E_lab=14.1, nx=46, xmax=90.0, ymax=90.0, nyint=50, nq=6, θ_deg=6.0)
+# scheme-A ≡ LL at θ=3° (committed e3ae056); reproduce 14.1 at the LL box xmax=30/ymax=120, scan ymax.
+# Target δ=105.50, η=0.4653. (Rotated-argument needed only for the larger θ that 42 MeV requires.)
+println(">>> doublet-14.1 at θ=3°, LL box (xmax=30); ymax scan → target δ=105.50/η=0.4653")
+scatt(E_lab=14.1, nx=24, xmax=30.0, ymax=100.0, nyint=70, nq=6, θ_deg=3.0)
+scatt(E_lab=14.1, nx=24, xmax=30.0, ymax=120.0, nyint=84, nq=6, θ_deg=3.0)
+scatt(E_lab=14.1, nx=24, xmax=30.0, ymax=140.0, nyint=98, nq=6, θ_deg=3.0)
